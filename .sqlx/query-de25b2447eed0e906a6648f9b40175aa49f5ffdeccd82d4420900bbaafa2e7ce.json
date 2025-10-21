@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO return_exchange_records \n                      (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)\n                      VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "de25b2447eed0e906a6648f9b40175aa49f5ffdeccd82d4420900bbaafa2e7ce"
+}

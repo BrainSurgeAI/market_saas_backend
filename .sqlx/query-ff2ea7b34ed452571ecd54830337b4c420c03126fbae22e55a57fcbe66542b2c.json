@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "select id from tenants where name_hash=?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ff2ea7b34ed452571ecd54830337b4c420c03126fbae22e55a57fcbe66542b2c"
+}

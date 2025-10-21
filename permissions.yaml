@@ -1,0 +1,309 @@
+rules:
+  # Tenant routes
+  - path: "/api/v1/users/*/tenants"
+    method: "GET"
+    required_permission: "tenant:read"
+    self_only: true
+
+  # create a provider or customer by market
+  - path: "/api/v1/markets/*/tenants"
+    method: "POST"
+    required_permission: "tenant:create"
+    self_only: true
+
+  - path: "/api/v1/markets/*/tenants"
+    method: "GET"
+    required_permission: "tenant:list"
+    self_only: true
+
+  - path: "/api/v1/markets/*/tenants/*/status"
+    method: "PATCH"
+    required_permission: "tenant:disable"
+    self_only: true
+
+  - path: "/api/v1/markets/*/tenants/*"
+    method: "PATCH"
+    required_permission: "tenant:update"
+    self_only: true
+
+  - path: "/api/v1/tenants/*"
+    method: "GET"
+    required_permission: "tenant:read"
+    self_only: false
+
+
+
+  # - path: "/api/v1/tenants/*"
+  #   method: "PATCH"
+  #   required_permission: "tenant:update"
+  #   self_only: false
+
+  - path: "/api/v1/tenants/*/users"
+    method: "GET"
+    required_permission: "tenant:read"
+    self_only: true
+
+  - path: "/api/v1/tenants/*/users"
+    method: "POST"
+    required_permission: "tenant:update,user:create"
+    self_only: false
+
+  # User routes
+  - path: "/api/v1/users/*/notifications"
+    method: "GET"
+    required_permission: "message:read"
+    self_only: true
+
+  # User notification update routes, for all users update their own notification status  
+  - path: "/api/v1/users/*/notifications/*/status"
+    method: "PATCH"
+    required_permission: "message:update"
+    self_only: true
+
+  # User get routes, for all users get their own information 
+  # and tenant admin user get other users information  
+  - path: "/api/v1/users/*"
+    method: "GET"
+    required_permission: "user:read"
+    self_only: true
+
+  # User update routes, for all users update their own information 
+  # and tenant admin user update other users information 
+  - path: "/api/v1/users/*"
+    method: "PATCH"
+    required_permission: "user:update"
+    self_only: false
+
+  # User password routes, for all users reset their own password  
+  - path: "/api/v1/users/*/password"
+    method: "PATCH"
+    required_permission: "user:update"
+    self_only: false
+
+  # Roles routes, only for tenant admin user
+  - path: "/api/v1/tenants/*/types/*/roles"
+    method: "GET"
+    required_permission: "tenant:create"
+    self_only: false
+
+  # disable a user
+  - path: "/api/v1/tenants/*/users/*/disable"
+    method: "DELETE"
+    required_permission: "user:disable"
+    self_only: false
+
+  # enable a user
+  - path: "/api/v1/tenants/*/users/*/enable"
+    method: "PATCH"
+    required_permission: "user:update"
+    self_only: false
+
+  # get product prices published
+  - path: "/api/v1/users/*/product_prices"
+    method: "GET"
+    required_permission: "price:list"
+    self_only: true
+
+  # batch create product prices
+  - path: "/api/v1/users/*/product_prices"
+    method: "POST"
+    required_permission: "price:create"
+    self_only: true
+
+  # get processing fees
+  - path: "/api/v1/processing_fees"
+    method: "GET"
+    required_permission: "product:update"
+    self_only: false
+
+  # get product price status stats
+  - path: "/api/v1/users/*/product_price_status_stats"
+    method: "GET"
+    required_permission: "price:list"
+    self_only: true
+
+  # get product list TODO 需要让客户可以访问有关联的市场的产品价格
+  - path: "/api/v1/tenants/*/products"
+    method: "GET"
+    required_permission: "price:list"
+    self_only: false
+
+  # get product detail
+  - path: "/api/v1/tenants/*/products/{product_code}"
+    method: "GET"
+    required_permission: "price:read"
+    self_only: false
+
+  # update product status
+  - path: "/api/v1/tenants/*/products/{product_code}/archive"
+    method: "DELETE"
+    required_permission: "product:update"
+    self_only: false
+
+  # enable product
+  - path: "/api/v1/tenants/*/products/{product_code}/enable"
+    method: "PATCH"
+    required_permission: "product:update"
+    self_only: false
+
+  # update product
+  - path: "/api/v1/tenants/*/products/{product_code}"
+    method: "PUT"
+    required_permission: "product:update"
+    self_only: false
+
+  # update product price status
+  - path: "/api/v1/tenants/*/prices/aprox_price"
+    method: "PATCH"
+    required_permission: "price:update"
+    self_only: false
+
+  - path: "/api/v1/customers/*/products"
+    method: "GET"
+    required_permission: "product:list"
+    self_only: false
+
+  - path: "/api/v1/customers/*/orders"
+    method: "POST"
+    required_permission: "order:create"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/orders"
+    method: "GET"
+    required_permission: "order:list"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/orders/{order_code}"
+    method: "GET"
+    required_permission: "order:read"
+    self_only: false
+
+  - path: "/api/v1/markets/*/providers"
+    method: "GET"
+    required_permission: "tenant:list"
+    self_only: true
+
+  - path: "/api/v1/markets/*/orders/{order_code}/dispatch"
+    method: "PATCH"
+    required_permission: "order:publish"
+    self_only: false
+
+  - path: "/api/v1/providers/*/orders/{order_code}/processing"
+    method: "PATCH"
+    required_permission: "order:update"
+    self_only: false
+
+  - path: "/api/v1/providers/*/orders/{order_code}/update-quantities"
+    method: "PUT"
+    required_permission: "order:update"
+    self_only: false
+
+  - path: "/api/v1/customers/*/orders/{order_code}/operations"
+    method: "POST"
+    required_permission: "order:update"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/orders/{order_code}/operations"
+    method: "PATCH"
+    required_permission: "order:update"
+    self_only: false
+
+  - path: "/api/v1/category_with_sub_categories"
+    method: "GET"
+    required_permission: "order:read"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/orders/after_sale"
+    method: "GET"
+    required_permission: "order:list"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/delivery_staffs"
+    method: "POST"
+    required_permission: "delivery_staff:create"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/delivery_staffs"
+    method: "GET"
+    required_permission: "delivery_staff:list"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/delivery_staffs/{id_card}/status"
+    method: "PATCH"
+    required_permission: "delivery_staff:update"
+    self_only: false
+
+  - path: "/api/v1/reconciliation_statements"
+    method: "POST"
+    required_permission: "reconciliation_statement:create"
+    self_only: false
+
+  - path: "/api/v1/reconciliation_statements"
+    method: "GET"
+    required_permission: "reconciliation_statement:list"
+    self_only: false
+
+  - path: "/api/v1/reconciliation_statements/{id}"
+    method: "GET"
+    required_permission: "reconciliation_statement:list"
+    self_only: false
+
+
+  - path: "/api/v1/providers/*/orders/today-summary"
+    method: "GET"
+    required_permission: "order:list"
+    self_only: false
+
+  # Tenant Admin routes
+  - path: "/api/v1/tenants/*/discounts"
+    method: "GET"
+    required_permission: "discount:list"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/discounts/{discount_id}"
+    method: "PATCH"
+    required_permission: "discount:update"
+    self_only: false
+
+  - path: "/api/v1/tenants/*/discounts"
+    method: "POST"
+    required_permission: "discount:create"
+    self_only: false
+
+
+  # Super admin routes
+  - path: "/api/v1/superadmin/password"
+    method: "PATCH"
+    required_permission: "superadmin:update"
+    self_only: false
+
+  - path: "/api/v1/roles"
+    method: "GET"
+    required_permission: "superadmin:list"
+    self_only: false
+
+  - path: "/api/v1/roles/{role_id}"
+    method: "PATCH"
+    required_permission: "superadmin:update"
+    self_only: false
+
+  - path: "/api/v1/roles/{role_id}"
+    method: "GET"
+    required_permission: "superadmin:read"
+    self_only: false
+
+  - path: "/api/v1/permissions"
+    method: "GET"
+    required_permission: "superadmin:read"
+    self_only: false
+
+  - path: "/api/v1/roles/{role_id}/permissions"
+    method: "GET"
+    required_permission: "superadmin:read"
+    self_only: false
+
+  - path: "/api/v1/roles/{role_id}/permissions"
+    method: "POST"
+    required_permission: "superadmin:update"
+    self_only: false
+

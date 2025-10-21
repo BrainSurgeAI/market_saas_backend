@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT \n                        o.order_code,\n                        o.order_status, \n                        COALESCE(MIN(osh.created_at), o.created_at) as accepted_at\n                    FROM orders o\n                    JOIN tenants t ON o.market_id = t.id\n                    LEFT JOIN order_status_history osh ON o.id = osh.order_id\n                    WHERE t.name_hash = ?\n                    AND t.tenant_type = ?\n                    AND (o.order_status = 'AFTER_SALE' OR o.order_status = 'ACCEPTED')\n                    AND (osh.to_status = 'AFTER_SALE' OR osh.to_status = 'ACCEPTED')\n                    AND o.deleted_at IS NULL\n                    AND t.deleted_at IS NULL\n                    GROUP BY o.order_code, o.order_status, o.created_at\n                    ORDER BY accepted_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "order_code",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "order_status",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | MULTIPLE_KEY",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "accepted_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL",
+          "max_size": 76
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a12b901d69f6fa78951dded3b63c16637c556c6abbafeba726bf31e18376eaab"
+}

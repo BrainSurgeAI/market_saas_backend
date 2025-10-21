@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT o.id, od.id as detail_id \n               FROM orders o \n               JOIN order_details od ON o.id = od.order_id \n               WHERE o.order_code = ? AND od.id = ? AND o.order_status = 'STOCKED'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "detail_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b6b72fdf0ea4c298a33724d6fbeeb8f743f290d8f2ef2ee4f56bf4f5237dce11"
+}

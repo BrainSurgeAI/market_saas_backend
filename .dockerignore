@@ -1,0 +1,6 @@
+target/
+.git/
+.gitignore
+Dockerfile
+# 不再排除scripts目录
+# scripts/

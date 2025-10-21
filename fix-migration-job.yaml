@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fix-migration-job
+  namespace: market-saas
+spec:
+  template:
+    spec:
+      containers:
+      - name: fix-migration
+        image: mysql:8.0
+        command:
+        - /bin/bash
+        - '-c'
+        - |
+          # 从环境变量中提取数据库连接信息
+          DB_URL=${DATABASE_URL#*://}
+          DB_USER=${DB_URL%%:*}
+          DB_URL=${DB_URL#*:}
+          DB_PASS=${DB_URL%%@*}
+          DB_URL=${DB_URL#*@}
+          DB_HOST=${DB_URL%%:*}
+          DB_URL=${DB_URL#*:}
+          DB_PORT=${DB_URL%%/*}
+          DB_URL=${DB_URL#*/}
+          DB_NAME=${DB_URL%%\?*}
+          
+          echo "正在删除部分应用的迁移记录..."
+          mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "DELETE FROM _sqlx_migrations WHERE version = '20250306062612';"
+          
+          echo "检查是否删除成功..."
+          mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT * FROM _sqlx_migrations;"
+          
+          echo "修复完成"
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: database
+              key: DATABASE_URL
+      restartPolicy: Never
+  backoffLimit: 1 

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE order_details \n                      SET status = 'EXCHANGED', \n                        receipt_quantity = actual_quantity - ?, \n                        receipt_date = NOW(), \n                        receipt_notes = ?,\n                        receipt_evidence = ?\n                      WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "77c8eb9f1bf3fd67782458186be875f84570f83f2327bd7580e804b5abe23a16"
+}

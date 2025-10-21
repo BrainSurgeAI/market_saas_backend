@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                    INSERT INTO reconciliation_statement_details (\n                        statement_id, order_detail_id, product_code, product_name,\n                        category_name, unit, original_quantity, actual_quantity,\n                        receipt_quantity, returned_quantity, price, original_amount, actual_amount,\n                        order_date, created_at\n                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NOW())\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "4e20f8ece662d114ab156eace11d638db1957ec4da8c13a0e68a20bc3fff9587"
+}

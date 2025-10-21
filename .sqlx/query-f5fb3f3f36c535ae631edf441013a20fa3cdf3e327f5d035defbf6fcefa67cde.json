@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id, status, created_by)\n                      VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "f5fb3f3f36c535ae631edf441013a20fa3cdf3e327f5d035defbf6fcefa67cde"
+}

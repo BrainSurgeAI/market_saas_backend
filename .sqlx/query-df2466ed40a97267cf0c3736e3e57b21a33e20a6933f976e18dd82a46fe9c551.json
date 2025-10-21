@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO provider_orders_assignments (order_id, provider_id) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "df2466ed40a97267cf0c3736e3e57b21a33e20a6933f976e18dd82a46fe9c551"
+}

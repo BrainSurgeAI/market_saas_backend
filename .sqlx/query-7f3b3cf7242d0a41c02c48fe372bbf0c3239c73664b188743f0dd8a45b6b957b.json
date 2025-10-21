@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO customer_category_discount_history (tenant_id, category_id, new_discount_rate, old_discount_rate, change_type, change_reason, changed_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "7f3b3cf7242d0a41c02c48fe372bbf0c3239c73664b188743f0dd8a45b6b957b"
+}

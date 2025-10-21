@@ -1,0 +1,27 @@
+# 配置crates.io国内镜像源
+[source.crates-io]
+replace-with = "ustc"
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+[registries.ustc]
+index = "https://mirrors.ustc.edu.cn/crates.io-index/"
+
+# 使用git命令行工具进行git操作，避免某些网络问题
+[net]
+git-fetch-with-cli = true
+
+# 编译优化配置
+[build]
+rustc-wrapper = "sccache"  # 如果安装了sccache
+jobs = 4                   # 并行编译任务数，根据CPU核心数调整
+
+# 启用增量编译
+[profile.dev]
+incremental = true
+
+# 发布版本优化
+[profile.release]
+lto = "thin"               # 启用链接时优化，但使用"thin"模式以加快编译速度
+codegen-units = 16         # 增加代码生成单元数量以加快编译速度 

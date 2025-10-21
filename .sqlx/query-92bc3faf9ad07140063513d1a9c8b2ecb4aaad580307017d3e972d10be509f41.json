@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO product_processing_fee_relations (product_id, processing_fee_id, sort_order) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "92bc3faf9ad07140063513d1a9c8b2ecb4aaad580307017d3e972d10be509f41"
+}

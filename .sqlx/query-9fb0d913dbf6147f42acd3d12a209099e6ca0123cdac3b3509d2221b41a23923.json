@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE orders SET order_status = 'PROCESSING', delivery_staff_id = ? WHERE id = ? AND order_status = 'CONFIRMED'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9fb0d913dbf6147f42acd3d12a209099e6ca0123cdac3b3509d2221b41a23923"
+}

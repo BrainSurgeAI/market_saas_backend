@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: market-saas-migration
+  namespace: market-saas
+spec:
+  # 修改为每天凌晨2点执行一次
+  # 原来的设置: */40 * * * * (每40分钟执行一次)
+  # 新的设置: 0 2 * * * (每天凌晨2点执行一次)
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid  # 禁止并发执行，确保同一时间只有一个Job在运行
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: migration-job
+            image: swr.cn-north-4.myhuaweicloud.com/cloud-blh/market-saas-backend:v0.5
+            command:
+            - /bin/bash
+            - '-c'
+            - './scripts/entrypoint.sh'
+            env:
+            - name: PERFORM_MIGRATION
+              value: 'true'
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database
+                  key: DATABASE_URL
+          restartPolicy: OnFailure
+          imagePullSecrets:
+          - name: default-secret 

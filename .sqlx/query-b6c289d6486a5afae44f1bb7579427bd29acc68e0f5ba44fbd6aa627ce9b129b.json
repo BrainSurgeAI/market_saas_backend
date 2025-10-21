@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE orders \n                       SET order_status = ?,\n                           rejected_by = ?,\n                           rejected_at = NOW() \n                       WHERE order_code = ? \n                       AND order_status = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b6c289d6486a5afae44f1bb7579427bd29acc68e0f5ba44fbd6aa627ce9b129b"
+}

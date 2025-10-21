@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE order_details SET actual_quantity = ?, actual_amount = actual_price * ?,\n                   total_amount = original_price * ?, status = 'PENDING'\n                WHERE order_id = ? AND id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "88c049221196b2db0407dbb066fcdece7833471a3feb8bea2549374b06e75090"
+}

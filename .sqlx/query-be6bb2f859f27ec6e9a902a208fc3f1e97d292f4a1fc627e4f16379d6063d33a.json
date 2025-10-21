@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT password_hash FROM users WHERE username = ? AND is_super_admin = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "password_hash",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 1020
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "be6bb2f859f27ec6e9a902a208fc3f1e97d292f4a1fc627e4f16379d6063d33a"
+}

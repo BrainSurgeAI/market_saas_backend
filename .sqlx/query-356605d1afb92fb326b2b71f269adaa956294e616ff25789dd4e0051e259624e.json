@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "356605d1afb92fb326b2b71f269adaa956294e616ff25789dd4e0051e259624e"
+}

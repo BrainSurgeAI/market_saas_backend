@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "WITH provider_orders AS (\n                        SELECT DISTINCT poa.order_id\n                        FROM provider_orders_assignments poa\n                        JOIN tenants t ON poa.provider_id = t.id\n                        WHERE t.name_hash = ?\n                        AND t.tenant_type = ?\n                        AND t.deleted_at IS NULL\n                    )\n                    SELECT \n                        o.order_code,\n                        o.order_status, \n                        COALESCE(MIN(osh.created_at), o.created_at) as accepted_at\n                    FROM orders o\n                    JOIN provider_orders po ON o.id = po.order_id\n                    LEFT JOIN order_status_history osh ON o.id = osh.order_id\n                    WHERE (o.order_status = 'AFTER_SALE' OR o.order_status = 'ACCEPTED')\n                    AND (osh.to_status = 'AFTER_SALE' OR osh.to_status = 'ACCEPTED')\n                    AND o.deleted_at IS NULL\n                    GROUP BY o.order_code, o.order_status, o.created_at\n                    ORDER BY accepted_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "order_code",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "order_status",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | MULTIPLE_KEY",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "accepted_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL",
+          "max_size": 76
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6ede68a1d2dfcef42e1ace0d0e7e1fa8fe2c533194a649affde8cd4725b260f0"
+}

@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+- 生成的注释请用英文
+- 生成的单元测试代码要包含所有测试边界
+- 代码要用最新的rust最佳实践

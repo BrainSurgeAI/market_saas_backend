@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-saas-backend
+  namespace: market-saas
+  labels:
+    app: market-saas-backend
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: market-saas-backend
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: market-saas-backend
+        version: v1
+      annotations:
+        redeploy-timestamp: '1741259318869'
+    spec:
+      containers:
+        - name: backend
+          image: swr.cn-north-4.myhuaweicloud.com/cloud-blh/market-saas-backend:v0.5
+          command:
+            - /bin/bash
+            - '-c'
+            - './scripts/entrypoint.sh'
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database
+                  key: DATABASE_URL
+            - name: PERMISSIONS_CONFIG_PATH
+              valueFrom:
+                secretKeyRef:
+                  name: permissions
+                  key: PERMISSIONS_CONFIG_PATH
+            - name: PAAS_APP_NAME
+              value: market-saas-backend
+            - name: PAAS_NAMESPACE
+              value: market-saas
+            - name: PAAS_PROJECT_ID
+              value: f034fbe526c4495d987fad8f29c2fa37
+            - name: JWT_SECRET
+              valueFrom:
+                configMapKeyRef:
+                  name: jwt-secret
+                  key: JWT_SECRET
+            - name: PERFORM_MIGRATION
+              value: 'false'
+          resources:
+            limits:
+              cpu: 250m
+              memory: 512Mi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      imagePullSecrets:
+        - name: default-secret
+      schedulerName: default-scheduler
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600 

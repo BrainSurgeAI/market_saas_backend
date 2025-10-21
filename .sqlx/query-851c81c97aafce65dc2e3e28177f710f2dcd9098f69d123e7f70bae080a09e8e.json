@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE delivery_staff SET status = 1 - status WHERE id_card = ? AND provider_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "851c81c97aafce65dc2e3e28177f710f2dcd9098f69d123e7f70bae080a09e8e"
+}

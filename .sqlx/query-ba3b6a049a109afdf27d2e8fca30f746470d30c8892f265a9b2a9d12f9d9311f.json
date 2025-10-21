@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE order_details \n                      SET status = 'SIGN', \n                        receipt_quantity = ?, \n                        receipt_date = NOW(), \n                        receipt_notes = ?,\n                        receipt_evidence = ? \n                      WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "ba3b6a049a109afdf27d2e8fca30f746470d30c8892f265a9b2a9d12f9d9311f"
+}

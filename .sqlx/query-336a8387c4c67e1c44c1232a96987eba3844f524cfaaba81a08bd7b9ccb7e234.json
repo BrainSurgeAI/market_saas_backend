@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT actual_price FROM order_details WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "actual_price",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 12
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "336a8387c4c67e1c44c1232a96987eba3844f524cfaaba81a08bd7b9ccb7e234"
+}

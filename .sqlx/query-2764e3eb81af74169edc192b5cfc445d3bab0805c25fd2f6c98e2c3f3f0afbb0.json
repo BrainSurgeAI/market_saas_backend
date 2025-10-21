@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO exchange_items\n                              (return_exchange_id, product_code, product_name, quantity, price, total_amount)\n                              VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "2764e3eb81af74169edc192b5cfc445d3bab0805c25fd2f6c98e2c3f3f0afbb0"
+}

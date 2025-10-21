@@ -1,0 +1,22 @@
+{
+    "mcpServers": {
+      "MySQL": {
+        "command": "npx",
+        "args": [
+          "mcprunner",
+          "MYSQL_HOST=127.0.0.1",
+          "MYSQL_PORT=3307",
+          "MYSQL_USER=root",
+          "MYSQL_PASS=Nihaoccj123",
+          "MYSQL_DB=tenant_saas",
+          "ALLOW_INSERT_OPERATION=true",
+          "ALLOW_UPDATE_OPERATION=true",
+          "ALLOW_DELETE_OPERATION=true",
+          "--",
+          "npx",
+          "-y",
+          "@benborla29/mcp-server-mysql"
+        ]
+      }
+    }
+  }

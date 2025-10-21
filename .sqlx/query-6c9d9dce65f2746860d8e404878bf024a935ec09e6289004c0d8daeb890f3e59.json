@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM role_permissions WHERE role_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "6c9d9dce65f2746860d8e404878bf024a935ec09e6289004c0d8daeb890f3e59"
+}

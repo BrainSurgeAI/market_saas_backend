@@ -1,0 +1,508 @@
+use axum::{
+    extract::{Path, Query},
+    Extension,
+};
+use tracing::{debug, info};
+
+use crate::{
+    common::{ApiResponse, AppError},
+    dto::{
+        delivery_staff::DeliveryStaffIdDTO,
+        order::{
+            AcceptedOrderResponseDTO, ActualQuantityDTO, CreateOrderDTO, DispatchOrderDTO,
+            OrderDetailResponse, OrderQueryParams, OrderReceiptDTO, OrderResponse,
+            ProductsSummaryWithOrdersDTO, UpdateOrderStatusDTO,
+        },
+        ValidatedJSON,
+    },
+    middleware::context::RequestContext,
+    models::claims::Claims,
+    repositories::{order_traits::OrderRepository, TenantType},
+    utils::validate_json_fmt::Json,
+};
+
+pub async fn create_order<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(customer_hash): Path<String>,
+    Json(order): Json<CreateOrderDTO>,
+) -> Result<Json<ApiResponse<OrderResponse>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let customer_type = TenantType::from(claims.tenant_type.as_str());
+    if !matches!(customer_type, TenantType::Customer) {
+        return Err(AppError::Forbidden(
+            "Only customer can create order".to_string(),
+        ));
+    }
+
+    let order_response = repo.create_order(1, &customer_hash, &order).await?;
+    info!(
+        "User {} create order {} success",
+        claims.username, order_response.order_code
+    );
+    Ok(Json(ApiResponse::new(Some(order_response), &context)))
+}
+
+pub async fn get_orders<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(tenant_hash): Path<String>,
+    Query(query_params): Query<OrderQueryParams>,
+) -> Result<Json<ApiResponse<Vec<OrderResponse>>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let orders = repo
+        .get_orders_by_tenant(&tenant_hash, &claims.tenant_type, &query_params)
+        .await?;
+    Ok(Json(ApiResponse::new(Some(orders), &context)))
+}
+
+pub async fn get_order_by_order_code<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path((_, order_code)): Path<(String, String)>,
+) -> Result<Json<ApiResponse<Option<OrderDetailResponse>>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let order = repo.get_order_by_order_code(&order_code).await?;
+    Ok(Json(ApiResponse::new(Some(order), &context)))
+}
+
+/// Dispatch order to provider
+pub async fn dispatch_order<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path((_, order_code)): Path<(String, String)>,
+    Json(dispatch_order_dto): Json<DispatchOrderDTO>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    debug!("Dispatch order to provider: {:?}", dispatch_order_dto);
+    repo.dispatch_order(
+        &order_code,
+        dispatch_order_dto.provider_id,
+        &dispatch_order_dto.confirmed_by,
+    )
+    .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+/// Update order status to processing
+pub async fn update_order_status_to_processing<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path((provider_hash, order_code)): Path<(String, String)>,
+    ValidatedJSON(delivery_staff_id_dto): ValidatedJSON<DeliveryStaffIdDTO>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    repo.update_order_status_to_processing(
+        &order_code,
+        &provider_hash,
+        &delivery_staff_id_dto.id_card,
+    )
+    .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+pub async fn update_actual_quantity<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path((_, order_code)): Path<(String, String)>,
+    Json(actual_quantity_dto): Json<ActualQuantityDTO>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    debug!("Update actual quantity: {:?}", actual_quantity_dto);
+    repo.update_actual_quantity(&order_code, &actual_quantity_dto)
+        .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+/// Get accepted orders by provider
+pub async fn get_after_sale_orders_by_provider<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(tenant_hash): Path<String>,
+) -> Result<Json<ApiResponse<Vec<AcceptedOrderResponseDTO>>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())
+        .map_err(|_| AppError::Validation("无效的租户类型".to_string()))?;
+    let orders = repo
+        .get_after_sale_orders_by_tenant(&tenant_hash, &tenant_type)
+        .await?;
+    Ok(Json(ApiResponse::new(Some(orders), &context)))
+}
+
+pub async fn return_exchange_order<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Json(return_exchange_dto): Json<OrderReceiptDTO>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    repo.process_order_receipt(
+        &return_exchange_dto.receipt,
+        &return_exchange_dto.operate_by,
+        &context.request_id,
+    )
+    .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+pub async fn update_order_status<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path((_, order_code)): Path<(String, String)>,
+    Json(update_order_status_dto): Json<UpdateOrderStatusDTO>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    info!(
+        "Update order {} status to: {}",
+        &order_code, &update_order_status_dto.status
+    );
+
+    let new_status = &update_order_status_dto.status;
+    let tenant_type = claims.tenant_type.to_string();
+
+    repo.update_order_status(
+        &tenant_type,
+        &order_code,
+        new_status,
+        &update_order_status_dto.operate_by,
+    )
+    .await?;
+
+    info!(
+        "订单 {}  更新为 {} (执行者: {})",
+        &order_code, new_status, &update_order_status_dto.operate_by
+    );
+
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+pub async fn get_provider_today_product_order_summary<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path(provider_hash): Path<String>,
+) -> Result<Json<ApiResponse<Vec<ProductsSummaryWithOrdersDTO>>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let summary = repo
+        .fetch_today_product_order_summary_by_provider_hash(&provider_hash)
+        .await?;
+    Ok(Json(ApiResponse::new(Some(summary), &context)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dto::order::{
+        CreateOrderDTO, CreateOrderItem, DeliveryInfo, OrderDetail, OrderDetailResponse, OrderItem,
+        OrderQueryParams, OrderResponse,
+    };
+    use crate::middleware::context::RequestContext;
+    use crate::models::claims::Claims;
+    use crate::utils::validate_json_fmt::Json;
+    use async_trait::async_trait;
+    use axum::extract::Path;
+    use chrono::NaiveDate;
+    use mockall::mock;
+    use mockall::predicate;
+    use mockall::predicate::*;
+    use rust_decimal::Decimal;
+
+    mock! {
+        pub OrderRepo {}
+
+        #[async_trait]
+        impl OrderRepository for OrderRepo {
+            async fn get_after_sale_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &TenantType) -> Result<Vec<crate::dto::order::AcceptedOrderResponseDTO>, AppError>;
+            async fn create_order(&self, market_id: i32, customer_hash: &str, order: &CreateOrderDTO) -> Result<OrderResponse, AppError>;
+            async fn get_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &str, query_params: &OrderQueryParams) -> Result<Vec<OrderResponse>, AppError>;
+            async fn get_order_by_order_code(&self, order_code: &str) -> Result<Option<OrderDetailResponse>, AppError>;
+            async fn dispatch_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
+            async fn update_order_status_to_processing(&self, order_code: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
+            async fn update_actual_quantity(&self, order_code: &str, actual_quantity_dto: &ActualQuantityDTO) -> Result<(), AppError>;
+            async fn process_order_receipt(&self, receipt: &crate::dto::order::OrderReceipt, operator: &str, transaction_id: &str) -> Result<(), AppError>;
+            async fn update_order_status(&self, tenant_hash: &str, order_code: &str, new_status: &str, operator: &str) -> Result<(), AppError>;
+            async fn fetch_today_product_order_summary_by_provider_hash(&self, provider_hash: &str) -> Result<Vec<crate::dto::order::ProductsSummaryWithOrdersDTO>, AppError>;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_order_success() {
+        // 1. 准备测试数据
+        let customer_hash = "test_customer_hash".to_string();
+
+        let delivery_info = DeliveryInfo {
+            delivery_date: "2023-05-15".to_string(),
+            delivery_address: "测试地址".to_string(),
+            contact_name: "测试用户".to_string(),
+            contact_phone: "13800138000".to_string(),
+        };
+
+        let items = vec![CreateOrderItem {
+            product_code: "P001".to_string(),
+            product_name: "测试产品".to_string(),
+            category_id: 1,
+            category_name: "测试分类".to_string(),
+            unit: "个".to_string(),
+            quantity: Decimal::new(2, 0),
+            price: Decimal::new(100, 0),
+            original_price: Decimal::new(120, 0),
+            original_amount: Decimal::new(240, 0),
+            discount_rate: Decimal::new(8, 1), // 0.8
+            total: Decimal::new(200, 0),
+            remark: None,
+            processing_services: vec![],
+        }];
+
+        let order = CreateOrderDTO {
+            total_amount: Decimal::new(200, 0),
+            delivery_info,
+            items,
+        };
+
+        // 2. 创建Mock实例和请求上下文
+        let mut mock_repo = MockOrderRepo::new();
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        let claims = Claims {
+            tenant_type: "CUSTOMER".to_string(),
+            tenant_name: "测试客户".to_string(),
+            tenant_hash: "test_tenant_hash".to_string(),
+            username: "test_user".to_string(),
+            roles: vec!["CUSTOMER".to_string()],
+            permissions: vec!["order:create".to_string()],
+            exp: chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::days(1))
+                .expect("Invalid timestamp")
+                .timestamp() as usize,
+            is_super_admin: false,
+        };
+
+        // 3. 设置mock行为 - 模拟repository返回成功响应
+        mock_repo
+            .expect_create_order()
+            .with(eq(1), eq(customer_hash.clone()), predicate::always())
+            .times(1)
+            .returning(|_, _, _| {
+                // 返回模拟的成功响应
+                Ok(OrderResponse {
+                    order_code: "ODR-20230515123456-ABCD".to_string(),
+                    total_amount: Decimal::new(240, 0),
+                    actual_amount: Decimal::new(200, 0),
+                    delivery_date: NaiveDate::from_ymd_opt(2023, 5, 15).unwrap(),
+                    delivery_address: "测试地址".to_string(),
+                    order_status: "PENDING".to_string(),
+                    created_at: None,
+                    after_sale_at: None,
+                })
+            });
+
+        // 4. 执行service函数
+        let result = create_order(
+            Extension(mock_repo),
+            Extension(context),
+            Extension(claims),
+            Path(customer_hash),
+            Json(order),
+        )
+        .await;
+
+        // 5. 验证结果
+        assert!(result.is_ok());
+        let api_response = result.unwrap().0;
+        assert!(api_response.code == 200);
+
+        let order_response = api_response.data.unwrap();
+        assert!(order_response.order_code.starts_with("ODR-"));
+        assert_eq!(order_response.actual_amount, Decimal::new(200, 0));
+        assert_eq!(order_response.order_status, "PENDING");
+        assert_eq!(order_response.delivery_address, "测试地址");
+    }
+
+    #[tokio::test]
+    async fn test_create_order_customer_not_found() {
+        // 1. 准备测试数据
+        let invalid_customer_hash = "invalid_hash".to_string();
+
+        let order = CreateOrderDTO {
+            total_amount: Decimal::new(200, 0),
+            delivery_info: DeliveryInfo {
+                delivery_date: "2023-05-15".to_string(),
+                delivery_address: "测试地址".to_string(),
+                contact_name: "测试用户".to_string(),
+                contact_phone: "13800138000".to_string(),
+            },
+            items: vec![], // 简化测试
+        };
+
+        // 2. 创建Mock实例和请求上下文
+        let mut mock_repo = MockOrderRepo::new();
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        let claims = Claims {
+            tenant_type: "CUSTOMER".to_string(),
+            tenant_name: "测试客户".to_string(),
+            tenant_hash: "test_tenant_hash".to_string(),
+            username: "test_user".to_string(),
+            roles: vec!["CUSTOMER".to_string()],
+            permissions: vec!["order:create".to_string()],
+            exp: chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::days(1))
+                .expect("Invalid timestamp")
+                .timestamp() as usize,
+            is_super_admin: false,
+        };
+
+        // 3. 设置mock行为 - 模拟客户不存在的情况
+        mock_repo
+            .expect_create_order()
+            .with(
+                eq(1),
+                eq(invalid_customer_hash.clone()),
+                predicate::always(),
+            )
+            .times(1)
+            .returning(|_, hash, _| {
+                Err(AppError::NotFound(format!("Customer {} not found", hash)))
+            });
+
+        // 4. 执行service函数
+        let result = create_order(
+            Extension(mock_repo),
+            Extension(context),
+            Extension(claims),
+            Path(invalid_customer_hash),
+            Json(order),
+        )
+        .await;
+
+        // 5. 验证结果
+        assert!(result.is_err());
+        match result {
+            Err(AppError::NotFound(msg)) => {
+                assert!(msg.contains("Customer"));
+                assert!(msg.contains("not found"));
+            }
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_order_by_order_code_success() {
+        // 1. 准备测试数据
+        let tenant_hash = "test_tenant".to_string();
+        let order_code = "ODR-123456".to_string();
+
+        // 2. 创建Mock实例和请求上下文
+        let mut mock_repo = MockOrderRepo::new();
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        // 3. 设置mock行为 - 模拟订单查询成功
+        mock_repo
+            .expect_get_order_by_order_code()
+            .with(eq(order_code.clone()))
+            .times(1)
+            .returning(|_| {
+                Ok(Some(OrderDetailResponse {
+                    order: OrderItem {
+                        id: 1,
+                        order_code: "ODR-123456".to_string(),
+                        customer_name: "测试客户".to_string(),
+                        order_status: "PENDING".to_string(),
+                        total_amount: Decimal::new(240, 0),
+                        discount_amount: Decimal::new(40, 0),
+                        actual_amount: Decimal::new(200, 0),
+                        delivery_date: NaiveDate::from_ymd_opt(2023, 5, 15).unwrap(),
+                        delivery_address: "测试地址".to_string(),
+                        contact_name: "测试用户".to_string(),
+                        contact_phone: "13800138000".to_string(),
+                        remark: None,
+                        created_by: "test-user".to_string(),
+                        created_at: chrono::Utc::now(),
+                        confirmed_by: None,
+                        confirmed_at: None,
+                        processed_by: None,
+                        processed_at: None,
+                        stocked_by: None,
+                        stocked_at: None,
+                        after_sale_at: None,
+                        completed_by: None,
+                        completed_at: None,
+                        rejected_by: None,
+                        rejected_at: None,
+                        reject_reason: None,
+                        delivery_staff_name: None,
+                        delivery_staff_phone: None,
+                        provider_name: None,
+                    },
+                    items: vec![OrderDetail {
+                        id: 1,
+                        product_code: "P001".to_string(),
+                        product_name: "测试产品".to_string(),
+                        category_id: 1,
+                        category_name: "测试分类".to_string(),
+                        unit: "个".to_string(),
+                        quantity: Decimal::new(2, 0),
+                        original_price: Decimal::new(120, 0),
+                        discount_rate: Decimal::new(8, 1),
+                        actual_price: Decimal::new(100, 0),
+                        actual_quantity: None,
+                        actual_amount: None,
+                        total_amount: Decimal::new(200, 0),
+                        processing_requirements: None,
+                        remark: None,
+                        status: None,
+                    }],
+                    receipts: vec![],
+                }))
+            });
+
+        // 4. 执行service函数
+        let result = get_order_by_order_code(
+            Extension(mock_repo),
+            Extension(context),
+            Path((tenant_hash, order_code)),
+        )
+        .await;
+
+        // 5. 验证结果
+        assert!(result.is_ok());
+        let api_response = result.unwrap().0;
+        assert!(api_response.code == 200);
+
+        let order_detail = api_response.data.unwrap().unwrap();
+        assert_eq!(order_detail.order.order_code, "ODR-123456");
+        assert_eq!(order_detail.order.order_status, "PENDING");
+        assert_eq!(order_detail.items.len(), 1);
+    }
+}

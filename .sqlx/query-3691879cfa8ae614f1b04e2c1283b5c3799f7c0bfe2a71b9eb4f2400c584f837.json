@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO orders (order_code, market_id, customer_id, total_amount, discount_amount, actual_amount, delivery_date,\n            delivery_address, contact_name, contact_phone, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "3691879cfa8ae614f1b04e2c1283b5c3799f7c0bfe2a71b9eb4f2400c584f837"
+}

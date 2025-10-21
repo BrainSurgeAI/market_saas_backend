@@ -1,0 +1,74 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            SELECT o.id, o.order_code, DATE(o.created_at) as order_date,\n                    o.total_amount, o.discount_amount, o.actual_amount\n            FROM orders o\n            JOIN provider_orders_assignments po ON o.id = po.order_id\n            WHERE o.customer_id = ?\n            AND o.market_id = ?\n            AND po.provider_id = ?\n            AND o.created_at BETWEEN ? AND ?\n            AND o.order_status = 'COMPLETED'\n            AND o.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "order_code",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | UNIQUE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 128
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "order_date",
+        "type_info": {
+          "type": "Date",
+          "flags": "BINARY",
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "total_amount",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 14
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "discount_amount",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 14
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "actual_amount",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 14
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c09b8666f93e27e5f3cae61b92353a40998fb4eef63a313f5bf4008948c783a9"
+}

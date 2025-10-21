@@ -1,0 +1,84 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT\n                od.product_code,\n                od.product_name,\n                SUM(od.quantity) AS total_quantity,\n                od.unit,\n                od.processing_requirements,\n                c.name AS customer_name,\n                od.remark\n            FROM\n                provider_orders_assignments poa\n            JOIN\n                tenants t ON poa.provider_id = t.id\n            JOIN\n                orders o ON poa.order_id = o.id\n            JOIN\n                order_details od ON o.id = od.order_id\n            JOIN\n                tenants c ON o.customer_id = c.id\n            WHERE\n                t.name_hash = ? -- provider_hash\n                AND t.tenant_type = 'PROVIDER'\n                AND t.deleted_at IS NULL\n                AND o.order_status IN ('CONFIRMED', 'PROCESSING')\n                AND o.deleted_at IS NULL\n                AND o.created_at >= CURDATE()\n            GROUP BY\n                od.product_code, od.product_name, od.unit, od.processing_requirements, c.name, od.remark\n            ORDER BY\n                total_quantity DESC;",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "product_code",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 40
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "product_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "total_quantity",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "BINARY",
+          "max_size": 34
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "unit",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 16
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "processing_requirements",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "customer_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "remark",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 1020
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "f491c4bd22864db155f28c4aa00a7234d5df00eca7375345f6e87a2a0ce06dbe"
+}

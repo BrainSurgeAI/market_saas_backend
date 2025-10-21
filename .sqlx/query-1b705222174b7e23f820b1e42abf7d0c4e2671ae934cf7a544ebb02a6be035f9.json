@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO delivery_staff (name, phone, id_card, created_by, remark, provider_id) VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "1b705222174b7e23f820b1e42abf7d0c4e2671ae934cf7a544ebb02a6be035f9"
+}

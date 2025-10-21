@@ -1,0 +1,34 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            select u.name as name, t.id as market_id from users u INNER join tenants t on u.tenant_id = t.id where u.username=?;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 64
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "market_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "max_size": 11
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "539eeda1e890eeb71bed4e02164980075155bca6c64e961fa97165068dddacdb"
+}

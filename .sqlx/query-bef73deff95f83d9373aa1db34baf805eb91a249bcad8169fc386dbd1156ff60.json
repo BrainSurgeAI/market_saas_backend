@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            UPDATE reconciliation_statements\n            SET total_amount = ?, discount_amount = ?, actual_amount = ?, updated_at = NOW()\n            WHERE id = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "bef73deff95f83d9373aa1db34baf805eb91a249bcad8169fc386dbd1156ff60"
+}

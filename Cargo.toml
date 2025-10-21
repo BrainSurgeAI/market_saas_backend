@@ -1,0 +1,86 @@
+[package]
+name = "market-saas-backend"
+version = "0.7.24"
+edition = "2021"
+
+# [[bin]]
+# name = "create_user"
+# path = "scripts/create_user.rs"
+
+[dependencies]
+axum = { version = "0.8.6", features = ["macros"] }
+tokio = { version = "1.45.1", features = ["full"] }
+tower-http = { version = "0.6.4", features = ["cors", "trace", "compression-gzip"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.140"
+serde_yaml = "0.9.34"
+jsonwebtoken = "9.3.1"
+bcrypt = "0.17"
+dotenv = "0.15"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "runtime-tokio", "mysql", "chrono", "derive", "json","rust_decimal","migrate"] }
+chrono = { version = "0.4.39", features = ["serde", ] }
+hyper = "1.6.0" 
+tracing = "0.1.41"
+tracing-subscriber = {version = "0.3.19", features = ["env-filter"]} 
+uuid = { version = "1.16.0", features = ["v4", "serde"] }
+anyhow = "1.0.98"
+thiserror = "2.0.12"
+listenfd = "1.0.2"
+lazy_static = "1.5.0"
+regex = "1.9.1"
+async-trait = "0.1.88"
+validator = { version = "0.20.0", features = ["derive"] }
+axum-extra = { version = "0.10.0", features = ["typed-header"] }
+utoipa-redoc = { version = "6.0.0", features = ["axum"] }
+utoipa = { version = "5.3.1", features = ["axum_extras", "time", "chrono"] }
+tower = { version = "0.5.2", features = ["timeout"] }
+stateful = "0.1.0"
+strum = "0.27.0"
+strum_macros = "0.27.0"
+rust_decimal = {version = "1.30.0", features = ["serde"] }
+rand = "0.8"
+futures = "0.3.31"
+
+
+[dev-dependencies]
+tokio = { version = "1.45.0", features = ["full", "test-util"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+googletest = { version = "0.14.0" }
+
+# 测试相关依赖
+criterion = "0.5"
+mockall = "0.13"
+tempfile = "3.8"
+fake = { version = "2.9", features = ["derive", "chrono"] }
+
+# 开发工具
+cargo-watch = "8.4"
+cargo-tarpaulin = "0.27"
+
+[profile.test]
+# 测试时的优化配置
+opt-level = 1
+debug = true
+
+[profile.dev]
+# 开发时的配置
+debug = true
+opt-level = 0
+
+# Clippy 配置
+[lints.clippy]
+# 允许的 lint
+too_many_arguments = "allow"
+large_enum_variant = "allow"
+
+# 警告级别的 lint
+missing_docs_in_private_items = "warn"
+cognitive_complexity = "warn"
+missing_errors_doc = "warn"
+
+# 错误级别的 lint
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

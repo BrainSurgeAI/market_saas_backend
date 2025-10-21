@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            UPDATE roles SET name = ?, tenant_type = ?, alias_name = ? WHERE id = ?;\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "cb498f2f78da86c8e7c393c11e1741a72c3565683464428cb5d0f9674a6f5435"
+}

@@ -1,0 +1,23 @@
+mod categories;
+mod delivery_staff;
+mod discounts;
+mod orders;
+mod prices;
+mod products;
+mod reconciliation_statement;
+mod roles;
+mod tenants;
+mod users;
+mod workspace;
+
+pub use categories::categories_routes;
+pub use delivery_staff::delivery_staff_routes;
+pub use discounts::discount_routes;
+pub use orders::order_routes;
+pub use prices::prices_routes;
+pub use products::products_routes;
+pub use reconciliation_statement::reconciliation_statement_routes;
+pub use roles::roles_routes;
+pub use tenants::tenant_routes;
+pub use users::user_routes;
+pub use workspace::workspace_routes;

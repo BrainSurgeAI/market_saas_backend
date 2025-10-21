@@ -1,0 +1,174 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT \n                id,\n                product_code,\n                product_name,\n                category_id,\n                category_name,\n                unit,\n                quantity,\n                original_price,\n                discount_rate,\n                actual_price,\n                actual_amount,\n                total_amount,\n                actual_quantity,\n                processing_requirements,\n                remark,\n                status\n            FROM order_details\n            WHERE order_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "product_code",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 40
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "product_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 400
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "category_id",
+        "type_info": {
+          "type": "Long",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "max_size": 11
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "category_name",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 200
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "unit",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 16
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "quantity",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "original_price",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "discount_rate",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 6
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "actual_price",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 12
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "actual_amount",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "",
+          "max_size": 14
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "total_amount",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 14
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "actual_quantity",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": "NOT_NULL",
+          "max_size": 10
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "processing_requirements",
+        "type_info": {
+          "type": "Blob",
+          "flags": "BLOB",
+          "max_size": 262140
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "remark",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 1020
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "status",
+        "type_info": {
+          "type": "VarString",
+          "flags": "",
+          "max_size": 64
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "fc87bd0722596d82aff2c10fe5328bbc3edde7b222acf1d449355afb74e793f6"
+}

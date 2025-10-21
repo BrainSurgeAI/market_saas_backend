@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE orders o\n               SET o.actual_amount = (\n                   SELECT SUM(od.actual_amount)\n                   FROM order_details od\n                   WHERE od.order_id = o.id\n               ),\n               o.total_amount = (\n                   SELECT SUM(od.total_amount)\n                   FROM order_details od\n                   WHERE od.order_id = o.id\n               ),\n               o.discount_amount = (\n                   SELECT SUM(od.total_amount - od.actual_amount)\n                   FROM order_details od\n                   WHERE od.order_id = o.id\n               ),\n               o.order_status = 'STOCKED',\n               o.stocked_by = ? \n               WHERE o.id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e38185bf1c1078bb8d843dfef5ca73d798a84cb1fce9ef40371374d90f26cc85"
+}

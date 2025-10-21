@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO order_status_history (\n                order_id, from_status, to_status, \n                changed_by, change_reason\n              ) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "22ba1bf61b111e2c7ee924575208cb4a2a5c43149e07ee140792f89a21bd2c4e"
+}
