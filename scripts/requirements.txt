@@ -1,0 +1,4 @@
+# 华为云OBS管理脚本依赖
+esdk-obs-python==3.24.3
+mysql-connector-python==8.2.0
+python-dotenv==1.0.0

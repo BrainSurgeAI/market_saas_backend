@@ -179,7 +179,7 @@ INSERT INTO permissions (name) VALUES
 
 -- 初始化角色数据
 INSERT INTO roles (name, tenant_type, alias_name) VALUES
-    ('SYSTEM_ADMIN', null, '系统管理员'),            -- 系统管理员，拥有所有权限
+    ('SUPER_ADMIN', null, '超级管理员'),            -- 系统管理员，拥有所有权限
     ('MARKET_ADMIN', 'MARKET', '市场管理员'),        -- 市场管理员，负责管理市场运营
     ('PROVIDER_ADMIN', 'PROVIDER', '供应商管理员'),  -- 供应商管理员，管理供应商相关业务
     ('CUSTOMER_ADMIN', 'CUSTOMER', '客户管理员'),    -- 客户管理员，管理客户相关业务
@@ -198,7 +198,7 @@ INSERT INTO roles (name, tenant_type, alias_name) VALUES
 -- SYSTEM_ADMIN (超级管理员，拥有所有权限)
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT 
-    (SELECT id FROM roles WHERE name = 'SYSTEM_ADMIN'),
+    (SELECT id FROM roles WHERE name = 'SUPER_ADMIN'),
     id
 FROM permissions;
 
