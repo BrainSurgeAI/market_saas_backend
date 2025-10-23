@@ -5,6 +5,7 @@ use crate::{
         role_services::{
             get_permissions, get_permissions_by_role_id, get_role_by_id, get_roles,
             get_roles_by_tenant_type, update_role_by_id, update_role_permissions,
+            update_permission_by_id
         },
         superadmin_services::reset_password,
     },
@@ -41,6 +42,10 @@ pub fn roles_routes() -> Router {
         .route(
             "/api/v1/superadmin/password",
             patch(reset_password::<MySqlRepository>),
+        )
+        .route(
+            "/api/v1/permissions/{permission_id}",
+            put(update_permission_by_id::<MySqlRepository>),
         )
         .layer(from_fn(require_super_admin));
 

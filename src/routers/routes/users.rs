@@ -14,14 +14,14 @@ use axum::{
 pub fn user_routes() -> Router {
     Router::new()
         .route(
-            "/api/v1/users/{username}/notifications",
+            "/api/v1/notifications",
             get(list_notifications),
         )
         .route(
             "/api/v1/users/{username}/notifications/{message_id}/status",
             patch(update_notification_status),
         )
-        .route("/api/v1/users/{username}", get(get_user::<MySqlRepository>))
+        .route("/api/v1/users/me", get(get_user::<MySqlRepository>))
         .route(
             "/api/v1/users/{username}",
             patch(update_user::<MySqlRepository>),
