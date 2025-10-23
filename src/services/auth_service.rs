@@ -136,7 +136,7 @@ where
     }
 
     if repo
-        .find_tenant_by_name_hash(&payload.tenant_name)
+        .is_tenant_exist(&payload.tenant_name)
         .await?
         .then_some(())
         .is_some()
