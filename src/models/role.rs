@@ -20,10 +20,25 @@ pub struct Role {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow, Validate, Serialize, Deserialize)]
-pub struct Permission {
-    #[validate(range(min = 1))]
+pub struct PermissionResponseDto {
     pub id: i32,
+    pub name: String,
+    pub cname: Option<String>,
+    pub description: Option<String>,
 
+    #[serde(rename = "selfOnly")]
+    pub self_only: Option<i8>,
+
+    #[serde(rename = "pathPattern")]
+    pub path_pattern: Option<String>,
+
+    #[serde(rename = "httpMethod")]
+    pub http_method: Option<String>,
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow, Validate, Serialize, Deserialize)]
+pub struct PermissionCreateDto {
     #[validate(length(min = 4, max = 32))]
     pub name: String,
 
@@ -32,6 +47,17 @@ pub struct Permission {
 
     #[validate(length(min = 4, max = 32))]
     pub description: Option<String>,
+
+    #[serde(rename = "selfOnly")]
+    pub self_only: Option<i8>,
+
+    #[serde(rename = "pathPattern")]
+    #[validate(length(min = 4, max = 64))]
+    pub path_pattern: Option<String>,
+
+    #[serde(rename = "httpMethod")]
+    #[validate(length(min = 3, max = 8))]
+    pub http_method: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow, Validate, Serialize, Deserialize)]
