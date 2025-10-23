@@ -133,6 +133,7 @@ impl PermissionTrie {
             params.remove(star_name);
         }
 
+        debug!("No match found for segment: {}", current_segment);
         None
     }
 }
