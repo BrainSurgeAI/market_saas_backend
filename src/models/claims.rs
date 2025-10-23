@@ -7,7 +7,6 @@ pub struct Claims {
     pub tenant_hash: String,
     pub username: String,
     pub roles: Vec<String>,
-    pub permissions: Vec<String>,
     pub exp: usize,
     pub is_super_admin: bool,
 }

@@ -294,7 +294,6 @@ mod tests {
             tenant_hash: "test_tenant_hash".to_string(),
             username: "test_user".to_string(),
             roles: vec!["CUSTOMER".to_string()],
-            permissions: vec!["order:create".to_string()],
             exp: chrono::Utc::now()
                 .checked_add_signed(chrono::Duration::days(1))
                 .expect("Invalid timestamp")
@@ -372,7 +371,6 @@ mod tests {
             tenant_hash: "test_tenant_hash".to_string(),
             username: "test_user".to_string(),
             roles: vec!["CUSTOMER".to_string()],
-            permissions: vec!["order:create".to_string()],
             exp: chrono::Utc::now()
                 .checked_add_signed(chrono::Duration::days(1))
                 .expect("Invalid timestamp")

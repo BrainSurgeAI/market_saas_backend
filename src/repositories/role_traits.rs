@@ -105,7 +105,7 @@ impl RoleRepository for MySqlRepository {
         let permissions = sqlx::query_as!(
             Permission,
             r#"
-            SELECT p.* FROM permissions p
+            SELECT p.id, p.name, p.cname, p.description FROM permissions p
             JOIN role_permissions rp ON p.id = rp.permission_id
             WHERE rp.role_id = ?;
             "#,

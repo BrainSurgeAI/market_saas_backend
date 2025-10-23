@@ -51,7 +51,7 @@ where
             AppError::Auth("Invalid username or password".to_string())
         })?;
 
-    let permission_list = user_auth.permissions.split(',').map(String::from).collect();
+    
 
     let claims = Claims {
         tenant_type: "SUPER_ADMIN".to_string(),
@@ -59,7 +59,7 @@ where
         tenant_hash: "SUPER_ADMIN".to_string(),
         username: payload.username,
         roles: vec![user_auth.roles.to_string()],
-        permissions: permission_list,
+       
         is_super_admin: user_auth.is_super_admin,
         exp: chrono::Utc::now()
             .checked_add_signed(chrono::Duration::days(1))

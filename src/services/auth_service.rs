@@ -172,8 +172,8 @@ where
 
     let permissions = repo.get_permissions_by_role(&roles).await?;
 
-    if let Some(permissions) = permissions {
-        let permission_list = permissions.split(',').map(String::from).collect();
+    if let Some(_permissions) = permissions {
+        
 
         let claims = Claims {
             tenant_type: payload.tenant_type.to_uppercase(),
@@ -181,7 +181,6 @@ where
             tenant_hash: tenant_hash_name,
             username: payload.username,
             roles: vec![roles],
-            permissions: permission_list,
             is_super_admin: false,
             exp: chrono::Utc::now()
                 .checked_add_signed(chrono::Duration::days(1))
@@ -348,7 +347,6 @@ where
         return Err(AppError::Auth("Invalid username or password".to_string()));
     }
 
-    let permission_list = user_auth.permissions.split(',').map(String::from).collect();
 
     let tenant = repo
         .find_tenant_by_username(&payload.username)
@@ -361,7 +359,6 @@ where
         tenant_hash: tenant.name_hash,
         username: payload.username,
         roles: vec![user_auth.roles.to_string()],
-        permissions: permission_list,
         is_super_admin: user_auth.is_super_admin,
         exp: chrono::Utc::now()
             .checked_add_signed(chrono::Duration::days(1))

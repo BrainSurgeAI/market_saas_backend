@@ -130,7 +130,7 @@ mod tests {
             tenant_hash: tenant_hash.to_string(),
             username: "test_user".to_string(),
             roles: vec!["PROVIDER".to_string()],
-            permissions: vec!["staff:create".to_string()],
+           
             exp: 0,
             is_super_admin: false,
         }
@@ -143,7 +143,6 @@ mod tests {
             tenant_hash: "customer_hash".to_string(),
             username: "test_user".to_string(),
             roles: vec!["CUSTOMER".to_string()],
-            permissions: vec![],
             exp: 0,
             is_super_admin: false,
         }
