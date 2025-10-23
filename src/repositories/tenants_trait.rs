@@ -31,12 +31,14 @@ pub trait TenantRepository: Send + Sync {
         tenant: &TenantCreateDTO,
     ) -> Result<(), AppError>;
 
+    async fn verify_tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError>;
+
     // get the financials of a tenant
     async fn get_tenant_financials(&self, hashed_name: &str)
         -> Result<Option<Financial>, AppError>;
 
     // check if a tenant name hash exists
-    async fn find_tenant_by_name_hash(&self, name_hash: &str) -> Result<bool, AppError>;
+    async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError>;
 
     async fn get_tenant_users(&self, hashed_name: &str) -> Result<Vec<UserResponseDto>, AppError>;
 
@@ -76,8 +78,13 @@ pub trait TenantRepository: Send + Sync {
         tenant_hash: &str,
     ) -> Result<bool, AppError>;
 
-    // 根据 name_hash 查询 tenant 详情，若为 PROVIDER 则附带财务信息
-    async fn find_tenant_detail_by_name_hash(
+    /// Find tenant detail by hashed name of tenant
+    /// Returns None if tenant not found
+    /// # Arguments
+    /// * `name_hash` - Hashed name of the tenant
+    /// # Returns
+    /// * `Option<TenantDetailDTO>` - Tenant detail DTO if found
+    async fn find_tenant_detail_by_hashed_name(
         &self,
         name_hash: &str,
     ) -> Result<Option<TenantDetailDTO>, AppError>;
@@ -85,6 +92,18 @@ pub trait TenantRepository: Send + Sync {
 
 #[async_trait]
 impl TenantRepository for MySqlRepository {
+    async fn verify_tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError> {
+        let tenant_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM tenants WHERE name_hash = ?)",
+        )
+        .bind(hashed_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to verify tenant existence"))?;
+
+        Ok(tenant_exists.unwrap_or(false))
+    }
+
     async fn find_tenant_by_username(
         &self,
         username: &str,
@@ -92,8 +111,11 @@ impl TenantRepository for MySqlRepository {
         debug!("Finding tenant by username: {}", username);
 
         sqlx::query_as::<_, BaseTenantDTO>(
-            "SELECT t.id, t.name, t.tenant_type, t.address, t.business_scope, t.license_image, t.status, t.name_hash, t.created_at, t.updated_at, t.verified_at, t.deleted_at FROM tenants t INNER JOIN users u ON t.id = u.tenant_id 
-        WHERE u.username = ? AND u.tenant_id IS NOT NULL AND t.deleted_at IS NULL ORDER BY t.created_at DESC LIMIT 1",
+            r#"SELECT t.id, t.name, t.tenant_type, t.address, t.business_scope, 
+               t.license_image, t.status, t.name_hash, t.created_at, t.updated_at, 
+               t.verified_at, t.deleted_at FROM tenants t INNER JOIN users u ON t.id = u.tenant_id 
+               WHERE u.username = ? AND u.tenant_id IS NOT NULL AND t.deleted_at IS NULL 
+               ORDER BY t.created_at DESC LIMIT 1"#,
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -111,7 +133,7 @@ impl TenantRepository for MySqlRepository {
             AppError::Internal("Error hashing tenant name".to_string())
         })?;
 
-        let is_exist = self.find_tenant_by_name_hash(&name_hash).await?;
+        let is_exist = self.is_tenant_exist(&name_hash).await?;
         if is_exist {
             error!("Tenant {} already exists", tenant.name);
             return Err(AppError::Conflict("Tenant already exists".to_string()));
@@ -195,7 +217,7 @@ impl TenantRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get tenant financials"))
     }
 
-    async fn find_tenant_by_name_hash(&self, name_hash: &str) -> Result<bool, AppError> {
+    async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError> {
         // let name_hash = tenant_name_hash(name).unwrap();
         let tenant = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM tenants WHERE name_hash = ?)",
@@ -429,7 +451,7 @@ impl TenantRepository for MySqlRepository {
         Ok(true)
     }
 
-    async fn find_tenant_detail_by_name_hash(
+    async fn find_tenant_detail_by_hashed_name(
         &self,
         name_hash: &str,
     ) -> Result<Option<TenantDetailDTO>, AppError> {
