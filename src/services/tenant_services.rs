@@ -56,7 +56,7 @@ use crate::utils::validate_json_fmt::Json;
     tag = "Tenants"
 )]
 
-pub async fn list_user_tenant<T>(
+pub async fn get_tenant_by_user<T>(
     Extension(context): Extension<RequestContext>,
     Extension(repo): Extension<T>,
     Path(username): Path<String>,
@@ -100,7 +100,6 @@ pub async fn list_tenants_by_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(market_hash): Path<String>,
     Query(query): Query<QueryTenantByType>,
 ) -> Result<Json<ApiResponse<Vec<BaseTenantDTO>>>, AppError>
 where
@@ -112,23 +111,19 @@ where
         ));
     }
 
-    let res = repo.get_all_tenants_by_market(&market_hash, &query).await?;
+    let res = repo.get_all_tenants_by_market(&claims.tenant_hash, &query).await?;
     Ok(Json(ApiResponse::new(Some(res), &context)))
 }
 
 pub async fn get_tenant_financials<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(hashed_name): Path<String>,
+    Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    debug!(
-        "Getting tenant financials by tenant hashed name: {}",
-        hashed_name
-    );
-    let financials = repo.get_tenant_financials(&hashed_name).await?;
+    let financials = repo.get_tenant_financials(&claims.tenant_hash).await?;
     Ok(Json(ApiResponse::new(financials, &context)))
 }
 
@@ -281,20 +276,26 @@ where
     Ok(Json(ApiResponse::new(Some(rows_affected), &context)))
 }
 
-/// Get tenant detail by name hash
-///
-/// Retrieves tenant details by their hashed name.
-///
-/// Required permission: tenant:read
-///
+
+
+/// Get tenant detail by hashed name of tenant.
+/// Use hashed name from JWT claims, so it is used for tenant to get its own detail.
+/// # Arguments
+/// * `repo` - Repository implementation for tenant operations
+/// * `claims` - Claims extracted from JWT token
+/// # Returns
+/// Returns a JSON response containing:
+/// * On success: Status 200 with the tenant details
+/// * On DB error: Status 500 for database errors
+/// * On other errors: Status 417 for unexpected errors
 pub async fn get_tenant_detail_by_name_hash<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(hashed_name): Path<String>,
+    Extension(claims): Extension<Claims>
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    let tenant = repo.find_tenant_detail_by_name_hash(&hashed_name).await?;
+    let tenant = repo.find_tenant_detail_by_hashed_name(&claims.tenant_hash).await?;
     Ok(Json(ApiResponse::new(tenant, &context)))
 }

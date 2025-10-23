@@ -286,10 +286,7 @@ where
 ///
 #[utoipa::path(
     get,
-    path = "/api/v1/users/{username}",
-    params(
-        ("username" = String, Path, description = "Username of the user to retrieve")
-    ),
+    path = "/api/v1/users/me",
     responses(
         (status = 200, description = "User profile retrieved successfully", body = ApiResponse<UserCreateDto>),
         (status = 404, description = "User profile not found", body = ApiResponse<String>),
@@ -301,11 +298,12 @@ where
 pub async fn get_user<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(username): Path<String>,
+    Extension(claims): Extension<Claims>,
+   // Path(username): Path<String>,
 ) -> Result<Json<ApiResponse<UserResponseDto>>, AppError>
 where
     T: UserRepository + Send + Sync,
 {
-    let profile = repo.get_user_by_username(&username).await?;
+    let profile = repo.get_user_by_username(&claims.username).await?;
     Ok(Json(ApiResponse::new(profile, &context)))
 }

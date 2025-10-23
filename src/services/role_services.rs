@@ -2,7 +2,7 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::ValidatedJSON,
     middleware::context::RequestContext,
-    models::role::{Permission, Role, UpdateRolePermissionDTO},
+    models::role::{PermissionResponseDto, Role, UpdateRolePermissionDTO, PermissionCreateDto},
     repositories::role_traits::RoleRepository,
     utils::validate_json_fmt::Json,
 };
@@ -35,7 +35,7 @@ where
 pub async fn get_permissions<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-) -> Result<Json<ApiResponse<Vec<Permission>>>, AppError>
+) -> Result<Json<ApiResponse<Vec<PermissionResponseDto>>>, AppError>
 where
     T: RoleRepository + Send + Sync,
 {
@@ -47,7 +47,7 @@ pub async fn get_permissions_by_role_id<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path(role_id): Path<i32>,
-) -> Result<Json<ApiResponse<Vec<Permission>>>, AppError>
+) -> Result<Json<ApiResponse<Vec<PermissionResponseDto>>>, AppError>
 where
     T: RoleRepository + Send + Sync,
 {
@@ -103,4 +103,18 @@ where
 {
     let role = repo.get_role_by_id(role_id).await?;
     Ok(Json(ApiResponse::new(Some(role), &context)))
+}
+
+pub async fn update_permission_by_id<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path(permission_id): Path<i32>,
+    Json(payload): Json<PermissionCreateDto>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: RoleRepository + Send + Sync,
+{
+    repo.update_permission_by_id(permission_id, &payload)
+        .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
 }

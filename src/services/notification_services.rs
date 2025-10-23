@@ -3,6 +3,7 @@ use axum::{extract::Path, http::StatusCode, Extension, Json};
 use serde::Serialize;
 use sqlx::MySqlPool;
 use tracing::{debug, error};
+use crate::models::claims::Claims;
 
 #[derive(Serialize)]
 pub struct ApiResponse<T> {
@@ -12,10 +13,10 @@ pub struct ApiResponse<T> {
 }
 
 pub async fn list_notifications(
-    Path(username): Path<String>,
+    Extension(claims): Extension<Claims>,
     Extension(pool): Extension<MySqlPool>,
 ) -> Json<ApiResponse<Vec<Message>>> {
-    match Message::get_unread_messages(&pool, &username).await {
+    match Message::get_unread_messages(&pool, &claims.username).await {
         Ok(messages) => Json(ApiResponse {
             code: StatusCode::OK.into(),
             message: "Success".to_string(),
