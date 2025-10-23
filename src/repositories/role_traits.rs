@@ -2,7 +2,7 @@ use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     map_db_err,
-    models::role::{Permission, Role},
+    models::role::{PermissionCreateDto, PermissionResponseDto, Role},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,9 +15,17 @@ pub trait RoleRepository: Send + Sync {
     async fn get_role_by_id(&self, id: i32) -> Result<Role, AppError>;
     async fn update_role_by_id(&self, role: &Role) -> Result<(), AppError>;
 
-    async fn get_permissions(&self) -> Result<Vec<Permission>, AppError>;
-    async fn get_permissions_by_role_id(&self, role_id: i32) -> Result<Vec<Permission>, AppError>;
+    async fn get_permissions(&self) -> Result<Vec<PermissionResponseDto>, AppError>;
+    async fn get_permissions_by_role_id(
+        &self,
+        role_id: i32,
+    ) -> Result<Vec<PermissionResponseDto>, AppError>;
 
+    async fn update_permission_by_id(
+        &self,
+        id: i32,
+        permission: &PermissionCreateDto,
+    ) -> Result<(), AppError>;
     /// 更新角色的权限
     ///
     /// # 参数
@@ -88,8 +96,8 @@ impl RoleRepository for MySqlRepository {
 
         Ok(())
     }
-    async fn get_permissions(&self) -> Result<Vec<Permission>, AppError> {
-        let permissions = sqlx::query_as::<_, Permission>(
+    async fn get_permissions(&self) -> Result<Vec<PermissionResponseDto>, AppError> {
+        let permissions = sqlx::query_as::<_, PermissionResponseDto>(
             r#"
             SELECT * FROM permissions ORDER BY id;
             "#,
@@ -101,11 +109,14 @@ impl RoleRepository for MySqlRepository {
         Ok(permissions)
     }
 
-    async fn get_permissions_by_role_id(&self, role_id: i32) -> Result<Vec<Permission>, AppError> {
+    async fn get_permissions_by_role_id(
+        &self,
+        role_id: i32,
+    ) -> Result<Vec<PermissionResponseDto>, AppError> {
         let permissions = sqlx::query_as!(
-            Permission,
+            PermissionResponseDto,
             r#"
-            SELECT p.id, p.name, p.cname, p.description FROM permissions p
+            SELECT p.id, p.name, p.cname, p.description, p.self_only, p.path_pattern, p.http_method FROM permissions p
             JOIN role_permissions rp ON p.id = rp.permission_id
             WHERE rp.role_id = ?;
             "#,
@@ -160,6 +171,33 @@ impl RoleRepository for MySqlRepository {
         tx.commit()
             .await
             .map_err(map_db_err!("failed to commit transaction"))?;
+
+        Ok(())
+    }
+
+    async fn update_permission_by_id(
+        &self,
+        id: i32,
+        permission: &PermissionCreateDto,
+    ) -> Result<(), AppError> {
+        sqlx::query_as!(
+            Permission,
+            r#"
+            UPDATE permissions 
+            SET name = ?, cname = ?, description = ?, self_only = ?, path_pattern = ?, http_method = ?
+            WHERE id = ?;
+            "#,
+            permission.name,
+            permission.cname,
+            permission.description,
+            permission.self_only,
+            permission.path_pattern,
+            permission.http_method,
+            id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to update permission by id"))?;
 
         Ok(())
     }
