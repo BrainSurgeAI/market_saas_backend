@@ -17,9 +17,13 @@ use crate::{
     common::AppError,
     dto,
     middleware::{
-        auth::auth_middleware, context::inject_request_context, logging_layer::LoggingLayer,
+        auth::{AppState, auth_middleware}, context::inject_request_context, logging_layer::LoggingLayer, 
     },
-    repositories::{my_sql_repository::MySqlRepository, system_log_repo::MySqlSystemLogRepository},
+    repositories::{
+        my_sql_repository::MySqlRepository, 
+        system_log_repo::MySqlSystemLogRepository,
+        
+    },
     services::{
         auth_service::{login, register},
         price_services::fetch_price_announcements,
@@ -96,6 +100,12 @@ fn configure_routes(pool: &MySqlPool) -> Router {
     let log_service = Arc::new(SystemLogService::new(log_repo));
     let logging_layer = LoggingLayer::new(Arc::clone(&log_service));
 
+
+    let mysql = Arc::new(MySqlRepository::new(pool.clone()));
+
+    let shared_state = AppState {
+        repo: mysql.clone(),
+    };
     // Protected routes (requires authentication)
     let protected_routes = Router::new()
         .merge(workspace_routes())
@@ -110,23 +120,24 @@ fn configure_routes(pool: &MySqlPool) -> Router {
         .merge(reconciliation_statement_routes())
         .merge(discount_routes())
         .layer(logging_layer)
-        .layer(axum::middleware::from_fn(auth_middleware));
+        .layer(axum::middleware::from_fn_with_state(shared_state.clone(), auth_middleware));
 
+        public_routes.with_state(shared_state).merge(protected_routes)
     // 合并路由，并设置全局中间件，注意顺序
-    public_routes.merge(protected_routes)
+   // public_routes.merge(protected_routes)
 }
 
 pub fn create_router(pool: &MySqlPool) -> Router {
     let cors = crate::config::cors::configure_cors();
     let routes = configure_routes(pool);
-    let mysql = MySqlRepository::new(pool.clone());
-
+    
+    let my_sql_repository = MySqlRepository::new(pool.clone());
     Router::new()
         .merge(routes)
         .layer(cors)
         .layer(axum::middleware::from_fn(inject_request_context))
         .layer(Extension(pool.clone()))
-        .layer(Extension(mysql))
+        .layer(Extension(my_sql_repository.clone()))
         .layer(TraceLayer::new_for_http())
         .layer(
             ServiceBuilder::new()

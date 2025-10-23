@@ -1,14 +1,13 @@
+use crate::repositories::tenants_trait::TenantRepository;
 use anyhow::Result;
 use serde_json::json;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
-use crate::{
-    acl_core::acl_snapshot::ACL_SNAPSHOT,
-    models::claims::Claims,
-};
+use crate::{acl_core::acl_snapshot::ACL_SNAPSHOT, models::claims::Claims};
 use axum::{
     body::Body,
-    extract::Request,
+    extract::{Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -95,6 +94,11 @@ fn decode_jwt(token: &str) -> Result<Claims, AuthError> {
     Ok(claims.claims)
 }
 
+#[derive(Clone)]
+pub struct AppState {
+    pub repo: Arc<dyn TenantRepository + Send + Sync>,
+}
+
 /// Middleware function to handle authentication and JWT token validation
 ///
 /// # Arguments
@@ -109,7 +113,11 @@ fn decode_jwt(token: &str) -> Result<Claims, AuthError> {
 /// 2. Decodes and validates the JWT token
 /// 3. Performs access control verification
 /// 4. Injects the claims into request extensions for downstream handlers
-pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Response, StatusCode> {
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
     let start_time = std::time::Instant::now();
     let path = req.uri().path();
     let method = req.method();
@@ -136,13 +144,40 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
         StatusCode::BAD_REQUEST
     })?;
 
-    // 2. Decode and validate JWT token
+    // Decode and validate JWT token
     let claims = decode_jwt(token).map_err(|_| {
         warn!("Invalid JWT token for {} {}", method, path);
         StatusCode::UNAUTHORIZED
     })?;
 
-    // 3. Verify access permissions
+    if !claims.roles.contains(&"SUPER_ADMIN".to_string()) {
+        let tenant_exists = state
+            .repo
+            .verify_tenant_exists(&claims.tenant_hash)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to verify tenant existence for {}: {}",
+                    claims.username, e
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+        if !tenant_exists {
+            warn!(
+                "Tenant does not exist for user {} with tenant_hash {}",
+                claims.username, claims.tenant_hash
+            );
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        debug!(
+            "tenant is exists {} for user {} with tenant_hash {}",
+            tenant_exists, claims.username, claims.tenant_hash
+        );
+    }
+
+    // Verify access permissions
     ACL_SNAPSHOT
         .load()
         .verify_access(method, path, &claims)
@@ -171,100 +206,12 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
     // 4. Inject claims into request extensions
     req.extensions_mut().insert(claims.clone());
 
-    debug!("ok, this request is authenticated for user {}", claims.username);
+    debug!(
+        "ok, this request is authenticated for user {}",
+        claims.username
+    );
     Ok(next.run(req).await)
 }
-
-/// Verifies if the user has permission to access the requested resource
-///
-/// # Arguments
-/// * `path` - The request path to verify
-/// * `method` - The HTTP method being used
-/// * `claims` - The JWT claims containing user information and permissions
-///
-/// # Returns
-/// * `Result<(), StatusCode>` - Ok if access is granted, error status code otherwise
-///
-/// This function performs several access control checks:
-/// 1. Super admin bypass check
-/// 2. Route pattern matching against permission tries
-/// 3. Self-only route validation (username matching)
-/// 4. Tenant-specific route validation (tenant_hash matching)
-/// 5. Permission requirement validation
-// async fn verify_access(path: &str, method: &Method, claims: &Claims) -> Result<(), StatusCode> {
-//     debug!(
-//         "Verifying access for user {} to {} {}",
-//         claims.username, method, path
-//     );
-
-//     // Super admin bypass - early return for performance
-//     if claims.is_super_admin {
-//         debug!("Super admin access granted for user {}", claims.username);
-//         return Ok(());
-//     }
-
-//     let tries = PERMISSION_TRIES.read().await;
-
-//     let trie = tries.get(method).ok_or_else(|| {
-//         error!("No permission trie found for HTTP method: {}", method);
-//         StatusCode::METHOD_NOT_ALLOWED
-//     })?;
-
-//     let (rule, params) = trie.find(path).ok_or_else(|| {
-//         error!("No matching route pattern found for {} {}", method, path);
-//         StatusCode::NOT_FOUND
-//     })?;
-
-//     debug!("Matched rule: {:?} for path: {}", rule, path);
-//     debug!("Captured params: {:?}", params);
-
-//     // Validate self-only routes
-//     if rule.self_only {
-//         if let Some(username) = params.get("username") {
-//             if username != &claims.username {
-//                 error!(
-//                     "Self-only route {} accessed by user {} (expected: {})",
-//                     path, claims.username, username
-//                 );
-//                 return Err(StatusCode::FORBIDDEN);
-//             }
-//         }
-//         // TODO: Check if provider_hash in token matches provider_hash in path
-//     }
-
-//     // Validate tenant access
-//     if let Some(tenant_hash) = params.get("tenant_hash") {
-//         let has_tenant_access = claims.tenant_hash == *tenant_hash;
-//         let is_market_admin = claims
-//             .roles
-//             .first()
-//             .map(|role| role.to_uppercase() == "MARKET_ADMIN")
-//             .unwrap_or(false);
-
-//         if !has_tenant_access && !is_market_admin {
-//             error!(
-//                 "User {} (tenant: {}) does not have access to tenant: {}",
-//                 claims.username, claims.tenant_hash, tenant_hash
-//             );
-//             return Err(StatusCode::FORBIDDEN);
-//         }
-//     }
-
-//     // Validate permissions
-//     if !permission::verify_permissions(&rule.required_permission, &claims.permissions) {
-//         error!(
-//             "User {} does not have required permission '{}'. User permissions: {:?}",
-//             claims.username, rule.required_permission, claims.permissions
-//         );
-//         return Err(StatusCode::FORBIDDEN);
-//     }
-
-//     info!(
-//         "Access granted to user {} for {} {} (permission: {})",
-//         claims.username, method, path, rule.required_permission
-//     );
-//     Ok(())
-// }
 
 struct Keys {
     pub encoding: EncodingKey,
