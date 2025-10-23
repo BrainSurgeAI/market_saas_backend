@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use tracing::{debug, info};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -48,13 +48,11 @@ async fn main() {
         .await
         .expect("Failed to initialize ACL snapshot");
 
-    // let snapshot = ACL_SNAPSHOT.load();
-    // debug!("Snapshot: {:?}", snapshot.clone());
-    // let config_path =
-    //     std::env::var("PERMISSIONS_CONFIG_PATH").unwrap_or_else(|_| "permissions.yaml".to_string());
-    // init_permissions(&config_path)
-    //     .await
-    //     .expect("Failed to load initial permissions");
+    let snapshot = ACL_SNAPSHOT.load();
+    info!(
+        "ACL Snapshot initialized {:?}",
+        snapshot
+    );
 
     let app = create_router(&pool);
 
