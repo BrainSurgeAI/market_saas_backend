@@ -22,7 +22,7 @@ pub fn products_routes() -> Router {
             post(batch_create_product_price::<MySqlRepository>),
         )
         .route(
-            "/api/v1/users/{username}/product_price_status_stats",
+            "/api/v1/product_price_status_stats",
             get(get_product_price_status_stats::<MySqlRepository>),
         )
         .route(

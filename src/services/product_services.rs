@@ -112,14 +112,13 @@ where
 pub async fn get_product_price_status_stats<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Path(username): Path<String>,
+    Extension(claims): Extension<Claims>
 ) -> Result<Json<ApiResponse<Vec<PriceStatusDTO>>>, AppError>
 where
     T: ProductRepository + Send + Sync,
 {
     let stats = repo
-        .fetch_product_price_status_stats(&username, &claims.roles[0])
+        .fetch_product_price_status_stats(&claims.username, &claims.roles[0])
         .await?;
     Ok(Json(ApiResponse::new(Some(stats), &context)))
 }
