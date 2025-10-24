@@ -57,7 +57,6 @@ pub async fn get_pricer_published_prices<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(username): Path<String>,
     Query(query): Query<QueryPriceByStatusParams>,
 ) -> Result<Json<ApiResponse<Vec<ProductDailyPriceComparisonDTO>>>, AppError>
 where
@@ -80,7 +79,7 @@ where
     debug!("合并后的查询参数: {:?}", query_with_defaults);
     let product_prices = repo
         .find_product_daily_price_comparison_by_user(
-            &username,
+            &claims.username,
             &claims.roles[0],
             &query_with_defaults,
         )

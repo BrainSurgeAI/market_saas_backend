@@ -14,7 +14,7 @@ use axum::{
 pub fn products_routes() -> Router {
     Router::new()
         .route(
-            "/api/v1/users/{username}/product_prices",
+            "/api/v1/product_prices",
             get(get_pricer_published_prices::<MySqlRepository>),
         )
         .route(
