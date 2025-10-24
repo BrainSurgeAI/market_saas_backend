@@ -2,7 +2,7 @@ use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     map_db_err,
-    models::role::{PermissionCreateDto, PermissionResponseDto, Role},
+    models::role::{MenuConfig, MenuItem, PermissionCreateDto, PermissionResponseDto, Role},
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -36,6 +36,9 @@ pub trait RoleRepository: Send + Sync {
         role_id: i32,
         permission_ids: &[i32],
     ) -> Result<(), AppError>;
+
+    /// 根据角色名称获取菜单配置
+    async fn get_menus_by_role_name(&self, role_name: &str) -> Result<Vec<MenuConfig>, AppError>;
 }
 
 #[async_trait]
@@ -200,5 +203,62 @@ impl RoleRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to update permission by id"))?;
 
         Ok(())
+    }
+
+    async fn get_menus_by_role_name(&self, role_name: &str) -> Result<Vec<MenuConfig>, AppError> {
+        let menu_items = sqlx::query_as!(
+            MenuItem,
+            r#"
+            SELECT DISTINCT mc.id, mc.title, mc.url, mc.icon, mc.is_active, mc.parent_id, mc.sort_order
+            FROM menu_config mc
+            INNER JOIN role_menu rm ON mc.id = rm.menu_id
+            INNER JOIN roles r ON rm.role_id = r.id
+            WHERE r.name = ?
+            ORDER BY mc.parent_id ASC, mc.sort_order ASC
+            "#,
+            role_name
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get menus by role name"))?;
+
+        // 构建菜单层次结构
+        let mut menu_map: std::collections::HashMap<i32, MenuConfig> = std::collections::HashMap::new();
+        let mut children_map: std::collections::HashMap<i32, Vec<MenuConfig>> = std::collections::HashMap::new();
+
+        // 首先处理所有菜单项，创建所有菜单的基础配置
+        for item in menu_items {
+            let menu_config = MenuConfig {
+                id: item.id,
+                title: item.title,
+                url: item.url,
+                icon: item.icon,
+                is_active: item.is_active.map(|v| v != 0).unwrap_or(false),
+                items: None,
+            };
+
+            if item.parent_id.is_none() {
+                // 根菜单直接插入到map中
+                menu_map.insert(item.id, menu_config);
+            } else {
+                // 子菜单按父级ID分组
+                children_map
+                    .entry(item.parent_id.unwrap())
+                    .or_insert_with(Vec::new)
+                    .push(menu_config);
+            }
+        }
+
+        // 将子菜单添加到对应的父菜单中
+        for (parent_id, children) in children_map {
+            if let Some(parent_menu) = menu_map.get_mut(&parent_id) {
+                parent_menu.items = Some(children);
+            }
+        }
+
+        // 只返回根菜单（包含其子菜单）
+        let root_menus: Vec<MenuConfig> = menu_map.into_values().collect();
+
+        Ok(root_menus)
     }
 }

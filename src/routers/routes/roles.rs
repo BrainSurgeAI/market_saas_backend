@@ -5,7 +5,7 @@ use crate::{
         role_services::{
             get_permissions, get_permissions_by_role_id, get_role_by_id, get_roles,
             get_roles_by_tenant_type, update_role_by_id, update_role_permissions,
-            update_permission_by_id
+            update_permission_by_id, get_menu_by_roles,
         },
         superadmin_services::reset_password,
     },
@@ -54,5 +54,6 @@ pub fn roles_routes() -> Router {
             "/api/v1/tenants/{tenant_name}/types/{tenant_type}/roles",
             get(get_roles_by_tenant_type::<MySqlRepository>),
         )
+        .route("/api/v1/menus", get(get_menu_by_roles::<MySqlRepository>))
         .merge(admin_routes)
 }

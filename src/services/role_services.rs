@@ -2,7 +2,10 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::ValidatedJSON,
     middleware::context::RequestContext,
-    models::role::{PermissionResponseDto, Role, UpdateRolePermissionDTO, PermissionCreateDto},
+    models::{
+        claims::Claims,
+        role::{PermissionCreateDto, PermissionResponseDto, Role, UpdateRolePermissionDTO},
+    },
     repositories::role_traits::RoleRepository,
     utils::validate_json_fmt::Json,
 };
@@ -117,4 +120,29 @@ where
     repo.update_permission_by_id(permission_id, &payload)
         .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+/// Get menu of specific roles
+pub async fn get_menu_by_roles<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, AppError>
+where
+    T: RoleRepository + Send + Sync,
+{
+    // 从用户信息中获取主要角色
+    let primary_role = claims.roles.first().map(|r| r.as_str()).unwrap_or("user");
+
+    // 根据主要角色获取菜单配置
+    let menu_config = repo.get_menus_by_role_name(primary_role).await?;
+
+    // 构建响应数据结构
+    let menu_response = serde_json::json!({
+      "userRoles": claims.roles,
+      "primaryRole": primary_role,
+      "menuConfig": menu_config
+    });
+
+    Ok(Json(ApiResponse::new(Some(menu_response), &context)))
 }

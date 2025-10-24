@@ -65,3 +65,24 @@ pub struct UpdateRolePermissionDTO {
     #[serde(rename = "permissionIds")]
     pub permissions: Vec<i32>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow, Serialize, Deserialize)]
+pub struct MenuItem {
+    pub id: i32,
+    pub title: String,
+    pub url: Option<String>,
+    pub icon: Option<String>,
+    pub is_active: Option<i8>,
+    pub parent_id: Option<i32>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow, Serialize, Deserialize)]
+pub struct MenuConfig {
+    pub id: i32,
+    pub title: String,
+    pub url: Option<String>,
+    pub icon: Option<String>,
+    pub is_active: bool,
+    pub items: Option<Vec<MenuConfig>>,
+}
