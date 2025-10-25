@@ -24,7 +24,7 @@
 |------|------|------|----------|
 | GET | `/api/v1/users/me` | 获取当前用户信息 | ok |
 | GET | `/api/v1/notifications` | 获取用户通知列表 | ok |
-| POST | `/api/v1/users/{username}/notifications/{message_id}/status` | 更新通知状态 | |
+| PATCH | `/api/v1/notifications/{message_id}` | 标记信息已读 | ok |
 | PATCH | `/api/v1/users/{username}` | 更新用户 | |
 | PATCH | `/api/v1/users/{username}/password` | 重置用户密码 | |
 
