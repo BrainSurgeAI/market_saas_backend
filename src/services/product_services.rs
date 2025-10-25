@@ -40,7 +40,8 @@ where
     )))
 }
 
-/// 获取一级分类
+/// Get level 1 categories
+/// This is public API, no authentication required
 pub async fn get_level1_categories<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
