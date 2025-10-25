@@ -6,18 +6,18 @@ use tracing::debug;
 
 use crate::common::AppError;
 
-pub mod category_traits;
-pub mod delivery_staff_traits;
-pub mod discount_traits;
-pub mod order_traits;
-pub mod price_traits;
-pub mod product_traits;
-pub mod reconciliation_statement_traits;
-pub mod role_traits;
-pub mod superadmin_traits;
-pub mod system_log_repo;
-pub mod tenants_trait;
-pub mod user_traits;
+pub(crate) mod category_traits;
+pub(crate) mod delivery_staff_traits;
+pub(crate) mod discount_traits;
+pub(crate) mod order_traits;
+pub(crate) mod price_traits;
+pub(crate) mod product_traits;
+pub(crate) mod reconciliation_statement_traits;
+pub(crate) mod role_traits;
+pub(crate) mod superadmin_traits;
+pub(crate) mod system_log_repo;
+pub(crate) mod tenants_trait;
+pub(crate) mod user_traits;
 
 
 #[macro_export]
@@ -31,23 +31,23 @@ macro_rules! map_db_err {
 }
 
 
-pub mod my_sql_repository {
+pub(crate) mod my_sql_repository {
     use sqlx::MySqlPool;
 
     #[derive(Debug, Clone)]
-    pub struct MySqlRepository {
+    pub(crate) struct MySqlRepository {
         pub(crate) pool: MySqlPool,
     }
 
     impl MySqlRepository {
-        pub fn new(pool: MySqlPool) -> Self {
+        pub(crate) fn new(pool: MySqlPool) -> Self {
             Self { pool }
         }
     }
 }
 
 
-pub enum TenantType {
+pub(crate) enum TenantType {
     Customer,
     Provider,
     Market,
@@ -74,7 +74,23 @@ impl From<&str> for TenantType {
     }
 }
 
-pub fn tenant_name_hash(name: &str) -> Result<String, AppError> {
+/// Generate a hash for a given tenant name
+///
+/// This function generates a hash for a given tenant name. 
+/// Because we don't use uuid, the hash is used to identify the tenant uniquely.
+///
+/// # Parameters
+///
+/// * `name`: The name of the tenant.
+///
+/// # Returns
+///
+/// A string representing the generated hash.
+///
+/// # Errors
+///
+/// Returns an `AppError` if the tenant name is empty.
+pub(crate) fn generate_tenant_name_hash(name: &str) -> Result<String, AppError> {
     debug!("Hashing tenant name: {}", name);
 
     if name.trim().is_empty() {
@@ -110,13 +126,23 @@ pub fn tenant_name_hash(name: &str) -> Result<String, AppError> {
     Ok(result)
 }
 
-pub enum CodeType {
+pub(crate) enum CodeType {
     Order,
     ReconciliationStatement,
 }
 
-/// 生成订单编号，格式为 ODR-时间戳-4位随机字母
-pub fn generate_code(code_type: CodeType) -> String {
+/// Generate a order code or reconciliation statement code for a given code type
+///
+/// This function generates a order code or reconciliation statement code for a given code type. 
+///
+/// # Parameters
+///
+/// * `code_type`: The type of code to generate. Can be `Order` or `ReconciliationStatement`.
+///
+/// # Returns
+///
+/// A string representing the generated code. The format is `{code_type}-{timestamp}-{4-letter-random-suffix}`.
+pub(crate) fn generate_code(code_type: CodeType) -> String {
     let timestamp = Utc::now().format("%Y%m%d%H%M%S%3f");
     let random_suffix: String = rand::thread_rng()
         .sample_iter(rand::distributions::Alphanumeric)
