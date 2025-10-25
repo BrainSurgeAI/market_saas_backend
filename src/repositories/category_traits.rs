@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use tracing::error;
 
 #[async_trait]
-pub trait CategoryRepository: Send + Sync {
+pub(crate) trait CategoryRepository: Send + Sync {
 
     /// List categories with subcategories
     ///

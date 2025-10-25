@@ -8,7 +8,7 @@ use crate::{
     utils::validate_json_fmt::Json,
 };
 
-pub async fn get_categories_tree<T>(
+pub(crate) async fn get_categories_tree<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
 ) -> Result<Json<ApiResponse<Vec<CategoryWithSubCategoriesDTO>>>, AppError>
