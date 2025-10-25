@@ -61,30 +61,6 @@ where
     Ok(Json(ApiResponse::new(Some(categories), &context)))
 }
 
-/// 获取产品价格
-pub async fn get_pricer_published_prices<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Query(query): Query<PriceStatusPaginationParams>,
-) -> Result<Json<ApiResponse<Vec<ProductDailyPriceComparisonDTO>>>, AppError>
-where
-    T: ProductRepository + Send + Sync,
-{
-    let mut query_with_defaults = PriceStatusPaginationParams::default();
-    query_with_defaults.merge_from(&query);
-
-    debug!("合并后的查询参数: {:?}", query_with_defaults);
-    let product_prices = repo
-        .user_daily_price_comparison(
-            &claims.username,
-            &claims.roles[0],
-            &query_with_defaults,
-        )
-        .await?;
-    Ok(Json(ApiResponse::new(Some(product_prices), &context)))
-}
-
 /// 批量创建产品价格
 pub async fn batch_create_product_price<T>(
     Extension(repo): Extension<T>,

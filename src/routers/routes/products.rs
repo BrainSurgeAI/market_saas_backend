@@ -1,7 +1,7 @@
 use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::product_services::{
-        batch_create_product_price, get_pricer_published_prices, get_processing_fees,
+        batch_create_product_price, get_processing_fees,
         get_product_detail, get_product_list, get_product_price_status_stats,
         get_products_overview, update_product, update_product_status,
     },
@@ -13,10 +13,6 @@ use axum::{
 
 pub fn products_routes() -> Router {
     Router::new()
-        .route(
-            "/api/v1/product_prices",
-            get(get_pricer_published_prices::<MySqlRepository>),
-        )
         .route(
             "/api/v1/users/{username}/product_prices",
             post(batch_create_product_price::<MySqlRepository>),

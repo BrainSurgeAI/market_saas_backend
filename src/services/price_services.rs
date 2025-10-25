@@ -3,10 +3,12 @@ use tracing::debug;
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams},
+    dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams, PriceStatusPaginationParams},
+    dto::products::ProductDailyPriceComparisonDTO,
     middleware::context::RequestContext,
     repositories::price_traits::PriceRepository,
     utils::validate_json_fmt::Json,
+    models::claims::Claims
 };
 
 /// Get price announcements
@@ -78,4 +80,29 @@ where
     debug!("AproxPrice: {:?}", query);
     repo.aprox_price(&query).await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+
+/// 获取产品价格
+pub async fn get_pricer_published_prices<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Query(query): Query<PriceStatusPaginationParams>,
+) -> Result<Json<ApiResponse<Vec<ProductDailyPriceComparisonDTO>>>, AppError>
+where
+    T: PriceRepository + Send + Sync,
+{
+    let mut query_with_defaults = PriceStatusPaginationParams::default();
+    query_with_defaults.merge_from(&query);
+
+    debug!("合并后的查询参数: {:?}", query_with_defaults);
+    let product_prices = repo
+        .user_daily_price_comparison(
+            &claims.username,
+            &claims.roles[0],
+            &query_with_defaults,
+        )
+        .await?;
+    Ok(Json(ApiResponse::new(Some(product_prices), &context)))
 }
