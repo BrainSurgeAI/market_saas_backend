@@ -115,28 +115,32 @@ mod tests {
     #[derive(Debug, Clone)]
     struct MockCategoryRepository {
         categories: Arc<Vec<CategoryWithSubCategoriesResponseDto>>,
-        should_fail: bool,
+        should_fail_internal: bool,
+        should_fail_database: bool,
     }
 
     impl MockCategoryRepository {
-        // fn new() -> Self {
-        //     Self {
-        //         categories: Arc::new(vec![]),
-        //         should_fail: false,
-        //     }
-        // }
-
         fn with_categories(categories: Vec<CategoryWithSubCategoriesResponseDto>) -> Self {
             Self {
                 categories: Arc::new(categories),
-                should_fail: false,
+                should_fail_internal: false,
+                should_fail_database: false,
             }
         }
 
-        fn with_error() -> Self {
+        fn with_internal_error() -> Self {
             Self {
                 categories: Arc::new(vec![]),
-                should_fail: true,
+                should_fail_internal: true,
+                should_fail_database: false,
+            }
+        }
+
+        fn with_database_error() -> Self {
+            Self {
+                categories: Arc::new(vec![]),
+                should_fail_database: true,
+                should_fail_internal: false,
             }
         }
     }
@@ -144,11 +148,18 @@ mod tests {
     #[async_trait]
     impl CategoryRepository for MockCategoryRepository {
         async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError> {
-            if self.should_fail {
+            if self.should_fail_internal {
                 return Err(AppError::internal(
                     "Database connection failed"
                 ));
             }
+
+            if self.should_fail_database {
+                // Simulate a real database error using map_db_err macro behavior
+                let db_error = sqlx::Error::PoolTimedOut;
+                return Err(AppError::Database(db_error));
+            }
+
             Ok((*self.categories).clone())
         }
     }
@@ -250,8 +261,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_categories_tree_repository_error() {
-        // Arrange
-        let repo = MockCategoryRepository::with_error();
+        // Arrange - Test general repository error (using internal error for backward compatibility)
+        let repo = MockCategoryRepository::with_internal_error();
         let context = create_test_context();
         let repo_extension = Extension(repo);
         let context_extension = Extension(context);
@@ -526,9 +537,9 @@ mod tests {
 
     // Tests for different HTTP status code scenarios
     #[tokio::test]
-    async fn test_get_categories_tree_500_database_error() {
-        // Arrange - Simulate database connection error (HTTP 500)
-        let repo = MockCategoryRepository::with_error();
+    async fn test_get_categories_tree_500_internal_error() {
+        // Arrange - Simulate internal server error (HTTP 500)
+        let repo = MockCategoryRepository::with_internal_error();
         let context = create_test_context();
         let repo_extension = Extension(repo);
         let context_extension = Extension(context);
@@ -545,6 +556,36 @@ mod tests {
                 assert_eq!(AppError::internal("test").error_code(), 500);
             }
             _ => panic!("Expected Internal error with 500 status code"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_categories_tree_500_database_error() {
+        // Arrange - Simulate database error using map_db_err behavior (HTTP 500)
+        let repo = MockCategoryRepository::with_database_error();
+        let context = create_test_context();
+        let repo_extension = Extension(repo);
+        let context_extension = Extension(context);
+
+        // Act
+        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
+            .await;
+
+        // Assert - Should return 500 Internal Server Error via AppError::Database
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::Database(db_error) => {
+                // Verify it's a database error with 500 status code
+                let app_error = AppError::Database(db_error);
+                assert_eq!(app_error.error_code(), 500);
+                assert!(app_error.is_server_error());
+
+                // Verify the error message contains pool timeout information
+                let error_string = app_error.to_string();
+                assert!(error_string.contains("Database error"));
+                assert!(error_string.contains("timed out"));
+            }
+            _ => panic!("Expected Database error (map_db_err scenario) with 500 status code"),
         }
     }
 
