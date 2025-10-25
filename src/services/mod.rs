@@ -2,7 +2,7 @@ pub mod auth_service;
 pub mod category_services;
 pub mod delivery_staff_serivces;
 pub mod discount_services;
-pub mod message_services;
+pub mod message;
 pub mod notification_services;
 pub mod order_services;
 pub mod price_services;
