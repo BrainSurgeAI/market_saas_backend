@@ -2,7 +2,7 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::{
         products::{
-            PriceStatusDTO, ProcessingFeeDTO,
+            PriceStatusResponseDTO, ProcessingFeeDTO,
             ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewResponse,
             PriceCreateDTO, UpdateProductRequestDTO,
         },
@@ -64,7 +64,7 @@ pub async fn get_product_price_status_stats<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>
-) -> Result<Json<ApiResponse<Vec<PriceStatusDTO>>>, AppError>
+) -> Result<Json<ApiResponse<Vec<PriceStatusResponseDTO>>>, AppError>
 where
     T: ProductRepository + Send + Sync,
 {

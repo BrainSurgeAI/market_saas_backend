@@ -199,7 +199,7 @@ pub struct PriceCreateDTO {
 
 // 价格状态统计 DTO
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct PriceStatusDTO {
+pub struct PriceStatusResponseDTO {
     pub category_id: i32,
     pub category_name: String,
     pub total_products: i32,
@@ -906,7 +906,7 @@ mod tests {
 
         #[test]
         fn test_statistics_data() {
-            let dto = PriceStatusDTO {
+            let dto = PriceStatusResponseDTO {
                 category_id: 1,
                 category_name: "水果".to_string(),
                 total_products: 100,
@@ -934,7 +934,7 @@ mod tests {
 
         #[test]
         fn test_zero_statistics() {
-            let dto = PriceStatusDTO {
+            let dto = PriceStatusResponseDTO {
                 category_id: 2,
                 category_name: "空类别".to_string(),
                 total_products: 0,
@@ -1301,7 +1301,7 @@ mod tests {
 
         #[test]
         fn test_price_status_statistics() {
-            let status = PriceStatusDTO {
+            let status = PriceStatusResponseDTO {
                 category_id: 1,
                 category_name: "测试类别".to_string(),
                 total_products: 50,
@@ -1323,7 +1323,7 @@ mod tests {
 
             // Test serialization
             let json = serde_json::to_string(&status).unwrap();
-            let deserialized: PriceStatusDTO = serde_json::from_str(&json).unwrap();
+            let deserialized: PriceStatusResponseDTO = serde_json::from_str(&json).unwrap();
             assert_eq!(status.total_products, deserialized.total_products);
         }
 

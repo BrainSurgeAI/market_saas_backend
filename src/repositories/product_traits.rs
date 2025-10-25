@@ -2,7 +2,7 @@ use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     dto::products::{
-        PriceStatusDTO, ProcessingFeeDTO, ProductDetailDTO, ProductDetailResponse, ProductListDTO,
+        PriceStatusResponseDTO, ProcessingFeeDTO, ProductDetailDTO, ProductDetailResponse, ProductListDTO,
         ProductListQueryParams, ProductOverviewDTO, PriceCreateDTO, UpdateProductRequestDTO,
     },
     map_db_err,
@@ -30,7 +30,7 @@ pub trait ProductRepository: Send + Sync {
         &self,
         username: &str,
         role_name: &str,
-    ) -> Result<Vec<PriceStatusDTO>, AppError>;
+    ) -> Result<Vec<PriceStatusResponseDTO>, AppError>;
 
     async fn get_product_list(
         &self,
@@ -224,7 +224,7 @@ impl ProductRepository for MySqlRepository {
         &self,
         username: &str,
         role_name: &str,
-    ) -> Result<Vec<PriceStatusDTO>, AppError> {
+    ) -> Result<Vec<PriceStatusResponseDTO>, AppError> {
         let sql = r#"
         SELECT
     c.id AS category_id,
@@ -287,7 +287,7 @@ GROUP BY
 ORDER BY 
     c.level, c.name;"#;
 
-        let stats = sqlx::query_as::<_, PriceStatusDTO>(sql)
+        let stats = sqlx::query_as::<_, PriceStatusResponseDTO>(sql)
             .bind(role_name)
             .bind(username)
             .fetch_all(&self.pool)
