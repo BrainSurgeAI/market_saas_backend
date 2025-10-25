@@ -3,7 +3,7 @@ use crate::{
     common::AppError,
     dto::{
         category::CategoryDTO,
-        price::QueryPriceByStatusParams,
+        price::PriceStatusPaginationParams,
         products::{
             PriceStatusDTO, ProcessingFeeDTO, ProductDailyPriceComparisonDTO, ProductDetailDTO,
             ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewDTO,
@@ -33,15 +33,121 @@ pub trait ProductRepository: Send + Sync {
     /// A vector of `CategoryDTO` objects.
     ///
     /// # Error
-    /// 
+    ///
     /// Returns an `AppError` if the database query fails.
     async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError>;
 
-    async fn find_product_daily_price_comparison_by_user(
+    /// Find product daily price comparison by user with role-based filtering.
+    ///
+    /// This function retrieves a comprehensive comparison of product prices for a specific user,
+    /// showing both today's and yesterday's pricing data with role-based access control.
+    /// It handles complex category hierarchies and provides intelligent price source prioritization.
+    ///
+    /// # Parameters
+    ///
+    /// * `username` - The username of the user requesting the price comparison
+    /// * `role_name` - The role name of the user (e.g., "AUDITOR", "PRICER") which determines data access
+    /// * `query` - Query parameters containing optional status filtering for AUDITOR role
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`ProductDailyPriceComparisonDTO`] containing:
+    /// - Product基本信息 (ID, name, unit, assigned category)
+    /// - 昨天价格 (min, avg, max) - 从历史数据获取
+    /// - 今天价格 (min, avg, max) - 根据状态决定显示
+    /// - 价格状态 (PENDING, APPROVED, PUBLISHED, REJECTED)
+    /// - 价格来源 (TODAY, HISTORY)
+    /// - 发布日期
+    ///
+    /// # Role-Based Behavior
+    ///
+    /// **AUDITOR Role:**
+    /// - Can filter by specific status (PENDING, APPROVED, PUBLISHED, REJECTED)
+    /// - Sees all price entries for the current date
+    /// - Used for auditing and price review purposes
+    ///
+    /// **PRICER Role:**
+    /// - Only sees PUBLISHED status prices from history
+    /// - Today's prices default to PENDING status
+    /// - Used for price entry and management
+    ///
+    /// # Price Source Logic
+    ///
+    /// The query implements sophisticated price source prioritization:
+    ///
+    /// 1. **Today's Prices (TODAY source):**
+    ///    - When `price_date = CURRENT_DATE`
+    ///    - Shows all statuses including REJECTED
+    ///    - Displayed as today's min/avg/max prices
+    ///
+    /// 2. **Historical Prices (HISTORY source):**
+    ///    - When `price_date < CURRENT_DATE`
+    ///    - Only PUBLISHED status from recent historical data
+    ///    - Used as fallback when no today's data exists
+    ///    - Displayed as yesterday's min/avg/max prices when today's source is HISTORY
+    ///
+    /// 3. **Yesterday's Prices Calculation:**
+    ///    - If today's source is HISTORY: show today's data as "yesterday's"
+    ///    - If today's source is TODAY: query actual yesterday's PUBLISHED data
+    ///    - Handles the transition from pending to approved to published pricing
+    ///
+    /// # Category Hierarchy Handling
+    ///
+    /// The query supports complex category assignments:
+    ///
+    /// **Level 1 Assignment:**
+    /// - User assigned to Level 1 category sees all Level 2 and Level 3 subcategories
+    /// - Example: User assigned to "熟食卤味" sees all subcategories
+    ///
+    /// **Level 2 Assignment:**
+    /// - User assigned to Level 2 category sees all Level 3 subcategories
+    /// - Example: User assigned to "猪肉卤制品" sees specific product categories
+    ///
+    /// **Level 3 Assignment:**
+    /// - User assigned to Level 3 category sees only products in that category
+    /// - Most granular level of access control
+    ///
+    /// # SQL Query Structure
+    ///
+    /// The complex SQL query consists of:
+    /// - **User & Category Joins:** Links users to their assigned categories
+    /// - **Category Mapping Subquery:** Resolves category hierarchy relationships
+    /// - **Price Logic Subquery:** Implements price source prioritization
+    /// - **Conditional Filtering:** Role-based WHERE clauses
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// // AUDITOR can see specific status
+    /// let query = QueryPriceByStatusParams {
+    ///     status: Some("PENDING".to_string()),
+    /// };
+    /// let prices = repo.find_product_daily_price_comparison_by_user(
+    ///     "auditor_user",
+    ///     "AUDITOR",
+    ///     &query
+    /// ).await?;
+    ///
+    /// // PRICER sees PUBLISHED historical data
+    /// let query = QueryPriceByStatusParams { status: None };
+    /// let prices = repo.find_product_daily_price_comparison_by_user(
+    ///     "pricer_user",
+    ///     "PRICER",
+    ///     &query
+    /// ).await?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an `AppError` if:
+    /// - Database query fails (connection, syntax, etc.)
+    /// - User has no category assignments
+    /// - Invalid role name is provided
+    async fn user_daily_price_comparison(
         &self,
         username: &str,
         role_name: &str,
-        query: &QueryPriceByStatusParams,
+        query: &PriceStatusPaginationParams,
     ) -> Result<Vec<ProductDailyPriceComparisonDTO>, AppError>;
 
     async fn batch_create_product_price(
@@ -185,11 +291,11 @@ impl ProductRepository for MySqlRepository {
         Ok(categories)
     }
 
-    async fn find_product_daily_price_comparison_by_user(
+    async fn user_daily_price_comparison(
         &self,
         username: &str,
         role_name: &str,
-        query: &QueryPriceByStatusParams,
+        query: &PriceStatusPaginationParams,
     ) -> Result<Vec<ProductDailyPriceComparisonDTO>, AppError> {
         let sql = r#"SELECT 
         p.id AS product_id,
@@ -318,7 +424,7 @@ impl ProductRepository for MySqlRepository {
             }
         }
 
-        builder.push(" ORDER BY c.sort_order, c.name, p.name DESC;");
+        builder.push(" ORDER BY c.sort_order, p.id DESC LIMIT ? OFFSET ?;");
 
         let status = if role_name == "PRICER" {
             "PUBLISHED"
@@ -331,6 +437,8 @@ impl ProductRepository for MySqlRepository {
             .bind(role_name)
             .bind(status)
             .bind(username)
+            .bind(query.page_size.unwrap())
+            .bind(query.page.unwrap() - 1)
             .fetch_all(&self.pool)
             .await
             .map_err(map_db_err!("Failed to get product prices"))?;
