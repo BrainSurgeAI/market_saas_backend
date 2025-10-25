@@ -174,7 +174,7 @@ pub struct ProductDetailResponse {
 
 // 批量创建产品价格 DTO
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct ProductPriceCreateDTO {
+pub struct PriceCreateDTO {
     #[serde(rename = "productId")]
     pub product_id: i32,
 
@@ -866,7 +866,7 @@ mod tests {
 
         #[test]
         fn test_field_mapping() {
-            let dto = ProductPriceCreateDTO {
+            let dto = PriceCreateDTO {
                 product_id: 1,
                 min_price: create_decimal("5.00"),
                 min_price_change: create_decimal("0.10"),

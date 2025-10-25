@@ -4,7 +4,7 @@ use crate::{
         products::{
             PriceStatusDTO, ProcessingFeeDTO,
             ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewResponse,
-            ProductPriceCreateDTO, UpdateProductRequestDTO,
+            PriceCreateDTO, UpdateProductRequestDTO,
         },
     },
     middleware::context::RequestContext,
@@ -44,7 +44,7 @@ pub async fn batch_create_product_price<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path(username): Path<String>,
-    Json(product_prices): Json<Vec<ProductPriceCreateDTO>>,
+    Json(product_prices): Json<Vec<PriceCreateDTO>>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: ProductRepository + Send + Sync,

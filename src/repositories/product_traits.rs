@@ -3,7 +3,7 @@ use crate::{
     common::AppError,
     dto::products::{
         PriceStatusDTO, ProcessingFeeDTO, ProductDetailDTO, ProductDetailResponse, ProductListDTO,
-        ProductListQueryParams, ProductOverviewDTO, ProductPriceCreateDTO, UpdateProductRequestDTO,
+        ProductListQueryParams, ProductOverviewDTO, PriceCreateDTO, UpdateProductRequestDTO,
     },
     map_db_err,
 };
@@ -22,7 +22,7 @@ pub trait ProductRepository: Send + Sync {
     async fn batch_create_product_price(
         &self,
         username: &str,
-        product_prices: &[ProductPriceCreateDTO],
+        product_prices: &[PriceCreateDTO],
     ) -> Result<u64, AppError>;
 
     // 获取当日价格状态统计
@@ -154,7 +154,7 @@ impl ProductRepository for MySqlRepository {
     async fn batch_create_product_price(
         &self,
         username: &str,
-        product_prices: &[ProductPriceCreateDTO],
+        product_prices: &[PriceCreateDTO],
     ) -> Result<u64, AppError> {
         let mut tx = self
             .pool
