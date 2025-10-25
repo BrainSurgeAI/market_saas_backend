@@ -8,20 +8,20 @@ use regex::Regex;
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
-pub mod auth;
-pub mod category;
-pub mod delivery_staff;
-pub mod discount;
-pub mod order;
-pub mod price;
-pub mod products;
-pub mod reconciliation_statement;
-pub mod system_log;
-pub mod tenants;
-pub mod users;
+pub(crate) mod auth;
+pub(crate) mod category;
+pub(crate) mod delivery_staff;
+pub(crate) mod discount;
+pub(crate) mod order;
+pub(crate) mod price;
+pub(crate) mod products;
+pub(crate) mod reconciliation_statement;
+pub(crate) mod system_log;
+pub(crate) mod tenants;
+pub(crate) mod users;
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ValidatedJSON<T>(pub T);
+pub(crate) struct ValidatedJSON<T>(pub T);
 
 impl<T, S> FromRequest<S> for ValidatedJSON<T>
 where
@@ -39,10 +39,10 @@ where
 }
 
 lazy_static! {
-    pub static ref PHONE_REGEX: Regex = Regex::new(r"^1[3-9]\d{9}$").unwrap();
+    pub(crate) static ref PHONE_REGEX: Regex = Regex::new(r"^1[3-9]\d{9}$").unwrap();
 }
 
-pub fn validate_phone(phone: &str) -> Result<(), validator::ValidationError> {
+pub(crate) fn validate_phone(phone: &str) -> Result<(), validator::ValidationError> {
     if !PHONE_REGEX.is_match(phone) {
         return Err(validator::ValidationError::new("Invalid phone number"));
     }

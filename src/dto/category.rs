@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{types::Json, FromRow};
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct CategoryDTO {
+pub(crate) struct CategoryDTO {
     pub id: i32,
 
     #[sqlx(rename = "level1_category")]
@@ -10,7 +10,7 @@ pub struct CategoryDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct CategoryWithSubCategoriesDTO {
+pub(crate) struct CategoryWithSubCategoriesDTO {
     #[serde(rename = "id")]
     pub category_id: i32,
 
@@ -22,7 +22,7 @@ pub struct CategoryWithSubCategoriesDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct SubCategoryDTO {
+pub(crate) struct SubCategoryDTO {
     pub id: i32,
 
     pub name: String,
