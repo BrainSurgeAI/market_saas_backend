@@ -119,12 +119,12 @@ mod tests {
     }
 
     impl MockCategoryRepository {
-        fn new() -> Self {
-            Self {
-                categories: Arc::new(vec![]),
-                should_fail: false,
-            }
-        }
+        // fn new() -> Self {
+        //     Self {
+        //         categories: Arc::new(vec![]),
+        //         should_fail: false,
+        //     }
+        // }
 
         fn with_categories(categories: Vec<CategoryWithSubCategoriesResponseDto>) -> Self {
             Self {
