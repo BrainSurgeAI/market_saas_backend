@@ -27,7 +27,7 @@ pub fn user_routes() -> Router {
             patch(update_user::<MySqlRepository>),
         )
         .route(
-            "/api/v1/users/{username}/password",
+            "/api/v1/password/reset",
             patch(reset_password::<MySqlRepository>),
         )
         .route(

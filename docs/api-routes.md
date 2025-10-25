@@ -26,7 +26,7 @@
 | GET | `/api/v1/notifications` | 获取用户通知列表 | ok |
 | PATCH | `/api/v1/notifications/{message_id}` | 标记信息已读 | ok |
 | PATCH | `/api/v1/users/{username}` | 更新用户 | |
-| PATCH | `/api/v1/users/{username}/password` | 重置用户密码 | |
+| PATCH | `/api/v1/password/reset` | 重置用户密码 | ok |
 
 ### 租户管理
 

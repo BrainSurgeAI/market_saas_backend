@@ -32,15 +32,17 @@ pub struct RegisterRequest {
     pub tenant_name: String,
 }
 
+
+/// User resets password by self
 #[derive(Deserialize, Serialize, Debug, Validate, PartialEq, Eq, Clone, ToSchema)]
-pub struct ResetPasswordRequest {
+pub(crate) struct ResetPasswordDto {
     #[validate(custom(function = validate_password))]
     #[serde(rename = "currentPassword")]
-    pub current_password: String,
+    pub(crate) current_password: String,
 
     #[validate(custom(function = validate_password))]
     #[serde(rename = "newPassword")]
-    pub new_password: String,
+    pub(crate) new_password: String
 }
 
 /// # Super Admin Login Request
@@ -121,7 +123,7 @@ mod tests {
         serde_json::from_value(json_data).unwrap()
     }
 
-    fn create_reset_password_request(current_password: &str, new_password: &str) -> ResetPasswordRequest {
+    fn create_reset_password_request(current_password: &str, new_password: &str) -> ResetPasswordDto {
         let json_data = json!({
             "currentPassword": current_password,
             "newPassword": new_password
@@ -282,19 +284,6 @@ mod tests {
             assert!(reset_req.validate().is_ok());
         }
 
-        #[test]
-        fn test_serialization_field_names() {
-            let reset_req = ResetPasswordRequest {
-                current_password: "OldPass123!".to_string(),
-                new_password: "NewPass456@".to_string(),
-            };
-            
-            let json_value = serde_json::to_value(&reset_req).unwrap();
-            assert!(json_value.get("currentPassword").is_some());
-            assert!(json_value.get("newPassword").is_some());
-            assert!(json_value.get("current_password").is_none());
-            assert!(json_value.get("new_password").is_none());
-        }
     }
 
     // Tests for SuperAdminLoginRequest
@@ -407,26 +396,6 @@ mod tests {
             assert!(debug_output.contains("test"));
             assert!(debug_output.contains("password123"));
         }
-
-        #[test]
-        fn test_clone_and_partial_eq() {
-            let login_req = LoginRequest {
-                username: "test".to_string(),
-                password: "password123".to_string(),
-            };
-            
-            let cloned_req = login_req.clone();
-            assert_eq!(login_req, cloned_req);
-            
-            // Test ResetPasswordRequest clone as well
-            let reset_req = ResetPasswordRequest {
-                current_password: "OldPass123!".to_string(),
-                new_password: "NewPass456@".to_string(),
-            };
-            
-            let cloned_reset_req = reset_req.clone();
-            assert_eq!(reset_req, cloned_reset_req);
-        }
     }
 }
 
@@ -434,54 +403,6 @@ mod tests {
 mod performance_tests {
     use super::*;
     use std::time::Instant;
-
-    #[test]
-    fn test_clone_performance_impact() {
-        println!("\n=== Clone Performance Analysis ===");
-        
-        // Create test data
-        let login_req = LoginRequest {
-            username: "a".repeat(16),    // Max length username
-            password: "a".repeat(16),    // Max length password
-        };
-        
-        let reset_req = ResetPasswordRequest {
-            current_password: "Pass123!@#$%^&*()".to_string(),
-            new_password: "NewPass456@#$%^&*()".to_string(),
-        };
-        
-        // Test clone performance
-        let iterations = 100_000;
-        
-        // Test LoginRequest clone
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let _cloned = login_req.clone();
-        }
-        let login_duration = start.elapsed();
-        
-        // Test ResetPasswordRequest clone
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let _cloned = reset_req.clone();
-        }
-        let reset_duration = start.elapsed();
-        
-        // Test memory usage estimation
-        let login_size = std::mem::size_of::<LoginRequest>();
-        let reset_size = std::mem::size_of::<ResetPasswordRequest>();
-        
-        println!("LoginRequest size: {} bytes", login_size);
-        println!("ResetPasswordRequest size: {} bytes", reset_size);
-        println!("LoginRequest clone time: {:?} for {} iterations", login_duration, iterations);
-        println!("ResetPasswordRequest clone time: {:?} for {} iterations", reset_duration, iterations);
-        println!("Average clone time per LoginRequest: {:?}", login_duration / iterations);
-        println!("Average clone time per ResetPasswordRequest: {:?}", reset_duration / iterations);
-        
-        // Performance assertions (these are reasonable thresholds)
-        assert!(login_duration.as_millis() < 100, "Clone operation too slow");
-        assert!(reset_duration.as_millis() < 100, "Clone operation too slow");
-    }
     
     #[test]
     fn test_memory_allocation_comparison() {

@@ -56,7 +56,7 @@ use super::{
         schemas(
             dto::auth::LoginRequest,
             dto::auth::RegisterRequest,
-            dto::auth::ResetPasswordRequest,
+            dto::auth::ResetPasswordDto,
             dto::users::UserCreateDto,
         )
     ),

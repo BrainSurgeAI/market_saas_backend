@@ -1,12 +1,13 @@
 use axum::{Extension, Json};
+use tower_http::classify::ClassifiedResponse;
 use tracing::{error, info, warn};
 
 use crate::common::{ApiResponse, AppError};
-use crate::dto::auth::{ResetPasswordRequest, SuperAdminLoginRequest};
+use crate::dto::auth::{ResetPasswordDto, SuperAdminLoginRequest};
 use crate::dto::ValidatedJSON;
 use crate::middleware::auth::create_jwt;
 use crate::middleware::context::RequestContext;
-use crate::models::claims::Claims;
+use crate::models::claims::{self, Claims};
 use crate::repositories::superadmin_traits::SuperAdminRepository;
 use crate::repositories::user_traits::UserRepository;
 
@@ -79,14 +80,21 @@ where
 pub async fn reset_password<T>(
     Extension(super_admin_repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    ValidatedJSON(payload): ValidatedJSON<ResetPasswordRequest>,
+    Extension(claims): Extension<Claims>,
+    ValidatedJSON(payload): ValidatedJSON<ResetPasswordDto>,
 ) -> Result<Json<ApiResponse<String>>, AppError>
 where
     T: SuperAdminRepository + Send + Sync,
 {
+    if !claims.is_super_admin {
+        warn!("User {} has no permissions to reset Super Admin's password", claims.username);
+        return Err(AppError::Forbidden("No permission".to_string()));
+    }
+
     super_admin_repo
         .reset_password(&payload.current_password, &payload.new_password)
         .await?;
+
     Ok(Json(ApiResponse::new(
         Some("Password reset successfully".to_string()),
         &context,

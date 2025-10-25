@@ -27,9 +27,18 @@ pub trait UserRepository: Send + Sync {
     /// Joins users, roles and permissions tables to get all permissions for the user.
     /// Only returns active users (deleted_at is null).
     /// Groups results by user ID to handle multiple roles/permissions.
-    async fn get_user_permissions(&self,username: &str) -> Result<Option<UserPermission>, AppError>;
+    async fn get_user_permissions(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserPermission>, AppError>;
 
-    async fn create_user(&self, name: &str, username: &str, hashed_password: &str, roles: &str) -> Result<u64, AppError>;
+    async fn create_user(
+        &self,
+        name: &str,
+        username: &str,
+        hashed_password: &str,
+        roles: &str,
+    ) -> Result<u64, AppError>;
 
     async fn is_user_exists(&self, username: &str) -> Result<bool, AppError>;
 
@@ -37,7 +46,10 @@ pub trait UserRepository: Send + Sync {
 
     async fn send_message_to_user(&self, user_id: u64, content: &str) -> Result<(), AppError>;
 
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<UserResponseDto>, AppError>;
+    async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserResponseDto>, AppError>;
 
     async fn update_user(&self, username: &str, profile: &UserUpdateDto) -> Result<(), AppError>;
 
@@ -45,11 +57,23 @@ pub trait UserRepository: Send + Sync {
 
     async fn enable_user(&self, username: &str) -> Result<(), AppError>;
 
-    async fn reset_password(&self, username: &str, current_password: &str, new_password: &str) -> Result<(), AppError>;
+    async fn reset_password(
+        &self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), AppError>;
 
-    async fn create_tenant_with_admin(&self, params: &CreateTenantWithAdminParams) -> Result<u64, AppError>;
+    async fn create_tenant_with_admin(
+        &self,
+        params: &CreateTenantWithAdminParams,
+    ) -> Result<u64, AppError>;
 
-    async fn create_tenant_user(&self, tenant_hash: &str, user: &UserCreateDto) -> Result<u64, AppError>;
+    async fn create_tenant_user(
+        &self,
+        tenant_hash: &str,
+        user: &UserCreateDto,
+    ) -> Result<u64, AppError>;
 }
 
 #[async_trait]
@@ -148,7 +172,10 @@ impl UserRepository for MySqlRepository {
         }
     }
 
-    async fn get_user_permissions(&self, username: &str) -> Result<Option<UserPermission>, AppError> {
+    async fn get_user_permissions(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserPermission>, AppError> {
         sqlx::query_as::<_, UserPermission>(
             "SELECT u.id, u.username, u.password_hash, u.is_super_admin,
             GROUP_CONCAT(DISTINCT r.name) as roles, 
@@ -165,7 +192,13 @@ impl UserRepository for MySqlRepository {
         .map_err(map_db_err!("Error fetching user permissions"))
     }
 
-    async fn create_user(&self, name: &str, username: &str, hashed_password: &str, tenant_type: &str) -> Result<u64, AppError> {
+    async fn create_user(
+        &self,
+        name: &str,
+        username: &str,
+        hashed_password: &str,
+        tenant_type: &str,
+    ) -> Result<u64, AppError> {
         let mut tx = self
             .pool
             .begin()
@@ -246,7 +279,10 @@ impl UserRepository for MySqlRepository {
         Ok(())
     }
 
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<UserResponseDto>, AppError> {
+    async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserResponseDto>, AppError> {
         sqlx::query_as::<_, UserResponseDto>(
             "SELECT u.id, u.name, u.username, u.email, u.phone, u.deleted_at, t.name as tenant_name, u.created_at, u.updated_at, r.name as role
             FROM users u 
@@ -261,7 +297,12 @@ impl UserRepository for MySqlRepository {
         .map_err(map_db_err!("Error fetching user by username"))
     }
 
-    async fn reset_password(&self, username: &str, current_password: &str, new_password: &str) -> Result<(), AppError> {
+    async fn reset_password(
+        &self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), AppError> {
         let password_hash = sqlx::query_scalar!(
             "SELECT password_hash FROM users WHERE username = ?",
             username
@@ -273,7 +314,7 @@ impl UserRepository for MySqlRepository {
         let hashed_password =
             password_hash.ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-        let is_valid = bcrypt::verify(current_password, &hashed_password)
+        let is_valid = bcrypt::verify(&current_password, &hashed_password)
             .map_err(|_| AppError::Internal("Error verifying password".to_string()))?;
 
         if !is_valid {
@@ -293,7 +334,10 @@ impl UserRepository for MySqlRepository {
         Ok(())
     }
 
-    async fn create_tenant_with_admin(&self, params: &CreateTenantWithAdminParams) -> Result<u64, AppError> {
+    async fn create_tenant_with_admin(
+        &self,
+        params: &CreateTenantWithAdminParams,
+    ) -> Result<u64, AppError> {
         // Open a transaction
         let mut tx = self
             .pool

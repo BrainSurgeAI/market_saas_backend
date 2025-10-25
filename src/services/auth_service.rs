@@ -1,17 +1,16 @@
 use crate::common::{ApiResponse, AppError};
-use crate::dto::auth::{LoginRequest, RegisterRequest, ResetPasswordRequest};
+use crate::dto::auth::{LoginRequest, RegisterRequest, ResetPasswordDto};
 use crate::dto::ValidatedJSON;
 use crate::middleware::context::RequestContext;
 use crate::models::claims::Claims;
 use crate::repositories::generate_tenant_name_hash;
 use crate::repositories::tenants_trait::TenantRepository;
 use crate::utils::validate_json_fmt::Json;
-use axum::extract::Path;
+
 use axum::response::IntoResponse;
 use axum::Extension;
 
 use tracing::{debug, error, info, warn};
-
 use validator::Validate;
 
 use crate::middleware::auth::create_jwt;
@@ -173,8 +172,6 @@ where
     let permissions = repo.get_permissions_by_role(&roles).await?;
 
     if let Some(_permissions) = permissions {
-        
-
         let claims = Claims {
             tenant_type: payload.tenant_type.to_uppercase(),
             tenant_name: payload.tenant_name,
@@ -347,7 +344,6 @@ where
         return Err(AppError::Auth("Invalid username or password".to_string()));
     }
 
-
     let tenant = repo
         .find_tenant_by_username(&payload.username)
         .await?
@@ -375,7 +371,7 @@ where
     Ok(Json(ApiResponse::new(Some(token), &context)))
 }
 
-/// Reset a user's password.
+/// Reset a user's password by self.
 ///
 /// Allows a user to reset their password by providing their current password and a new password.
 /// The new password must meet the password requirements.
@@ -447,7 +443,7 @@ where
 #[utoipa::path(
     post,
     path = "/api/v1/users/{username}/reset-password",
-    request_body = ResetPasswordRequest,
+    request_body = ResetPasswordDto,
     responses(
         (status = 200, description = "Password reset successful", body = ApiResponse<String>),
         (status = 400, description = "Invalid payload", body = ApiResponse<String>),
@@ -460,14 +456,19 @@ where
 pub async fn reset_password<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(username): Path<String>,
-    ValidatedJSON(payload): ValidatedJSON<ResetPasswordRequest>,
+    Extension(claims): Extension<Claims>,
+    ValidatedJSON(payload): ValidatedJSON<ResetPasswordDto>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: UserRepository + Send + Sync,
 {
-    repo.reset_password(&username, &payload.current_password, &payload.new_password)
-        .await?;
+    repo.reset_password(
+        &claims.username,
+        &payload.current_password,
+        &payload.new_password,
+    )
+    .await?;
+
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
