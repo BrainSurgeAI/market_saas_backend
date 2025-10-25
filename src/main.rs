@@ -29,7 +29,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use tracing::info;
+use tracing::{info, debug};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -62,7 +62,7 @@ async fn main() {
         .expect("Failed to initialize ACL snapshot");
 
     let snapshot = ACL_SNAPSHOT.load();
-    info!(
+    debug!(
         "ACL Snapshot initialized {:?}",
         snapshot
     );
