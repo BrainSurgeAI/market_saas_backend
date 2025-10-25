@@ -1,4 +1,4 @@
-use crate::models::financial::Financial;
+use crate::dto::financial::FinancialResponseDto;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -159,7 +159,7 @@ pub struct TenantDetailDTO {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(rename = "financial")]
-    pub financial: Option<Financial>,
+    pub financial: Option<FinancialResponseDto>,
 }
 
 #[cfg(test)]

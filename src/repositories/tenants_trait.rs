@@ -5,10 +5,10 @@ use crate::{
             BaseTenantDTO, Provider, QueryTenantByType, TenantAddressUpdate, TenantCreateDTO,
             TenantDetailDTO,
         },
+        financial::FinancialResponseDto,
         users::UserResponseDto,
     },
     map_db_err,
-    models::financial::Financial,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -35,7 +35,7 @@ pub trait TenantRepository: Send + Sync {
 
     // get the financials of a tenant
     async fn get_tenant_financials(&self, hashed_name: &str)
-        -> Result<Option<Financial>, AppError>;
+        -> Result<Option<FinancialResponseDto>, AppError>;
 
     // check if a tenant name hash exists
     async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError>;
@@ -201,8 +201,8 @@ impl TenantRepository for MySqlRepository {
     async fn get_tenant_financials(
         &self,
         hashed_name: &str,
-    ) -> Result<Option<Financial>, AppError> {
-        sqlx::query_as::<_, Financial>(
+    ) -> Result<Option<FinancialResponseDto>, AppError> {
+        sqlx::query_as::<_, FinancialResponseDto>(
             r#"
            SELECT pf.* FROM tenants t 
            INNER JOIN provider_financial_profiles pf ON t.id = pf.tenant_id 
@@ -491,7 +491,7 @@ impl TenantRepository for MySqlRepository {
                 query_builder.push(" AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1");
 
                 let financial = query_builder
-                    .build_query_as::<Financial>()
+                    .build_query_as::<FinancialResponseDto>()
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(map_db_err!("Failed to find financial info for tenant"))?;

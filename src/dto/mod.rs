@@ -19,6 +19,7 @@ pub(crate) mod reconciliation_statement;
 pub(crate) mod system_log;
 pub(crate) mod tenants;
 pub(crate) mod users;
+pub(crate) mod financial;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ValidatedJSON<T>(pub T);
