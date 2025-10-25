@@ -11,7 +11,59 @@ use tracing::{debug, error};
 
 #[async_trait]
 pub trait PriceRepository: Send + Sync {
-    async fn find_by_category_product_name_and_date(
+
+    /// Fetches published price announcements with optional filtering by category, product name, and date.
+    ///
+    /// This function dynamically builds and executes a SQL query to retrieve the latest published prices 
+    /// for products, including their price changes (min, avg, max) compared to the previous record.
+    ///
+    /// ### Date logic
+    /// - If `params.date` is **provided**, fetch price announcements for that date.
+    /// - If `params.date` is **not provided**:
+    ///   - Before **12:00 PM**, the query fetches announcements for **the previous day**.
+    ///   - After **12:00 PM**, the query fetches announcements for **the current day**.
+    ///
+    /// ### Category and product filtering
+    /// - If `params.category_l1` (Level 1) is **provided**, the query filters by that category.
+    ///   - Otherwise, defaults to category with ID `759`.
+    /// - If `params.category_l3` (Level 3) is **provided**, it filters by that subcategory.
+    /// - If `params.name` is **provided**, it performs a fuzzy search on the product name.
+    /// - If none of the above filters are provided, all active (non-disabled) products under category `759` are returned.
+    ///
+    /// ### Returned columns
+    /// Each [`PriceAnnouncement`] record includes:
+    /// - `level1_category`: Name of the level 1 category  
+    /// - `level3_category`: Name of the level 3 category  
+    /// - `product_name`, `product_code`, `unit`
+    /// - `min_price`, `avg_price`, `max_price`
+    /// - `min_price_change`, `avg_price_change`, `max_price_change`
+    /// - `price_status`: Either `"PUBLISHED"` or `"NOT_PUBLISHED"`
+    /// - `price_date`: The date associated with the published price
+    ///
+    /// ### Implementation details
+    /// - Uses [`sqlx::QueryBuilder`] to dynamically assemble a complex SQL query.  
+    /// - Joins category hierarchy (`level1 → level2 → level3`) and product tables.  
+    /// - Uses a subquery to identify the latest published price date per product, 
+    ///   handling cases where the current date has no published record.
+    /// - Computes price changes based on whether the current time is before or after noon.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` — [`PriceQueryParams`], which may include:
+    ///   - `date`: Specific date to query
+    ///   - `category_l1`: Level 1 category ID
+    ///   - `category_l3`: Level 3 category ID
+    ///   - `name`: Product name (supports partial match)
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`PriceAnnouncement`] objects representing published product prices and their variations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError`] if the database query or data mapping fails.
+
+    async fn find_price_announcements_by_category_product_name_and_date(
         &self,
         query: &PriceQueryParams,
     ) -> Result<Vec<PriceAnnouncement>, AppError>;
@@ -20,7 +72,7 @@ pub trait PriceRepository: Send + Sync {
 
 #[async_trait]
 impl PriceRepository for MySqlRepository {
-    async fn find_by_category_product_name_and_date(
+    async fn find_price_announcements_by_category_product_name_and_date(
         &self,
         params: &PriceQueryParams,
     ) -> Result<Vec<PriceAnnouncement>, AppError> {
