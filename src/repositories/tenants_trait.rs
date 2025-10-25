@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
 
-use super::{my_sql_repository::MySqlRepository, tenant_name_hash};
+use super::{my_sql_repository::MySqlRepository, generate_tenant_name_hash};
 
 #[async_trait]
 pub trait TenantRepository: Send + Sync {
@@ -128,7 +128,7 @@ impl TenantRepository for MySqlRepository {
         market_hash: &str,
         tenant: &TenantCreateDTO,
     ) -> Result<(), AppError> {
-        let name_hash = tenant_name_hash(&tenant.name).map_err(|e| {
+        let name_hash = generate_tenant_name_hash(&tenant.name).map_err(|e| {
             error!("Error hashing tenant name: {:?}", e);
             AppError::Internal("Error hashing tenant name".to_string())
         })?;

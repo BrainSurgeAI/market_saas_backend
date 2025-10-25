@@ -3,7 +3,7 @@ use crate::dto::auth::{LoginRequest, RegisterRequest, ResetPasswordRequest};
 use crate::dto::ValidatedJSON;
 use crate::middleware::context::RequestContext;
 use crate::models::claims::Claims;
-use crate::repositories::tenant_name_hash;
+use crate::repositories::generate_tenant_name_hash;
 use crate::repositories::tenants_trait::TenantRepository;
 use crate::utils::validate_json_fmt::Json;
 use axum::extract::Path;
@@ -156,7 +156,7 @@ where
         AppError::Internal("Error hashing password".to_string())
     })?;
 
-    let tenant_hash_name = tenant_name_hash(&payload.tenant_name).unwrap();
+    let tenant_hash_name = generate_tenant_name_hash(&payload.tenant_name).unwrap();
     let tenant_admin_params = CreateTenantWithAdminParams::builder()
         .tenant_type(payload.tenant_type.to_uppercase())
         .tenant_name(&payload.tenant_name)

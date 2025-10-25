@@ -24,7 +24,18 @@ pub trait ProductRepository: Send + Sync {
         query: &ProductListQueryParams,
     ) -> Result<(Vec<ProductOverviewDTO>, i32), AppError>;
 
-    async fn get_level1_categories(&self) -> Result<Vec<CategoryDTO>, AppError>;
+    /// List level one categories
+    ///
+    /// This function fetches all level one categories from the database.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `CategoryDTO` objects.
+    ///
+    /// # Error
+    /// 
+    /// Returns an `AppError` if the database query fails.
+    async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError>;
 
     async fn find_product_daily_price_comparison_by_user(
         &self,
@@ -165,7 +176,7 @@ impl ProductRepository for MySqlRepository {
         Ok((products, total_count))
     }
 
-    async fn get_level1_categories(&self) -> Result<Vec<CategoryDTO>, AppError> {
+    async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError> {
         let sql = "SELECT id, name as level1_category FROM categories WHERE level = 1 ORDER BY sort_order DESC";
         let categories = sqlx::query_as::<_, CategoryDTO>(sql)
             .fetch_all(&self.pool)

@@ -6,7 +6,8 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-
+use hyper::{header, Method};
+use tower_http::cors::CorsLayer;
 use sqlx::MySqlPool;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
@@ -26,8 +27,8 @@ use crate::{
     },
     services::{
         auth_service::{login, register},
-        price_services::fetch_price_announcements,
-        product_services::get_level1_categories,
+        price_services::get_price_announcements,
+        product_services::get_level_one_categories,
         superadmin_services::super_admin_login,
         system_log_service::SystemLogService,
     },
@@ -72,6 +73,21 @@ use super::{
 )]
 pub struct ApiDoc;
 
+fn configure_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(header::HeaderValue::from_static("*"))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::HEAD,
+            Method::PATCH,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+}
+
 fn configure_routes(pool: &MySqlPool) -> Router {
     let api_doc = ApiDoc::openapi();
 
@@ -84,11 +100,11 @@ fn configure_routes(pool: &MySqlPool) -> Router {
         )
         .route(
             "/api/v1/categories",
-            get(get_level1_categories::<MySqlRepository>),
+            get(get_level_one_categories::<MySqlRepository>),
         )
         .route(
             "/api/v1/price_announcements",
-            get(fetch_price_announcements::<MySqlRepository>),
+            get(get_price_announcements::<MySqlRepository>),
         )
         .route(
             "/api/v1/openapi.json",
@@ -123,12 +139,10 @@ fn configure_routes(pool: &MySqlPool) -> Router {
         .layer(axum::middleware::from_fn_with_state(shared_state.clone(), auth_middleware));
 
         public_routes.with_state(shared_state).merge(protected_routes)
-    // 合并路由，并设置全局中间件，注意顺序
-   // public_routes.merge(protected_routes)
 }
 
-pub fn create_router(pool: &MySqlPool) -> Router {
-    let cors = crate::config::cors::configure_cors();
+pub(crate) fn create_router(pool: &MySqlPool) -> Router {
+    let cors = configure_cors();
     let routes = configure_routes(pool);
     
     let my_sql_repository = MySqlRepository::new(pool.clone());
