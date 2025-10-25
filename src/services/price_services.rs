@@ -9,25 +9,27 @@ use crate::{
     utils::validate_json_fmt::Json,
 };
 
-/// # 每日价格公示数据接口
+/// Get price announcements
 ///
-/// 此接口提供市场每日价格公示数据，支持按类别和产品名称筛选。
+/// This function fetches all price announcements from the database.
+/// This is public API, no authentication required
+/// # Parameters
 ///
-/// ## 请求路径
-/// `GET /api/v1/fetch_price_announcements`
+/// * `query`: The query parameters for the price announcements.
+/// PriceQueryParams includes:
+/// - `date`: The date of the price announcements.
+/// - `category_l1`: The level one category ID.
+/// - `category_l3`: The level three category ID.
+/// - `name`: The name of the product.
 ///
-/// ## 查询参数
-/// - `category_l1`: 可选，一级类别ID
-/// - `category_l3`: 可选，三级类别ID
-/// - `name`: 可选，产品名称（模糊匹配）
-/// - `date`: 可选，价格日期，默认为当天
+/// # Returns
 ///
-/// ## 返回数据
-/// 返回符合条件的产品价格列表，包含类别、产品名称、价格区间等信息
+/// A vector of `PriceAnnouncement` objects.
 ///
-/// ## 权限要求 无
-
-pub async fn fetch_price_announcements<T>(
+/// # Error
+///
+/// Returns an `AppError` if the database query fails.
+pub(crate) async fn get_price_announcements<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Query(query): Query<PriceQueryParams>,
@@ -39,7 +41,9 @@ where
         return Err(AppError::Validation(validation_errors.to_string()));
     }
 
-    let product_prices = repo.find_by_category_product_name_and_date(&query).await?;
+    let product_prices = repo
+        .find_price_announcements_by_category_product_name_and_date(&query)
+        .await?;
     Ok(Json(ApiResponse::new(Some(product_prices), &context)))
 }
 
@@ -63,7 +67,7 @@ where
 /// ## 权限要求
 /// 需要 `price:update` 权限
 
-pub async fn aprox_price<T>(
+pub(crate) async fn aprox_price<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Json(query): Json<AproxPriceParam>,
