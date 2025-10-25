@@ -1,4 +1,4 @@
-use crate::{common::AppError, dto::category::CategoryWithSubCategoriesDTO, map_db_err};
+use crate::{common::AppError, dto::category::CategoryWithSubCategoriesResponseDto, map_db_err};
 
 use super::my_sql_repository::MySqlRepository;
 use async_trait::async_trait;
@@ -19,12 +19,12 @@ pub(crate) trait CategoryRepository: Send + Sync {
     /// # Errors
     ///
     /// Returns an `AppError` if the database query fails.
-    async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesDTO>, AppError>;
+    async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError>;
 }
 
 #[async_trait]
 impl CategoryRepository for MySqlRepository {
-    async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesDTO>, AppError> {
+    async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError> {
         let sql = r#"
         SELECT c1.id as category_id, c1.name as category_name,
         JSON_ARRAYAGG(
@@ -43,7 +43,7 @@ impl CategoryRepository for MySqlRepository {
             c1.id, c1.name
         ORDER BY c1.sort_order DESC;"#;
 
-        let categories = sqlx::query_as::<_, CategoryWithSubCategoriesDTO>(sql)
+        let categories = sqlx::query_as::<_, CategoryWithSubCategoriesResponseDto>(sql)
             .fetch_all(&self.pool)
             .await
             .map_err(map_db_err!("Failed to fetch categories with sub categories"))?;

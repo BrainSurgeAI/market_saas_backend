@@ -33,8 +33,8 @@ pub(crate) struct CategoryDTO {
 ///   ]
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, FromRow)]
-pub(crate) struct CategoryWithSubCategoriesDTO {
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub(crate) struct CategoryWithSubCategoriesResponseDto {
     #[serde(rename = "id")]
     pub(crate) category_id: i32,
 
@@ -42,11 +42,11 @@ pub(crate) struct CategoryWithSubCategoriesDTO {
     pub(crate) category_name: String,
 
     #[serde(rename = "subCategories")]
-    pub(crate) subcategories: Json<Vec<SubCategoryDTO>>,
+    pub(crate) subcategories: Json<Vec<SubCategoryResponseDto>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow)]
-pub(crate) struct SubCategoryDTO {
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub(crate) struct SubCategoryResponseDto {
     pub(crate) id: i32,
 
     pub(crate) name: String,
