@@ -18,8 +18,7 @@ pub struct CategoryWithSubCategoriesDTO {
     pub category_name: String,
 
     #[serde(rename = "subCategories")]
-    #[sqlx(rename = "sub_categories")]
-    pub sub_categories: Json<Vec<SubCategoryDTO>>,
+    pub subcategories: Json<Vec<SubCategoryDTO>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
