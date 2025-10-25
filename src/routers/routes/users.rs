@@ -2,7 +2,7 @@ use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::{
         auth_service::reset_password,
-        notification_services::{list_notifications, update_notification_status},
+        notification_services::{list_notifications, read_notification},
         user_services::{create_tenant_user, delete_user, enable_user, get_user, update_user},
     },
 };
@@ -15,11 +15,11 @@ pub fn user_routes() -> Router {
     Router::new()
         .route(
             "/api/v1/notifications",
-            get(list_notifications),
+            get(list_notifications)
         )
         .route(
-            "/api/v1/users/{username}/notifications/{message_id}/status",
-            patch(update_notification_status),
+            "/api/v1/notifications/{message_id}",
+            patch(read_notification)
         )
         .route("/api/v1/users/me", get(get_user::<MySqlRepository>))
         .route(
