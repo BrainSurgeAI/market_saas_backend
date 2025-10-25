@@ -2,7 +2,7 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::{
         category::CategoryDTO,
-        price::QueryPriceByStatusParams,
+        price::PriceStatusPaginationParams,
         products::{
             PriceStatusDTO, ProcessingFeeDTO, ProductDailyPriceComparisonDTO,
             ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewResponse,
@@ -66,28 +66,17 @@ pub async fn get_pricer_published_prices<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Query(query): Query<QueryPriceByStatusParams>,
+    Query(query): Query<PriceStatusPaginationParams>,
 ) -> Result<Json<ApiResponse<Vec<ProductDailyPriceComparisonDTO>>>, AppError>
 where
     T: ProductRepository + Send + Sync,
 {
-    let mut query_with_defaults = QueryPriceByStatusParams::default();
-
-    if query.status.is_some() {
-        query_with_defaults.status = query.status;
-    }
-
-    if query.page.is_some() {
-        query_with_defaults.page = query.page;
-    }
-
-    if query.page_size.is_some() {
-        query_with_defaults.page_size = query.page_size;
-    }
+    let mut query_with_defaults = PriceStatusPaginationParams::default();
+    query_with_defaults.merge_from(&query);
 
     debug!("合并后的查询参数: {:?}", query_with_defaults);
     let product_prices = repo
-        .find_product_daily_price_comparison_by_user(
+        .user_daily_price_comparison(
             &claims.username,
             &claims.roles[0],
             &query_with_defaults,
