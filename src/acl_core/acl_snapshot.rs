@@ -12,21 +12,21 @@ use std::sync::LazyLock;
 use tracing::{error, debug};
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
-pub struct AclSnapshot {
+pub(crate) struct AclSnapshot {
     #[serde(
         serialize_with = "serialize_method_map",
         deserialize_with = "deserialize_method_map"
     )]
-    pub tries: HashMap<Method, PermissionTrie>,
-    pub role_perms: HashMap<String, HashSet<String>>,
-    pub version: u64,
+    pub(crate) tries: HashMap<Method, PermissionTrie>,
+    pub(crate) role_perms: HashMap<String, HashSet<String>>,
+    pub(crate) version: u64,
     //pub(crate) system_code: String,
     #[serde(skip)]
-    pub role_cache: Arc<DashMap<Vec<String>, HashSet<String>>>,
+    pub(crate) role_cache: Arc<DashMap<Vec<String>, HashSet<String>>>,
 }
 
 /// 全局 ACL 快照（读侧无锁，写侧原子替换）
-pub static ACL_SNAPSHOT: LazyLock<ArcSwap<AclSnapshot>> =
+pub(crate) static ACL_SNAPSHOT: LazyLock<ArcSwap<AclSnapshot>> =
     LazyLock::new(|| ArcSwap::from_pointee(AclSnapshot::default()));
 
 impl AclSnapshot {
@@ -37,7 +37,7 @@ impl AclSnapshot {
     /// * `claim` - The user's claim containing roles and other info
     /// # Returns
     /// * `Result<(), StatusCode>` - Ok if access is granted, Err with appropriate StatusCode if denied
-    pub async fn verify_access(
+    pub(crate) async fn verify_access(
         &self,
         method: &Method,
         path: &str,
@@ -63,6 +63,8 @@ impl AclSnapshot {
 
         if rule.self_only {
             debug!("Route {} is self-only, verifying username", path);
+
+            // If username in the url, e.g /users/{username}
             if let Some(username) = params.get("username") {
                 debug!("Extracted username parameter: {}", username);
                 if username != &claim.username {
@@ -77,13 +79,15 @@ impl AclSnapshot {
         }
 
         debug!("params: {:?}", params);
-        if let Some(tenant_name) = params.get("id") {
-            debug!("Extracted hashed_name parameter: {}", tenant_name);
+
+        // If the url contains tenant hashed name, e.g /tenants/{hashed_name}
+        if let Some(hashed_name) = params.get("hashed_name") {
+            debug!("Extracted hashed_name parameter: {}", hashed_name);
             debug!("Route {} is tenant-specific, verifying hashed_name", path);
-            if tenant_name != &claim.tenant_hash {
+            if hashed_name != &claim.tenant_hash {
                 error!(
                     "Tenant-only route {} accessed by tenant {} (expected: {})",
-                    path, claim.tenant_hash, tenant_name
+                    path, claim.tenant_hash, hashed_name
                 );
                 return Err(StatusCode::FORBIDDEN);
             }
