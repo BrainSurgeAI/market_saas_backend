@@ -57,25 +57,25 @@ pub struct AproxPriceParam {
 
 /// 价格查询参数 DTO
 #[derive(Debug, Deserialize, Serialize, Default)]
-pub struct PriceQueryParams {
+pub(crate) struct PriceQueryParams {
     /// 价格日期：YYYY-MM-DD，不传默认今天
-    pub date: Option<String>,
+    pub(crate) date: Option<String>,
 
     /// 一级分类ID
     #[serde(rename = "category1")]
-    pub category_l1: Option<i32>,
+    pub(crate) category_l1: Option<i32>,
 
     /// 三级分类ID
     #[serde(rename = "category3")]
-    pub category_l3: Option<i32>,
+    pub(crate) category_l3: Option<i32>,
 
     /// 产品名称（模糊查询）
-    pub name: Option<String>,
+    pub(crate) name: Option<String>,
 }
 
 impl PriceQueryParams {
     /// 验证查询参数
-    pub fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         // 如果提供了日期，验证日期格式
         if let Some(date_str) = &self.date {
             if NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_err() {
@@ -110,16 +110,35 @@ impl PriceQueryParams {
     }
 }
 
-/// 根据状态查询价格公示参数
+/// Pagination parameters for querying prices by status.
+///
+/// This struct is used in API requests to filter and paginate price data based on status.
+/// It supports optional fields with sensible defaults for common use cases, such as fetching
+/// pending prices on the first page with a standard page size.
+///
+/// # Fields
+///
+/// * `status` - Optional price status filter (e.g., "PENDING", "APPROVED"). Defaults to "PENDING".
+/// * `page` - Optional page number for pagination. Starts from 1. Defaults to 1.
+/// * `page_size` - Optional number of items per page. Defaults to 10.
+///
+/// # Example
+///
+/// ```http
+/// GET /api/v1/product_prices?status=PUBLISHED&page=2&pageSize=20
+/// ```
+///
+/// This query fetches published product prices on page 2 with 20 items per page.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct QueryPriceByStatusParams {
-    pub status: Option<String>,
-    pub page: Option<i32>,
+pub(crate) struct PriceStatusPaginationParams {
+    pub(crate) status: Option<String>,
+    pub(crate) page: Option<i32>,
+
     #[serde(rename = "pageSize")]
-    pub page_size: Option<i32>,
+    pub(crate) page_size: Option<i32>,
 }
 
-impl Default for QueryPriceByStatusParams {
+impl Default for PriceStatusPaginationParams {
     fn default() -> Self {
         Self {
             status: Some("PENDING".to_string()),
@@ -129,7 +148,20 @@ impl Default for QueryPriceByStatusParams {
     }
 }
 
-// TODO: 给QueryPriceByStatusParams加上数据验证
+impl PriceStatusPaginationParams {
+    pub(crate) fn merge_from(&mut self, other: &Self) {
+        if other.status.is_some() {
+            self.status = other.status.clone();
+        }
+        if other.page.is_some() {
+            self.page = other.page;
+        }
+        if other.page_size.is_some() {
+            self.page_size = other.page_size;
+        }
+    }
+}
+
 
 // 为了方便测试，实现一个简单的构建器
 #[cfg(test)]
@@ -175,9 +207,9 @@ impl PriceQueryParamsBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use rust_decimal::Decimal;
     use chrono::NaiveDate;
+    use rust_decimal::Decimal;
+    use serde_json::json;
 
     // Test constants for better maintainability
     const VALID_DATE: &str = "2024-03-20";
@@ -186,7 +218,8 @@ mod tests {
     const INVALID_CATEGORY_ID: i32 = -1;
     const VALID_PRODUCT_NAME: &str = "大白菜";
     const EMPTY_PRODUCT_NAME: &str = "";
-    const LONG_PRODUCT_NAME: &str = "这是一个非常非常长的产品名称用来测试长度限制验证功能是否正常工作超过五十个字符";
+    const LONG_PRODUCT_NAME: &str =
+        "这是一个非常非常长的产品名称用来测试长度限制验证功能是否正常工作超过五十个字符";
 
     // Helper functions to create test data
     fn create_decimal(value: &str) -> Decimal {
@@ -279,7 +312,10 @@ mod tests {
             assert_eq!(announcement.level_three_category, "热带水果");
             assert_eq!(announcement.product_name, "苹果");
             assert_eq!(announcement.price_status, "PENDING");
-            assert_eq!(announcement.price_date, Some(NaiveDate::from_ymd_opt(2024, 3, 21).unwrap()));
+            assert_eq!(
+                announcement.price_date,
+                Some(NaiveDate::from_ymd_opt(2024, 3, 21).unwrap())
+            );
         }
 
         #[test]
@@ -419,9 +455,7 @@ mod tests {
 
         #[test]
         fn test_only_date_param() {
-            let params = PriceQueryParams::builder()
-                .date(VALID_DATE)
-                .build();
+            let params = PriceQueryParams::builder().date(VALID_DATE).build();
             assert!(params.validate().is_ok());
         }
 
@@ -436,16 +470,14 @@ mod tests {
 
         #[test]
         fn test_only_name_param() {
-            let params = PriceQueryParams::builder()
-                .name(VALID_PRODUCT_NAME)
-                .build();
+            let params = PriceQueryParams::builder().name(VALID_PRODUCT_NAME).build();
             assert!(params.validate().is_ok());
         }
 
         #[test]
         fn test_invalid_date_format() {
             let invalid_dates = vec![
-                INVALID_DATE_FORMAT,  // slash format
+                INVALID_DATE_FORMAT, // slash format
                 "20240320",          // no separators
                 "2024/03/20",        // wrong separators
                 "March 20, 2024",    // text format
@@ -456,11 +488,12 @@ mod tests {
             ];
 
             for invalid_date in invalid_dates {
-                let params = PriceQueryParams::builder()
-                    .date(invalid_date)
-                    .build();
-                assert!(params.validate().is_err(), 
-                    "Date '{}' should be invalid", invalid_date);
+                let params = PriceQueryParams::builder().date(invalid_date).build();
+                assert!(
+                    params.validate().is_err(),
+                    "Date '{}' should be invalid",
+                    invalid_date
+                );
             }
         }
 
@@ -470,18 +503,20 @@ mod tests {
 
             for invalid_id in invalid_ids {
                 // Test category1
-                let params = PriceQueryParams::builder()
-                    .category1(invalid_id)
-                    .build();
-                assert!(params.validate().is_err(), 
-                    "Category1 ID {} should be invalid", invalid_id);
+                let params = PriceQueryParams::builder().category1(invalid_id).build();
+                assert!(
+                    params.validate().is_err(),
+                    "Category1 ID {} should be invalid",
+                    invalid_id
+                );
 
                 // Test category3
-                let params = PriceQueryParams::builder()
-                    .category3(invalid_id)
-                    .build();
-                assert!(params.validate().is_err(), 
-                    "Category3 ID {} should be invalid", invalid_id);
+                let params = PriceQueryParams::builder().category3(invalid_id).build();
+                assert!(
+                    params.validate().is_err(),
+                    "Category3 ID {} should be invalid",
+                    invalid_id
+                );
             }
         }
 
@@ -494,52 +529,43 @@ mod tests {
                     .category1(valid_id)
                     .category3(valid_id)
                     .build();
-                assert!(params.validate().is_ok(), 
-                    "Category ID {} should be valid", valid_id);
+                assert!(
+                    params.validate().is_ok(),
+                    "Category ID {} should be valid",
+                    valid_id
+                );
             }
         }
 
         #[test]
         fn test_invalid_product_names() {
             // Test empty string
-            let params = PriceQueryParams::builder()
-                .name(EMPTY_PRODUCT_NAME)
-                .build();
+            let params = PriceQueryParams::builder().name(EMPTY_PRODUCT_NAME).build();
             assert!(params.validate().is_err());
 
             // Test whitespace only
-            let params = PriceQueryParams::builder()
-                .name("   ")
-                .build();
+            let params = PriceQueryParams::builder().name("   ").build();
             assert!(params.validate().is_err());
 
             // Test too long name
-            let params = PriceQueryParams::builder()
-                .name(LONG_PRODUCT_NAME)
-                .build();
+            let params = PriceQueryParams::builder().name(LONG_PRODUCT_NAME).build();
             assert!(params.validate().is_err());
         }
 
         #[test]
         fn test_valid_product_name_boundary_values() {
             // Test minimum length (1 character)
-            let params = PriceQueryParams::builder()
-                .name("a")
-                .build();
+            let params = PriceQueryParams::builder().name("a").build();
             assert!(params.validate().is_ok());
 
             // Test maximum length (50 characters)
             let max_length_name = "a".repeat(50);
-            let params = PriceQueryParams::builder()
-                .name(&max_length_name)
-                .build();
+            let params = PriceQueryParams::builder().name(&max_length_name).build();
             assert!(params.validate().is_ok());
 
             // Test with Chinese characters
             let chinese_name = "大白菜小白菜";
-            let params = PriceQueryParams::builder()
-                .name(chinese_name)
-                .build();
+            let params = PriceQueryParams::builder().name(chinese_name).build();
             assert!(params.validate().is_ok());
         }
 
@@ -567,16 +593,12 @@ mod tests {
             assert!(error.contains("Category3 ID must be positive"));
 
             // Test empty name error
-            let params = PriceQueryParams::builder()
-                .name(EMPTY_PRODUCT_NAME)
-                .build();
+            let params = PriceQueryParams::builder().name(EMPTY_PRODUCT_NAME).build();
             let error = params.validate().unwrap_err();
             assert!(error.contains("Product name cannot be empty"));
 
             // Test long name error
-            let params = PriceQueryParams::builder()
-                .name(LONG_PRODUCT_NAME)
-                .build();
+            let params = PriceQueryParams::builder().name(LONG_PRODUCT_NAME).build();
             let error = params.validate().unwrap_err();
             assert!(error.contains("Product name too long"));
         }
@@ -603,7 +625,7 @@ mod tests {
 
         #[test]
         fn test_default_values() {
-            let params = QueryPriceByStatusParams::default();
+            let params = PriceStatusPaginationParams::default();
             assert_eq!(params.status, Some("PENDING".to_string()));
             assert_eq!(params.page, Some(1));
             assert_eq!(params.page_size, Some(10));
@@ -611,7 +633,7 @@ mod tests {
 
         #[test]
         fn test_serialization_field_mapping() {
-            let params = QueryPriceByStatusParams {
+            let params = PriceStatusPaginationParams {
                 status: Some("APPROVED".to_string()),
                 page: Some(2),
                 page_size: Some(20),
@@ -634,7 +656,7 @@ mod tests {
                 "pageSize": 50
             });
 
-            let params: QueryPriceByStatusParams = serde_json::from_value(json_data).unwrap();
+            let params: PriceStatusPaginationParams = serde_json::from_value(json_data).unwrap();
             assert_eq!(params.status, Some("PUBLISHED".to_string()));
             assert_eq!(params.page, Some(3));
             assert_eq!(params.page_size, Some(50));
@@ -643,7 +665,7 @@ mod tests {
         #[test]
         fn test_optional_fields() {
             let json_data = json!({});
-            let params: QueryPriceByStatusParams = serde_json::from_value(json_data).unwrap();
+            let params: PriceStatusPaginationParams = serde_json::from_value(json_data).unwrap();
             assert!(params.status.is_none());
             assert!(params.page.is_none());
             assert!(params.page_size.is_none());
@@ -652,7 +674,7 @@ mod tests {
             let json_data = json!({
                 "status": "REJECTED"
             });
-            let params: QueryPriceByStatusParams = serde_json::from_value(json_data).unwrap();
+            let params: PriceStatusPaginationParams = serde_json::from_value(json_data).unwrap();
             assert_eq!(params.status, Some("REJECTED".to_string()));
             assert!(params.page.is_none());
             assert!(params.page_size.is_none());
@@ -721,7 +743,7 @@ mod tests {
             // Test that builder accepts different string types
             let string_date = String::from("2024-05-01");
             let str_name = "字符串测试";
-            
+
             let params = PriceQueryParams::builder()
                 .date(string_date)
                 .name(str_name)
@@ -770,21 +792,15 @@ mod tests {
         #[test]
         fn test_real_world_scenarios() {
             // Scenario 1: Search by category only
-            let params = PriceQueryParams::builder()
-                .category1(1)
-                .build();
+            let params = PriceQueryParams::builder().category1(1).build();
             assert!(params.validate().is_ok());
 
             // Scenario 2: Search by name only
-            let params = PriceQueryParams::builder()
-                .name("白菜")
-                .build();
+            let params = PriceQueryParams::builder().name("白菜").build();
             assert!(params.validate().is_ok());
 
             // Scenario 3: Search by date only
-            let params = PriceQueryParams::builder()
-                .date("2024-08-15")
-                .build();
+            let params = PriceQueryParams::builder().date("2024-08-15").build();
             assert!(params.validate().is_ok());
 
             // Scenario 4: Search with all filters
@@ -801,30 +817,30 @@ mod tests {
         fn test_edge_cases_and_boundary_values() {
             // Boundary date values
             let params = PriceQueryParams::builder()
-                .date("2024-01-01")  // Start of year
+                .date("2024-01-01") // Start of year
                 .build();
             assert!(params.validate().is_ok());
 
             let params = PriceQueryParams::builder()
-                .date("2024-12-31")  // End of year
+                .date("2024-12-31") // End of year
                 .build();
             assert!(params.validate().is_ok());
 
             // Boundary category values
             let params = PriceQueryParams::builder()
-                .category1(1)       // Minimum valid category
-                .category3(999999)  // Large category ID
+                .category1(1) // Minimum valid category
+                .category3(999999) // Large category ID
                 .build();
             assert!(params.validate().is_ok());
 
             // Boundary name values
             let params = PriceQueryParams::builder()
-                .name("a")          // Single character
+                .name("a") // Single character
                 .build();
             assert!(params.validate().is_ok());
 
             let params = PriceQueryParams::builder()
-                .name(&"x".repeat(50))  // Maximum length
+                .name(&"x".repeat(50)) // Maximum length
                 .build();
             assert!(params.validate().is_ok());
         }
