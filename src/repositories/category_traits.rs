@@ -14,7 +14,7 @@ pub(crate) trait CategoryRepository: Send + Sync {
     ///
     /// # Returns
     ///
-    /// A vector of `CategoryWithSubCategoriesDTO` objects.
+    /// A vector of [`CategoryWithSubCategoriesDTO`] objects.
     ///
     /// # Errors
     ///
