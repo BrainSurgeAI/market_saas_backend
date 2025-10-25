@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
-    pub tenant_type: String,
-    pub tenant_name: String,
-    pub tenant_hash: String,
-    pub username: String,
-    pub roles: Vec<String>,
-    pub exp: usize,
-    pub is_super_admin: bool,
+pub(crate) struct Claims {
+    pub(crate) tenant_type: String,
+    pub(crate) tenant_name: String,
+    pub(crate) tenant_hash: String,
+    pub(crate) username: String,
+    pub(crate) roles: Vec<String>,
+    pub(crate) exp: usize,
+    pub(crate) is_super_admin: bool,
 }
