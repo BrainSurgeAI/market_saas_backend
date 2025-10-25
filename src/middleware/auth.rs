@@ -153,7 +153,7 @@ pub async fn auth_middleware(
     if !claims.roles.contains(&"SUPER_ADMIN".to_string()) {
         let tenant_exists = state
             .repo
-            .verify_tenant_exists(&claims.tenant_hash)
+            .tenant_exists(&claims.tenant_hash)
             .await
             .map_err(|e| {
                 error!(

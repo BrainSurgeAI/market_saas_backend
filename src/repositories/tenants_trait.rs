@@ -31,14 +31,14 @@ pub trait TenantRepository: Send + Sync {
         tenant: &TenantCreateDTO,
     ) -> Result<(), AppError>;
 
-    async fn verify_tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError>;
+    async fn tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError>;
 
     // get the financials of a tenant
     async fn get_tenant_financials(&self, hashed_name: &str)
         -> Result<Option<FinancialResponseDto>, AppError>;
 
     // check if a tenant name hash exists
-    async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError>;
+    // async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError>;
 
     async fn get_tenant_users(&self, hashed_name: &str) -> Result<Vec<UserResponseDto>, AppError>;
 
@@ -92,7 +92,7 @@ pub trait TenantRepository: Send + Sync {
 
 #[async_trait]
 impl TenantRepository for MySqlRepository {
-    async fn verify_tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError> {
+    async fn tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError> {
         let tenant_exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM tenants WHERE name_hash = ?)",
         )
@@ -133,7 +133,7 @@ impl TenantRepository for MySqlRepository {
             AppError::Internal("Error hashing tenant name".to_string())
         })?;
 
-        let is_exist = self.is_tenant_exist(&name_hash).await?;
+        let is_exist = self.tenant_exists(&name_hash).await?;
         if is_exist {
             error!("Tenant {} already exists", tenant.name);
             return Err(AppError::Conflict("Tenant already exists".to_string()));
@@ -217,18 +217,18 @@ impl TenantRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get tenant financials"))
     }
 
-    async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError> {
-        // let name_hash = tenant_name_hash(name).unwrap();
-        let tenant = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM tenants WHERE name_hash = ?)",
-        )
-        .bind(name_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to find tenant by name"))?;
+    // async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError> {
+    //     // let name_hash = tenant_name_hash(name).unwrap();
+    //     let tenant = sqlx::query_scalar::<_, bool>(
+    //         "SELECT EXISTS(SELECT 1 FROM tenants WHERE name_hash = ?)",
+    //     )
+    //     .bind(name_hash)
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to find tenant by name"))?;
 
-        Ok(tenant.unwrap_or(false))
-    }
+    //     Ok(tenant.unwrap_or(false))
+    // }
 
     async fn get_tenant_users(&self, hashed_name: &str) -> Result<Vec<UserResponseDto>, AppError> {
         let users = sqlx::query_as::<_, UserResponseDto>(

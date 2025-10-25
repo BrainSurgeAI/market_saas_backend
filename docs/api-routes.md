@@ -33,7 +33,7 @@
 | 方法 | 路径 | 描述 | 测试状态 |
 |------|------|------|----------|
 | GET | `/api/v1/tenants/me` | 获取当前租户详情 | ok |
-| GET | `/api/v1/users/{username}/tenants` | 根据用户获取租户 | |
+| GET | `/api/v1/users/{username}/tenants` | 获取用户所属租户信息 | |
 | GET | `/api/v1/tenants` | 根据市场获取租户列表 | |
 | GET | `/api/v1/financials` | 获取租户财务信息 | |
 | GET | `/api/v1/tenants/{hashed_name}/users` | 获取租户用户列表 | |

@@ -135,7 +135,7 @@ where
     }
 
     if repo
-        .is_tenant_exist(&payload.tenant_name)
+        .tenant_exists(&payload.tenant_name)
         .await?
         .then_some(())
         .is_some()
