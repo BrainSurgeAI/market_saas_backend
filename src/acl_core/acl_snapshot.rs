@@ -5,11 +5,147 @@ use dashmap::DashMap;
 use hyper::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
+use arc_swap::ArcSwap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use arc_swap::ArcSwap;
 use std::sync::LazyLock;
-use tracing::error;
+use tracing::{error, debug};
+
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
+pub struct AclSnapshot {
+    #[serde(
+        serialize_with = "serialize_method_map",
+        deserialize_with = "deserialize_method_map"
+    )]
+    pub tries: HashMap<Method, PermissionTrie>,
+    pub role_perms: HashMap<String, HashSet<String>>,
+    pub version: u64,
+    //pub(crate) system_code: String,
+    #[serde(skip)]
+    pub role_cache: Arc<DashMap<Vec<String>, HashSet<String>>>,
+}
+
+/// 全局 ACL 快照（读侧无锁，写侧原子替换）
+pub static ACL_SNAPSHOT: LazyLock<ArcSwap<AclSnapshot>> =
+    LazyLock::new(|| ArcSwap::from_pointee(AclSnapshot::default()));
+
+impl AclSnapshot {
+    /// Verifies if a user has access to a specific resource
+    /// # Arguments
+    /// * `method` - The HTTP method of the request
+    /// * `path` - The request path
+    /// * `claim` - The user's claim containing roles and other info
+    /// # Returns
+    /// * `Result<(), StatusCode>` - Ok if access is granted, Err with appropriate StatusCode if denied
+    pub async fn verify_access(
+        &self,
+        method: &Method,
+        path: &str,
+        claim: &Claims,
+    ) -> Result<(), StatusCode> {
+        if claim.is_super_admin {
+            return Ok(());
+        }
+
+        let trie = self.tries.get(method).ok_or_else(|| {
+            error!("No permission trie found for HTTP method: {}", method);
+            StatusCode::METHOD_NOT_ALLOWED
+        })?;
+
+        debug!(
+            "Verifying access for {} {} with roles {:?}",
+            method, path, claim.roles
+        );
+        let (rule, params) = trie.find(path).ok_or_else(|| {
+            error!("No path_pattern and method matches {} {}", path, method);
+            StatusCode::UNAUTHORIZED
+        })?;
+
+        if rule.self_only {
+            debug!("Route {} is self-only, verifying username", path);
+            if let Some(username) = params.get("username") {
+                debug!("Extracted username parameter: {}", username);
+                if username != &claim.username {
+                    error!(
+                        "Self-only route {} accessed by user {} (expected: {})",
+                        path, claim.username, username
+                    );
+                    return Err(StatusCode::FORBIDDEN);
+                }
+            }
+            debug!("Self-only verification ignored for user {}", claim.username);
+        }
+
+        debug!("params: {:?}", params);
+        if let Some(tenant_name) = params.get("id") {
+            debug!("Extracted hashed_name parameter: {}", tenant_name);
+            debug!("Route {} is tenant-specific, verifying hashed_name", path);
+            if tenant_name != &claim.tenant_hash {
+                error!(
+                    "Tenant-only route {} accessed by tenant {} (expected: {})",
+                    path, claim.tenant_hash, tenant_name
+                );
+                return Err(StatusCode::FORBIDDEN);
+            }
+            debug!(
+                "Tenant-only verification passed for tenant {}",
+                claim.tenant_hash
+            );
+        }
+
+        let perms = self.permissions_for_roles(&claim.roles);
+
+        if !verify_permissions(&rule.required_permission, &perms) {
+            error!(
+                "User {} does not have required permissions: {}",
+                claim.username, rule.required_permission
+            );
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        Ok(())
+    }
+
+    fn permissions_for_roles(&self, roles: &[String]) -> HashSet<String> {
+        // sort roles to prevent cache miss
+        let mut sorted_roles = roles.to_vec();
+        sorted_roles.sort();
+
+        if let Some(cached) = self.role_cache.get(&sorted_roles) {
+            return cached.clone();
+        }
+
+        let mut perms = HashSet::with_capacity(roles.len() * 5);
+        for role in &sorted_roles {
+            if let Some(role_perms) = self.role_perms.get(role) {
+                perms.extend(role_perms.iter().cloned());
+            }
+        }
+
+        self.role_cache.insert(sorted_roles, perms.clone());
+        perms
+    }
+}
+
+/// Verifies if user has all required permissions
+/// Returns true if all required permissions are present in user_permissions
+///
+/// # Arguments
+/// * `required` - The required permissions
+/// * `user_permissions` - The user's permissions
+///
+/// # Returns
+/// * `bool` - True if the user has all required permissions, false otherwise
+fn verify_permissions(required: &str, user_permissions: &HashSet<String>) -> bool {
+    if required.trim().is_empty() {
+        return true; // Empty permission requirement always passes
+    }
+
+    required.split(',').all(|perm| {
+        let perm = perm.trim();
+        !perm.is_empty() && user_permissions.contains(perm)
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -844,12 +980,10 @@ mod tests {
         );
 
         // Read only user should only access read endpoints
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/data", &read_only_user)
-                .await
-                .is_ok()
-        );
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/data", &read_only_user)
+            .await
+            .is_ok());
         assert_eq!(
             snapshot_with_trie
                 .verify_access(&Method::GET, "/data/write", &read_only_user)
@@ -873,18 +1007,14 @@ mod tests {
         );
 
         // Read/write user should access read and write endpoints
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/data", &read_write_user)
-                .await
-                .is_ok()
-        );
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/data/write", &read_write_user)
-                .await
-                .is_ok()
-        );
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/data", &read_write_user)
+            .await
+            .is_ok());
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/data/write", &read_write_user)
+            .await
+            .is_ok());
         assert_eq!(
             snapshot_with_trie
                 .verify_access(&Method::GET, "/data/delete", &read_write_user)
@@ -901,161 +1031,21 @@ mod tests {
         );
 
         // Admin user should access all endpoints
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/data", &admin_user)
-                .await
-                .is_ok()
-        );
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/data/write", &admin_user)
-                .await
-                .is_ok()
-        );
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/data/delete", &admin_user)
-                .await
-                .is_ok()
-        );
-        assert!(
-            snapshot_with_trie
-                .verify_access(&Method::GET, "/admin", &admin_user)
-                .await
-                .is_ok()
-        );
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/data", &admin_user)
+            .await
+            .is_ok());
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/data/write", &admin_user)
+            .await
+            .is_ok());
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/data/delete", &admin_user)
+            .await
+            .is_ok());
+        assert!(snapshot_with_trie
+            .verify_access(&Method::GET, "/admin", &admin_user)
+            .await
+            .is_ok());
     }
-}
-
-use tracing::debug;
-#[derive(Clone, Default, Serialize, Deserialize, Debug)]
-pub struct AclSnapshot {
-    #[serde(
-        serialize_with = "serialize_method_map",
-        deserialize_with = "deserialize_method_map"
-    )]
-    pub tries: HashMap<Method, PermissionTrie>,
-    pub role_perms: HashMap<String, HashSet<String>>,
-    pub version: u64,
-    //pub(crate) system_code: String,
-
-    #[serde(skip)]
-    pub role_cache: Arc<DashMap<Vec<String>, HashSet<String>>>,
-}
-
-/// 全局 ACL 快照（读侧无锁，写侧原子替换）
-pub static ACL_SNAPSHOT: LazyLock<ArcSwap<AclSnapshot>> =
-    LazyLock::new(|| ArcSwap::from_pointee(AclSnapshot::default()));
-
-impl AclSnapshot {
-    /// Verifies if a user has access to a specific resource
-    /// # Arguments
-    /// * `method` - The HTTP method of the request
-    /// * `path` - The request path
-    /// * `claim` - The user's claim containing roles and other info
-    /// # Returns
-    /// * `Result<(), StatusCode>` - Ok if access is granted, Err with appropriate StatusCode if denied
-    pub async fn verify_access(
-        &self,
-        method: &Method,
-        path: &str,
-        claim: &Claims,
-    ) -> Result<(), StatusCode> {
-        if claim.is_super_admin {
-            return Ok(());
-        }
-
-        let trie = self.tries.get(method).ok_or_else(|| {
-            error!("No permission trie found for HTTP method: {}", method);
-            StatusCode::METHOD_NOT_ALLOWED
-        })?;
-
-        debug!("Verifying access for {} {} with roles {:?}", method, path, claim.roles);
-        let (rule, params) = trie.find(path).ok_or_else(|| {
-            error!("No matching route pattern found for {} {}", method, path);
-            StatusCode::NOT_FOUND
-        })?;
-
-        if rule.self_only {
-            debug!("Route {} is self-only, verifying username", path);
-            if let Some(username) = params.get("username") {
-                debug!("Extracted username parameter: {}", username);
-                if username != &claim.username {
-                    error!(
-                        "Self-only route {} accessed by user {} (expected: {})",
-                        path, claim.username, username
-                    );
-                    return Err(StatusCode::FORBIDDEN);
-                }
-            }
-            debug!("Self-only verification ignored for user {}", claim.username);
-        }
-
-        debug!("params: {:?}", params);
-        if let Some(tenant_name) = params.get("id") {
-            debug!("Extracted hashed_name parameter: {}", tenant_name);
-            debug!("Route {} is tenant-specific, verifying hashed_name", path);
-            if tenant_name != &claim.tenant_hash {
-                error!(
-                    "Tenant-only route {} accessed by tenant {} (expected: {})",
-                    path, claim.tenant_hash, tenant_name
-                );
-                return Err(StatusCode::FORBIDDEN);
-            }
-            debug!("Tenant-only verification passed for tenant {}", claim.tenant_hash);
-        }
-
-        let perms = self.permissions_for_roles(&claim.roles);
-
-        if !verify_permissions(&rule.required_permission, &perms) {
-            error!(
-                "User {} does not have required permissions: {}",
-                claim.username, rule.required_permission
-            );
-            return Err(StatusCode::FORBIDDEN);
-        }
-
-        Ok(())
-    }
-
-    fn permissions_for_roles(&self, roles: &[String]) -> HashSet<String> {
-        // sort roles to prevent cache miss
-        let mut sorted_roles = roles.to_vec();
-        sorted_roles.sort();
-
-        if let Some(cached) = self.role_cache.get(&sorted_roles) {
-            return cached.clone();
-        }
-
-        let mut perms = HashSet::with_capacity(roles.len() * 5);
-        for role in &sorted_roles {
-            if let Some(role_perms) = self.role_perms.get(role) {
-                perms.extend(role_perms.iter().cloned());
-            }
-        }
-
-        self.role_cache.insert(sorted_roles, perms.clone());
-        perms
-    }
-}
-
-/// Verifies if user has all required permissions
-/// Returns true if all required permissions are present in user_permissions
-///
-/// # Arguments
-/// * `required` - The required permissions
-/// * `user_permissions` - The user's permissions
-///
-/// # Returns
-/// * `bool` - True if the user has all required permissions, false otherwise
-fn verify_permissions(required: &str, user_permissions: &HashSet<String>) -> bool {
-    if required.trim().is_empty() {
-        return true; // Empty permission requirement always passes
-    }
-
-    required.split(',').all(|perm| {
-        let perm = perm.trim();
-        !perm.is_empty() && user_permissions.contains(perm)
-    })
 }
