@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// Get category with sub-categories route.
-pub fn categories_routes() -> Router {
+pub(crate) fn categories_routes() -> Router {
     Router::new().route(
         "/api/v1/categories/tree",
         get(get_categories_tree::<MySqlRepository>),

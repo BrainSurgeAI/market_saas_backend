@@ -10,7 +10,7 @@ mod tenants;
 mod users;
 mod workspace;
 
-pub use categories::categories_routes;
+pub(crate) use categories::categories_routes;
 pub use delivery_staff::delivery_staff_routes;
 pub use discounts::discount_routes;
 pub use orders::order_routes;
