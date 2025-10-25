@@ -18,6 +18,19 @@ pub mod superadmin_traits;
 pub mod system_log_repo;
 pub mod tenants_trait;
 pub mod user_traits;
+
+
+#[macro_export]
+macro_rules! map_db_err {
+    ($msg:expr) => {
+        |e| {
+            error!(concat!($msg, ": {:#?}"), e);
+            AppError::Database(e)
+        }
+    };
+}
+
+
 pub mod my_sql_repository {
     use sqlx::MySqlPool;
 
@@ -32,6 +45,7 @@ pub mod my_sql_repository {
         }
     }
 }
+
 
 pub enum TenantType {
     Customer,
