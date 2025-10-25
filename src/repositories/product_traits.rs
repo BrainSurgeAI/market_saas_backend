@@ -1,14 +1,9 @@
 use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
-    dto::{
-        category::CategoryDTO,
-     
-        products::{
-            PriceStatusDTO, ProcessingFeeDTO, ProductDetailDTO,
-            ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewDTO,
-            ProductPriceCreateDTO, UpdateProductRequestDTO,
-        },
+    dto::products::{
+        PriceStatusDTO, ProcessingFeeDTO, ProductDetailDTO, ProductDetailResponse, ProductListDTO,
+        ProductListQueryParams, ProductOverviewDTO, ProductPriceCreateDTO, UpdateProductRequestDTO,
     },
     map_db_err,
 };
@@ -23,21 +18,6 @@ pub trait ProductRepository: Send + Sync {
         &self,
         query: &ProductListQueryParams,
     ) -> Result<(Vec<ProductOverviewDTO>, i32), AppError>;
-
-    /// List level one categories
-    ///
-    /// This function fetches all level one categories from the database.
-    ///
-    /// # Returns
-    ///
-    /// A vector of `CategoryDTO` objects.
-    ///
-    /// # Error
-    ///
-    /// Returns an `AppError` if the database query fails.
-    async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError>;
-
-   
 
     async fn batch_create_product_price(
         &self,
@@ -169,15 +149,6 @@ impl ProductRepository for MySqlRepository {
 
         debug!("Total count: {}", total_count);
         Ok((products, total_count))
-    }
-
-    async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError> {
-        let sql = "SELECT id, name as level1_category FROM categories WHERE level = 1 ORDER BY sort_order DESC";
-        let categories = sqlx::query_as::<_, CategoryDTO>(sql)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get level 1 categories"))?;
-        Ok(categories)
     }
 
     async fn batch_create_product_price(

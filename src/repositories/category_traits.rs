@@ -1,4 +1,8 @@
-use crate::{common::AppError, dto::category::CategoryWithSubCategoriesResponseDto, map_db_err};
+use crate::{
+    common::AppError,
+    dto::category::{CategoryDTO, CategoryWithSubCategoriesResponseDto},
+    map_db_err,
+};
 
 use super::my_sql_repository::MySqlRepository;
 use async_trait::async_trait;
@@ -7,7 +11,6 @@ use tracing::error;
 
 #[async_trait]
 pub(crate) trait CategoryRepository: Send + Sync {
-
     /// List categories with subcategories
     ///
     /// This function fetches all categories with their subcategories from the database.
@@ -19,12 +22,29 @@ pub(crate) trait CategoryRepository: Send + Sync {
     /// # Errors
     ///
     /// Returns an `AppError` if the database query fails.
-    async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError>;
+    async fn list_categories_with_subcategories(
+        &self,
+    ) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError>;
+
+    /// List level one categories
+    ///
+    /// This function fetches all level one categories from the database.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `CategoryDTO` objects.
+    ///
+    /// # Error
+    ///
+    /// Returns an `AppError` if the database query fails.
+    async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError>;
 }
 
 #[async_trait]
 impl CategoryRepository for MySqlRepository {
-    async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError> {
+    async fn list_categories_with_subcategories(
+        &self,
+    ) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError> {
         let sql = r#"
         SELECT c1.id as category_id, c1.name as category_name,
         JSON_ARRAYAGG(
@@ -46,7 +66,18 @@ impl CategoryRepository for MySqlRepository {
         let categories = sqlx::query_as::<_, CategoryWithSubCategoriesResponseDto>(sql)
             .fetch_all(&self.pool)
             .await
-            .map_err(map_db_err!("Failed to fetch categories with sub categories"))?;
+            .map_err(map_db_err!(
+                "Failed to fetch categories with sub categories"
+            ))?;
+        Ok(categories)
+    }
+
+    async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError> {
+        let sql = "SELECT id, name as level1_category FROM categories WHERE level = 1 ORDER BY sort_order DESC";
+        let categories = sqlx::query_as::<_, CategoryDTO>(sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get level 1 categories"))?;
         Ok(categories)
     }
 }

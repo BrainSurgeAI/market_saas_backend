@@ -1,10 +1,8 @@
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        category::CategoryDTO,
-        price::PriceStatusPaginationParams,
         products::{
-            PriceStatusDTO, ProcessingFeeDTO, ProductDailyPriceComparisonDTO,
+            PriceStatusDTO, ProcessingFeeDTO,
             ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewResponse,
             ProductPriceCreateDTO, UpdateProductRequestDTO,
         },
@@ -40,26 +38,6 @@ where
     )))
 }
 
-/// Get level one categories
-/// This is public API, no authentication required
-///
-/// # Returns
-///
-/// A vector of `CategoryDTO` objects.
-///
-/// # Error
-/// 
-/// Returns an `AppError` if the database query fails.
-pub async fn get_level_one_categories<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-) -> Result<Json<ApiResponse<Vec<CategoryDTO>>>, AppError>
-where
-    T: ProductRepository + Send + Sync,
-{
-    let categories = repo.list_level_one_categories().await?;
-    Ok(Json(ApiResponse::new(Some(categories), &context)))
-}
 
 /// 批量创建产品价格
 pub async fn batch_create_product_price<T>(

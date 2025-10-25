@@ -28,7 +28,7 @@ use crate::{
     services::{
         auth_service::{login, register},
         price_services::get_price_announcements,
-        product_services::get_level_one_categories,
+        category_services::get_level_one_categories,
         superadmin_services::super_admin_login,
         system_log_service::SystemLogService,
     },
