@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use axum::{
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, patch, put},
     Router,
 };
 
