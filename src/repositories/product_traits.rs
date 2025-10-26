@@ -153,74 +153,148 @@ impl ProductRepository for MySqlRepository {
         username: &str,
         role_name: &str,
     ) -> Result<Vec<PriceStatusResponseDTO>, AppError> {
-        let sql = r#"
-        SELECT
-    c.id AS category_id,
-    c.name AS category_name,
-  
-    COUNT(DISTINCT p.id) AS total_products,
-    COUNT(DISTINCT CASE WHEN NOT EXISTS (
-        SELECT 1 FROM product_prices pp 
-        WHERE pp.product_id = p.id 
+        // AUDITOR角色可以看到全局统计，其他角色只能看到分配的分类统计
+        let sql = if role_name == "AUDITOR" {
+            r#"
+            SELECT
+        c.id AS category_id,
+        c.name AS category_name,
+
+        COUNT(DISTINCT p.id) AS total_products,
+        COUNT(DISTINCT CASE WHEN NOT EXISTS (
+            SELECT 1 FROM product_prices pp
+            WHERE pp.product_id = p.id
+            AND pp.price_date = CURRENT_DATE
+        ) THEN p.id END) AS products_without_price,
+        COUNT(DISTINCT CASE WHEN pp.status = 'PENDING' THEN p.id END) AS products_pending,
+        COUNT(DISTINCT CASE WHEN pp.status = 'APPROVED' THEN p.id END) AS products_approved,
+        COUNT(DISTINCT CASE WHEN pp.status = 'PUBLISHED' THEN p.id END) AS products_published,
+        COUNT(DISTINCT CASE WHEN pp.status = 'REJECTED' THEN p.id END) AS products_rejected
+    FROM
+        categories c
+    JOIN (
+        -- 对于一级分类，找到所有相关的三级分类
+        SELECT c3.id, c1.id AS root_id
+        FROM categories c1
+        JOIN categories c2 ON c2.parent_id = c1.id AND c2.level = 2
+        JOIN categories c3 ON c3.parent_id = c2.id AND c3.level = 3
+        WHERE c1.level = 1
+
+        UNION ALL
+
+        -- 对于二级分类，找到所有相关的三级分类
+        SELECT c3.id, c2.id AS root_id
+        FROM categories c2
+        JOIN categories c3 ON c3.parent_id = c2.id AND c3.level = 3
+        WHERE c2.level = 2
+
+        UNION ALL
+
+        -- 三级分类直接关联自己
+        SELECT c3.id, c3.id AS root_id
+        FROM categories c3
+        WHERE c3.level = 3
+    ) AS category_mapping ON (
+        c.id = category_mapping.root_id
+    )
+    JOIN
+        products p ON p.category_id = category_mapping.id
+    LEFT JOIN
+        product_prices pp ON p.id = pp.product_id
         AND pp.price_date = CURRENT_DATE
-    ) THEN p.id END) AS products_without_price,
-    COUNT(DISTINCT CASE WHEN pp.status = 'PENDING' THEN p.id END) AS products_pending,
-    COUNT(DISTINCT CASE WHEN pp.status = 'APPROVED' THEN p.id END) AS products_approved,
-    COUNT(DISTINCT CASE WHEN pp.status = 'PUBLISHED' THEN p.id END) AS products_published,
-    COUNT(DISTINCT CASE WHEN pp.status = 'REJECTED' THEN p.id END) AS products_rejected
-FROM 
-    users u
-JOIN 
-    user_roles ur ON u.id = ur.user_id
-JOIN 
-    roles r ON ur.role_id = r.id AND r.name = ?
-JOIN 
-    user_category_assignments uca ON u.id = uca.user_id
-JOIN 
-    categories c ON uca.category_id = c.id
+    WHERE
+        c.level = 1
+    GROUP BY
+        c.id, c.name, c.level
+    ORDER BY
+        c.level, c.name"#
+        } else {
+            r#"
+            SELECT
+        c.id AS category_id,
+        c.name AS category_name,
+
+        COUNT(DISTINCT p.id) AS total_products,
+        COUNT(DISTINCT CASE WHEN NOT EXISTS (
+            SELECT 1 FROM product_prices pp
+            WHERE pp.product_id = p.id
+            AND pp.price_date = CURRENT_DATE
+        ) THEN p.id END) AS products_without_price,
+        COUNT(DISTINCT CASE WHEN pp.status = 'PENDING' THEN p.id END) AS products_pending,
+        COUNT(DISTINCT CASE WHEN pp.status = 'APPROVED' THEN p.id END) AS products_approved,
+        COUNT(DISTINCT CASE WHEN pp.status = 'PUBLISHED' THEN p.id END) AS products_published,
+        COUNT(DISTINCT CASE WHEN pp.status = 'REJECTED' THEN p.id END) AS products_rejected
+    FROM
+        users u
+    JOIN
+        user_roles ur ON u.id = ur.user_id
+    JOIN
+        roles r ON ur.role_id = r.id AND r.name = ?
+    JOIN
+        user_category_assignments uca ON u.id = uca.user_id
+    JOIN
+        categories c ON uca.category_id = c.id"#
+        };
+
+        // 对于非AUDITOR角色，需要补全复杂的分类关联查询
+        let final_sql = if role_name == "AUDITOR" {
+            sql.to_string()
+        } else {
+            format!(r#"
+{}
+
 JOIN (
-    -- Para categorias de nível 1, encontre todas as categorias de nível 3 relacionadas
+    -- 对于一级分类，找到所有相关的三级分类
     SELECT c3.id, c1.id AS root_id
     FROM categories c1
     JOIN categories c2 ON c2.parent_id = c1.id AND c2.level = 2
     JOIN categories c3 ON c3.parent_id = c2.id AND c3.level = 3
     WHERE c1.level = 1
-    
+
     UNION ALL
-    
-    -- Para categorias de nível 2, encontre todas as categorias de nível 3 relacionadas
+
+    -- 对于二级分类，找到所有相关的三级分类
     SELECT c3.id, c2.id AS root_id
     FROM categories c2
     JOIN categories c3 ON c3.parent_id = c2.id AND c3.level = 3
     WHERE c2.level = 2
-    
+
     UNION ALL
-    
-    -- Categorias de nível 3 estão diretamente relacionadas a si mesmas
+
+    -- 三级分类直接关联自己
     SELECT c3.id, c3.id AS root_id
     FROM categories c3
     WHERE c3.level = 3
 ) AS category_mapping ON (
     c.id = category_mapping.root_id
 )
-JOIN 
+JOIN
     products p ON p.category_id = category_mapping.id
-LEFT JOIN 
-    product_prices pp ON p.id = pp.product_id 
+LEFT JOIN
+    product_prices pp ON p.id = pp.product_id
     AND pp.price_date = CURRENT_DATE
-WHERE 
-    u.username = ? -- Substitua pelo nome de usuário desejado
-GROUP BY 
+WHERE
+    u.username = ?
+GROUP BY
     u.username, c.id, c.name, c.level
-ORDER BY 
-    c.level, c.name;"#;
+ORDER BY
+    c.level, c.name"#, sql)
+        };
 
-        let stats = sqlx::query_as::<_, PriceStatusResponseDTO>(sql)
-            .bind(role_name)
-            .bind(username)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to fetch product price status stats"))?;
+        let stats = if role_name == "AUDITOR" {
+            sqlx::query_as::<_, PriceStatusResponseDTO>(&final_sql)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to fetch product price status stats for AUDITOR"))?
+        } else {
+            sqlx::query_as::<_, PriceStatusResponseDTO>(&final_sql)
+                .bind(role_name)
+                .bind(username)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to fetch product price status stats"))?
+        };
+
         Ok(stats)
     }
 

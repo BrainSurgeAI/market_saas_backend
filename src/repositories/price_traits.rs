@@ -8,7 +8,7 @@ use crate::{
         PriceStatusPaginationParams, 
         PriceCreateDTO,
     },
-    dto::products::ProductDailyPriceComparisonDTO,
+    dto::products::{ProductDailyPriceComparisonDTO, PaginatedProductDailyPriceComparison},
     map_db_err,
 };
 use async_trait::async_trait;
@@ -76,118 +76,51 @@ pub(crate) trait PriceRepository: Send + Sync {
     ) -> Result<Vec<PriceAnnouncement>, AppError>;
 
 
-     /// Find product daily price comparison by user with role-based filtering.
-    ///
-    /// This function retrieves a comprehensive comparison of product prices for a specific user,
-    /// showing both today's and yesterday's pricing data with role-based access control.
-    /// It handles complex category hierarchies and provides intelligent price source prioritization.
-    ///
-    /// # Parameters
-    ///
-    /// * `username` - The username of the user requesting the price comparison
-    /// * `role_name` - The role name of the user (e.g., "AUDITOR", "PRICER") which determines data access
-    /// * `query` - Query parameters containing optional status filtering for AUDITOR role
-    ///
-    /// # Returns
-    ///
-    /// A vector of [`ProductDailyPriceComparisonDTO`] containing:
-    /// - Product基本信息 (ID, name, unit, assigned category)
-    /// - 昨天价格 (min, avg, max) - 从历史数据获取
-    /// - 今天价格 (min, avg, max) - 根据状态决定显示
-    /// - 价格状态 (PENDING, APPROVED, PUBLISHED, REJECTED)
-    /// - 价格来源 (TODAY, HISTORY)
-    /// - 发布日期
-    ///
-    /// # Role-Based Behavior
-    ///
-    /// **AUDITOR Role:**
-    /// - Can filter by specific status (PENDING, APPROVED, PUBLISHED, REJECTED)
-    /// - Sees all price entries for the current date
-    /// - Used for auditing and price review purposes
-    ///
-    /// **PRICER Role:**
-    /// - Only sees PUBLISHED status prices from history
-    /// - Today's prices default to PENDING status
-    /// - Used for price entry and management
-    ///
-    /// # Price Source Logic
-    ///
-    /// The query implements sophisticated price source prioritization:
-    ///
-    /// 1. **Today's Prices (TODAY source):**
-    ///    - When `price_date = CURRENT_DATE`
-    ///    - Shows all statuses including REJECTED
-    ///    - Displayed as today's min/avg/max prices
-    ///
-    /// 2. **Historical Prices (HISTORY source):**
-    ///    - When `price_date < CURRENT_DATE`
-    ///    - Only PUBLISHED status from recent historical data
-    ///    - Used as fallback when no today's data exists
-    ///    - Displayed as yesterday's min/avg/max prices when today's source is HISTORY
-    ///
-    /// 3. **Yesterday's Prices Calculation:**
-    ///    - If today's source is HISTORY: show today's data as "yesterday's"
-    ///    - If today's source is TODAY: query actual yesterday's PUBLISHED data
-    ///    - Handles the transition from pending to approved to published pricing
-    ///
-    /// # Category Hierarchy Handling
-    ///
-    /// The query supports complex category assignments:
-    ///
-    /// **Level 1 Assignment:**
-    /// - User assigned to Level 1 category sees all Level 2 and Level 3 subcategories
-    /// - Example: User assigned to "熟食卤味" sees all subcategories
-    ///
-    /// **Level 2 Assignment:**
-    /// - User assigned to Level 2 category sees all Level 3 subcategories
-    /// - Example: User assigned to "猪肉卤制品" sees specific product categories
-    ///
-    /// **Level 3 Assignment:**
-    /// - User assigned to Level 3 category sees only products in that category
-    /// - Most granular level of access control
-    ///
-    /// # SQL Query Structure
-    ///
-    /// The complex SQL query consists of:
-    /// - **User & Category Joins:** Links users to their assigned categories
-    /// - **Category Mapping Subquery:** Resolves category hierarchy relationships
-    /// - **Price Logic Subquery:** Implements price source prioritization
-    /// - **Conditional Filtering:** Role-based WHERE clauses
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// // AUDITOR can see specific status
-    /// let query = QueryPriceByStatusParams {
-    ///     status: Some("PENDING".to_string()),
-    /// };
-    /// let prices = repo.find_product_daily_price_comparison_by_user(
-    ///     "auditor_user",
-    ///     "AUDITOR",
-    ///     &query
-    /// ).await?;
-    ///
-    /// // PRICER sees PUBLISHED historical data
-    /// let query = QueryPriceByStatusParams { status: None };
-    /// let prices = repo.find_product_daily_price_comparison_by_user(
-    ///     "pricer_user",
-    ///     "PRICER",
-    ///     &query
-    /// ).await?;
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns an `AppError` if:
-    /// - Database query fails (connection, syntax, etc.)
-    /// - User has no category assignments
-    /// - Invalid role name is provided
-    async fn user_daily_price_comparison(
+    async fn list_pricer_daily_price_comparison(
         &self,
         username: &str,
         role_name: &str,
         query: &PriceStatusPaginationParams,
-    ) -> Result<Vec<ProductDailyPriceComparisonDTO>, AppError>;
+    ) -> Result<PaginatedProductDailyPriceComparison, AppError>;
+
+    /// 获取用户关联分类中指定价格状态的产品列表
+    ///
+    /// 查找与用户关联的产品分类中，当天价格状态为指定状态的产品
+    /// 支持PENDING（待审核）、REJECTED（已拒绝）、PUBLISHED（已发布）状态
+    /// 返回分页数据，包含历史价格信息作为参考
+    ///
+    /// # Arguments
+    /// * `username` - 用户名
+    /// * `role_name` - 用户角色名
+    /// * `query` - 分页查询参数，包含status字段用于指定价格状态
+    ///
+    /// # Returns
+    /// * `PaginatedProductDailyPriceComparison` - 包含分页信息和指定状态产品数据
+    ///
+    /// # Errors
+    /// Returns an `AppError` if:
+    /// - Database query fails
+    /// - User has no category assignments
+    /// - Invalid role name is provided
+    /// - Invalid status value is provided
+    async fn list_price_products_by_status(
+        &self,
+        username: &str,
+        role_name: &str,
+        query: &PriceStatusPaginationParams,
+    ) -> Result<PaginatedProductDailyPriceComparison, AppError>;
+
+    /// 通用辅助函数：执行用户产品分页查询
+    async fn query_prices_paginated(
+        &self,
+        username: &str,
+        role_name: &str,
+        query: &PriceStatusPaginationParams,
+        where_clause: &str,
+        select_fields: &str,
+        additional_joins: &str,
+        order_by: &str,
+    ) -> Result<PaginatedProductDailyPriceComparison, AppError>;
 
 
     async fn aprox_price(&self, query: &AproxPriceParam) -> Result<(), AppError>;
@@ -387,64 +320,349 @@ impl PriceRepository for MySqlRepository {
     }
 
 
-    async fn user_daily_price_comparison(
+    /// Get daily price comparison for PRICER users
+    ///
+    /// Retrieves products associated with the PRICER user's assigned categories
+    /// that do not have any price records for the current day, along with their
+    /// most recent PUBLISHED prices as reference. This helps PRICER users identify
+    /// products that need to be priced for the current day.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The username of the PRICER user
+    /// * `role_name` - The role name (should be "PRICER")
+    /// * `query` - Pagination parameters including page number and page size
+    ///
+    /// # Returns
+    ///
+    /// Returns a list containing:
+    /// - Products without current day prices
+    /// - Historical PUBLISHED prices as reference (yesterday_min_price, yesterday_avg_price, yesterday_max_price)
+    /// - Current day prices set to 0.00 (since no pricing exists yet)
+    /// - Status set to "HISTORY" indicating these are historical references
+    ///
+    /// # Errors
+    ///
+    /// Returns an `AppError` if:
+    /// - Database query fails (connection, syntax, etc.)
+    /// - User has no category assignments
+    /// - Invalid role name is provided
+    /// - Pagination parameters are invalid
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let query = PriceStatusPaginationParams {
+    ///     page: Some(1),
+    ///     page_size: Some(20),
+    ///     ..Default::default()
+    /// };
+    /// let result = repo.list_pricer_daily_price_comparison(
+    ///     "pricer_user",
+    ///     "PRICER",
+    ///     &query
+    /// ).await?;
+    /// ```
+    async fn list_pricer_daily_price_comparison(
         &self,
         username: &str,
         role_name: &str,
         query: &PriceStatusPaginationParams,
-    ) -> Result<Vec<ProductDailyPriceComparisonDTO>, AppError> {
-        let sql = r#"SELECT 
-        p.id AS product_id,
+    ) -> Result<PaginatedProductDailyPriceComparison, AppError> {
+        debug!("Querying unpriced products for PRICER: {}", username);
+
+        let select_fields = r#"p.id AS product_id,
         p.name AS product_name,
         p.unit,
         c.name AS assigned_category_name,
-        COALESCE(
-            CASE 
-                WHEN today_pp.price_source = 'HISTORY' THEN today_pp.min_price
-                ELSE yesterday_pp.min_price 
-            END, 0
-        ) AS yesterday_min_price,
-        COALESCE(
-            CASE 
-                WHEN today_pp.price_source = 'HISTORY' THEN today_pp.avg_price
-                ELSE yesterday_pp.avg_price 
-            END, 0
-        ) AS yesterday_avg_price,
-        COALESCE(
-            CASE 
-                WHEN today_pp.price_source = 'HISTORY' THEN today_pp.max_price
-                ELSE yesterday_pp.max_price 
-            END, 0
-        ) AS yesterday_max_price,
-        COALESCE(
-            CASE 
-                WHEN today_pp.price_source = 'TODAY' THEN today_pp.min_price
-                ELSE 0
-            END, 0
-        ) AS today_min_price,
-        COALESCE(
-            CASE 
-                WHEN today_pp.price_source = 'TODAY' THEN today_pp.avg_price
-                ELSE 0
-            END, 0
-        ) AS today_avg_price,
-        COALESCE(
-            CASE 
-                WHEN today_pp.price_source = 'TODAY' THEN today_pp.max_price
-                ELSE 0
-            END, 0
-        ) AS today_max_price,
-        today_pp.status AS price_status,
-        today_pp.price_source AS price_source,
-        today_pp.price_date AS publish_date
-        FROM 
-        users u
-        JOIN 
-        user_roles ur ON u.id = ur.user_id AND ur.role_id = (SELECT id FROM roles WHERE name = ? LIMIT 1)
-        JOIN 
-        user_category_assignments uca ON u.id = uca.user_id
-        JOIN 
-        categories c ON uca.category_id = c.id
+        COALESCE(latest_pp.min_price, CAST(0 AS DECIMAL(10,2))) AS yesterday_min_price,
+        COALESCE(latest_pp.avg_price, CAST(0 AS DECIMAL(10,2))) AS yesterday_avg_price,
+        COALESCE(latest_pp.max_price, CAST(0 AS DECIMAL(10,2))) AS yesterday_max_price,
+        CAST(0 AS DECIMAL(10,2)) AS today_min_price,
+        CAST(0 AS DECIMAL(10,2)) AS today_avg_price,
+        CAST(0 AS DECIMAL(10,2)) AS today_max_price,
+        'HISTORY' AS price_status,
+        'HISTORY' AS price_source,
+        latest_pp.price_date AS publish_date"#;
+
+        let additional_joins = r#"LEFT JOIN (
+            -- 获取产品最近的PUBLISHED状态价格(排除当日)
+            SELECT pp.*
+            FROM product_prices pp
+            JOIN (
+                SELECT product_id, MAX(price_date) as max_date
+                FROM product_prices
+                WHERE status = 'PUBLISHED'
+                AND price_date < CURRENT_DATE
+                GROUP BY product_id
+            ) latest ON pp.product_id = latest.product_id AND pp.price_date = latest.max_date
+            WHERE pp.status = 'PUBLISHED'
+        ) AS latest_pp ON p.id = latest_pp.product_id"#;
+
+        let where_clause = r#"NOT EXISTS (
+            SELECT 1
+            FROM product_prices today_pp
+            WHERE today_pp.product_id = p.id
+            AND today_pp.price_date = CURRENT_DATE
+        )"#;
+
+        let order_by = "c.sort_order, p.id DESC";
+
+        self.query_prices_paginated(
+            username,
+            role_name,
+            query,
+            where_clause,
+            select_fields,
+            additional_joins,
+            order_by,
+        ).await
+    }
+
+    async fn list_price_products_by_status(
+        &self,
+        username: &str,
+        role_name: &str,
+        query: &PriceStatusPaginationParams,
+    ) -> Result<PaginatedProductDailyPriceComparison, AppError> {
+        // 确定要查询的状态，默认为PENDING
+        let target_status = if let Some(status) = &query.status {
+            match status.as_str() {
+                "PENDING" | "REJECTED" | "PUBLISHED" => status.as_str(),
+                _ => return Err(AppError::validation("Invalid status. Must be one of: PENDING, REJECTED, PUBLISHED")),
+            }
+        } else {
+            "PENDING"
+        };
+
+        debug!("Querying {} status products for user: {}, username: {}", target_status, role_name, username);
+
+        let select_fields = r#"p.id AS product_id,
+        p.name AS product_name,
+        p.unit,
+        c.name AS assigned_category_name,
+        COALESCE(latest_pp.min_price, CAST(0 AS DECIMAL(10,2))) AS yesterday_min_price,
+        COALESCE(latest_pp.avg_price, CAST(0 AS DECIMAL(10,2))) AS yesterday_avg_price,
+        COALESCE(latest_pp.max_price, CAST(0 AS DECIMAL(10,2))) AS yesterday_max_price,
+        pp.min_price AS today_min_price,
+        pp.avg_price AS today_avg_price,
+        pp.max_price AS today_max_price,
+        pp.status AS price_status,
+        'TODAY' AS price_source,
+        pp.price_date AS publish_date"#;
+
+        let additional_joins = r#"JOIN product_prices pp ON p.id = pp.product_id
+        LEFT JOIN (
+            -- 获取产品最近的PUBLISHED状态价格（不包括当天）
+            SELECT pp.*
+            FROM product_prices pp
+            JOIN (
+                SELECT product_id, MAX(price_date) as max_date
+                FROM product_prices
+                WHERE status = 'PUBLISHED'
+                AND price_date < CURRENT_DATE
+                GROUP BY product_id
+            ) latest ON pp.product_id = latest.product_id AND pp.price_date = latest.max_date
+            WHERE pp.status = 'PUBLISHED'
+        ) AS latest_pp ON p.id = latest_pp.product_id"#;
+
+        let where_clause = r#"pp.price_date = CURRENT_DATE
+        AND pp.status = ?"#;
+
+        let order_by = "c.sort_order, p.id DESC";
+
+        // Since we need to bind the status, we'll need to create a custom implementation
+        // that handles the status parameter binding
+        let page = query.page.unwrap_or(1) as u32;
+        let page_size = query.page_size.unwrap_or(50) as u32;
+        let offset = (page - 1) * page_size;
+
+        // 根据角色决定是否使用用户分类关联
+        let is_pricer_role = role_name == "PRICER";
+
+        let (from_clause, category_join) = if is_pricer_role {
+            // PRICER角色：使用用户分类关联
+            let category_join = r#"
+            JOIN (
+            -- 为一级分类找到所有关联的三级分类
+            SELECT c3.id, c1.id AS root_id
+            FROM categories c1
+            JOIN categories c2 ON c2.parent_id = c1.id AND c2.level = 2
+            JOIN categories c3 ON c3.parent_id = c2.id AND c3.level = 3
+            WHERE c1.level = 1
+
+            UNION ALL
+
+            -- 为二级分类找到所有关联的三级分类
+            SELECT c3.id, c2.id AS root_id
+            FROM categories c2
+            JOIN categories c3 ON c3.parent_id = c2.id AND c3.level = 3
+            WHERE c2.level = 2
+
+            UNION ALL
+
+            -- 三级分类直接关联自己
+            SELECT c3.id, c3.id AS root_id
+            FROM categories c3
+            WHERE c3.level = 3
+            ) AS category_mapping ON (
+            c.id = category_mapping.root_id
+            )
+            JOIN
+            products p ON p.category_id = category_mapping.id"#;
+
+            let from_clause = r#"FROM
+            users u
+            JOIN
+            user_roles ur ON u.id = ur.user_id AND ur.role_id = (SELECT id FROM roles WHERE name = ? LIMIT 1)
+            JOIN
+            user_category_assignments uca ON u.id = uca.user_id
+            JOIN
+            categories c ON uca.category_id = c.id"#;
+
+            (from_clause, category_join)
+        } else {
+            // 非PRICER角色（如AUDITOR）：直接查询所有产品，不使用用户分类关联
+            let category_join = r#"
+            JOIN
+            products p ON p.category_id = c.id"#;
+
+            let from_clause = r#"FROM
+            users u
+            JOIN
+            user_roles ur ON u.id = ur.user_id AND ur.role_id = (SELECT id FROM roles WHERE name = ? LIMIT 1)
+            CROSS JOIN
+            categories c1
+            JOIN categories c2 ON c2.parent_id = c1.id AND c2.level = 2
+            JOIN categories c ON c.parent_id = c2.id AND c.level = 3"#;
+
+            (from_clause, category_join)
+        };
+
+        // 构建count查询
+        let mut count_sql = format!(
+            r#"SELECT COUNT(*) as total
+        {} {} {}"#,
+            from_clause, category_join, additional_joins
+        );
+
+        if is_pricer_role {
+            count_sql.push_str(" WHERE u.username = ? AND ");
+        } else {
+            count_sql.push_str(" WHERE u.username = ? AND ");
+        }
+        count_sql.push_str(where_clause);
+
+        debug!("Counting products for user: {}, username: {}, where: {}, is_pricer: {}", role_name, username, where_clause, is_pricer_role);
+
+        let total: i64 = if is_pricer_role {
+            sqlx::query_scalar(&count_sql)
+                .bind(role_name)
+                .bind(username)
+                .bind(target_status)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to count products"))?
+        } else {
+            sqlx::query_scalar(&count_sql)
+                .bind(role_name)
+                .bind(username)
+                .bind(target_status)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to count products"))?
+        };
+
+        // 如果总数为0，直接返回空结果
+        if total == 0 {
+            return Ok(PaginatedProductDailyPriceComparison {
+                data: vec![],
+                total: 0,
+                page,
+                page_size,
+            });
+        }
+
+        // 构建数据查询
+        let data_sql = format!(
+            r#"SELECT {}
+        {} {} {}"#,
+            select_fields, from_clause, category_join, additional_joins
+        );
+
+        let mut final_query = data_sql;
+        if is_pricer_role {
+            final_query.push_str(" WHERE u.username = ? AND ");
+        } else {
+            final_query.push_str(" WHERE u.username = ? AND ");
+        }
+        final_query.push_str(where_clause);
+        final_query.push_str(" ORDER BY ");
+        final_query.push_str(order_by);
+        final_query.push_str(" LIMIT ? OFFSET ?");
+
+       // debug!("Querying products for user: {}, username: {}, SQL: {}", role_name, username, &final_query);
+
+        let product_prices = if is_pricer_role {
+            sqlx::query_as::<_, ProductDailyPriceComparisonDTO>(&final_query)
+                .bind(role_name)
+                .bind(username)
+                .bind(target_status)
+                .bind(page_size)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get products"))?
+        } else {
+            sqlx::query_as::<_, ProductDailyPriceComparisonDTO>(&final_query)
+                .bind(role_name)
+                .bind(username)
+                .bind(target_status)
+                .bind(page_size)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get products"))?
+        };
+
+        Ok(PaginatedProductDailyPriceComparison {
+            data: product_prices,
+            total: total as u64,
+            page,
+            page_size,
+        })
+    }
+
+    
+    /// 通用辅助函数：执行用户产品分页查询
+    ///
+    /// # Arguments
+    /// * `username` - 用户名
+    /// * `role_name` - 用户角色名
+    /// * `query` - 分页查询参数
+    /// * `where_clause` - WHERE条件子句（不包含WHERE关键字）
+    /// * `select_fields` - SELECT字段列表
+    /// * `additional_joins` - 额外的JOIN条件
+    /// * `order_by` - ORDER BY子句
+    ///
+    /// # Returns
+    /// * `PaginatedProductDailyPriceComparison` - 分页结果
+    async fn query_prices_paginated(
+        &self,
+        username: &str,
+        role_name: &str,
+        query: &PriceStatusPaginationParams,
+        where_clause: &str,
+        select_fields: &str,
+        additional_joins: &str,
+        order_by: &str,
+    ) -> Result<PaginatedProductDailyPriceComparison, AppError> {
+        let page = query.page.unwrap_or(1) as u32;
+        let page_size = query.page_size.unwrap_or(50) as u32;
+        let offset = (page - 1) * page_size;
+
+        // 通用的用户分类关联部分
+        let category_join = r#"
         JOIN (
         -- 为一级分类找到所有关联的三级分类
         SELECT c3.id, c1.id AS root_id
@@ -470,77 +688,91 @@ impl PriceRepository for MySqlRepository {
         ) AS category_mapping ON (
         c.id = category_mapping.root_id
         )
-        JOIN 
-        products p ON p.category_id = category_mapping.id
-        LEFT JOIN 
-        product_prices yesterday_pp ON p.id = yesterday_pp.product_id 
-        AND yesterday_pp.status = 'PUBLISHED' 
-        AND yesterday_pp.price_date = DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY)
-        LEFT JOIN (
-        -- 获取价格信息，优先显示当日价格（包括REJECTED状态），如果没有当日价格则显示最近的已发布价格
-        SELECT pp1.*,
-        CASE 
-            WHEN pp1.price_date = CURRENT_DATE THEN 'TODAY' 
-            ELSE 'HISTORY' 
-        END AS price_source
-        FROM product_prices pp1
-        JOIN (
-            SELECT product_id, 
-                CASE 
-                    -- 如果存在当日价格（包括REJECTED状态），则使用当日
-                    WHEN EXISTS (
-                        SELECT 1 FROM product_prices pp_inner 
-                        WHERE pp_inner.product_id = p_outer.product_id 
-                        AND pp_inner.price_date = CURRENT_DATE
-                    ) THEN CURRENT_DATE
-                    -- 否则使用最近的已发布价格日期
-                    ELSE (
-                        SELECT MAX(price_date) 
-                        FROM product_prices 
-                        WHERE product_id = p_outer.product_id 
-                        AND status = ?
-                        AND price_date <= CURRENT_DATE
-                    )
-                END as latest_date
-            FROM product_prices p_outer
-            GROUP BY product_id
-        ) latest ON pp1.product_id = latest.product_id 
-        AND pp1.price_date = latest.latest_date
-        ) AS today_pp ON p.id = today_pp.product_id
-        WHERE 
-        u.username = ?"#;
+        JOIN
+        products p ON p.category_id = category_mapping.id"#;
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(sql);
+        // 构建count查询
+        let mut count_sql = format!(
+            r#"SELECT COUNT(*) as total
+        FROM
+        users u
+        JOIN
+        user_roles ur ON u.id = ur.user_id AND ur.role_id = (SELECT id FROM roles WHERE name = ? LIMIT 1)
+        JOIN
+        user_category_assignments uca ON u.id = uca.user_id
+        JOIN
+        categories c ON uca.category_id = c.id
+        {} {}"#,
+            category_join, additional_joins
+        );
 
-        debug!("Role: {}", role_name);
-        if role_name == "AUDITOR" {
-            if let Some(status) = &query.status {
-                builder.push(" AND EXISTS (SELECT 1 FROM product_prices WHERE product_id = p.id AND price_date = CURRENT_DATE AND status = '");
-                builder.push(status);
-                builder.push("') ");
-            }
+        count_sql.push_str(" WHERE u.username = ?");
+        if !where_clause.is_empty() {
+            count_sql.push_str(" AND ");
+            count_sql.push_str(where_clause);
         }
 
-        builder.push(" ORDER BY c.sort_order, p.id DESC LIMIT ? OFFSET ?;");
-    
-        let status = if role_name == "PRICER" {
-            "PUBLISHED"
-        } else {
-            "PENDING"
-        };
+        debug!("Counting products for user: {}, username: {}, where: {}", role_name, username, where_clause);
 
-        debug!("Query price status: {}", status);
-        let product_prices = builder
-            .build_query_as::<ProductDailyPriceComparisonDTO>()
+        let total: i64 = sqlx::query_scalar(&count_sql)
             .bind(role_name)
-            .bind(status)
             .bind(username)
-            .bind(query.page_size.unwrap())
-            .bind(query.page.unwrap() - 1)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to count products"))?;
+
+        // 如果总数为0，直接返回空结果
+        if total == 0 {
+            return Ok(PaginatedProductDailyPriceComparison {
+                data: vec![],
+                total: 0,
+                page,
+                page_size,
+            });
+        }
+
+        // 构建数据查询
+        let data_sql = format!(
+            r#"SELECT {}
+        FROM
+        users u
+        JOIN
+        user_roles ur ON u.id = ur.user_id AND ur.role_id = (SELECT id FROM roles WHERE name = ? LIMIT 1)
+        JOIN
+        user_category_assignments uca ON u.id = uca.user_id
+        JOIN
+        categories c ON uca.category_id = c.id
+        {} {}"#,
+            select_fields, category_join, additional_joins
+        );
+
+        let mut final_query = data_sql;
+        final_query.push_str(" WHERE u.username = ?");
+        if !where_clause.is_empty() {
+            final_query.push_str(" AND ");
+            final_query.push_str(where_clause);
+        }
+        final_query.push_str(" ORDER BY ");
+        final_query.push_str(order_by);
+        final_query.push_str(" LIMIT ? OFFSET ?");
+
+        debug!("Querying products for user: {}, username: {}, SQL: {}", role_name, username, &final_query);
+
+        let product_prices = sqlx::query_as::<_, ProductDailyPriceComparisonDTO>(&final_query)
+            .bind(role_name)
+            .bind(username)
+            .bind(page_size)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await
-            .map_err(map_db_err!("Failed to get product prices"))?;
-        Ok(product_prices)
+            .map_err(map_db_err!("Failed to get products"))?;
+
+        Ok(PaginatedProductDailyPriceComparison {
+            data: product_prices,
+            total: total as u64,
+            page,
+            page_size,
+        })
     }
 
     async fn aprox_price(&self, query: &AproxPriceParam) -> Result<(), AppError> {

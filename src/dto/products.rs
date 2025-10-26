@@ -33,7 +33,7 @@ pub struct ProductPriceDTO {
     pub price_status: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ProductDailyPriceComparisonDTO {
     #[sqlx(rename = "product_id")]
     #[serde(rename = "id")]
@@ -83,6 +83,19 @@ pub struct ProductDailyPriceComparisonDTO {
     #[serde(rename = "publishDate")]
     #[serde(skip_deserializing)]
     pub publish_date: Option<NaiveDate>,
+}
+
+/// 分页响应数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedProductDailyPriceComparison {
+    /// 产品价格数据列表
+    pub data: Vec<ProductDailyPriceComparisonDTO>,
+    /// 总记录数
+    pub total: u64,
+    /// 当前页码
+    pub page: u32,
+    /// 每页大小
+    pub page_size: u32,
 }
 
 // 产品详情

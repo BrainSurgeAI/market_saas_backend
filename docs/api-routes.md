@@ -22,13 +22,13 @@
 
 ### 用户管理
 
-| 方法 | 路径 | 描述 | 测试状态 |
+| 方法 | 路径 | 描述 | 测试状态 | 权限 |
 |------|------|------|----------|
 | GET | `/api/v1/users/me` | 获取当前用户信息 | p | all |
-| GET | `/api/v1/notifications` | 获取用户通知列表 | ok |
-| PATCH | `/api/v1/notifications/{message_id}` | 标记信息已读 | ok |
+| GET | `/api/v1/notifications` | 获取用户通知列表 | ok | all |
+| PATCH | `/api/v1/notifications/{message_id}` | 标记信息已读 | ok | all |
 | PATCH | `/api/v1/users/{username}` | 更新用户 | |
-| PATCH | `/api/v1/password/reset` | 重置用户密码 | ok |
+| PATCH | `/api/v1/password/reset` | 重置用户密码 | ok | all |
 
 ### 租户管理
 

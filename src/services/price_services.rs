@@ -4,7 +4,7 @@ use tracing::debug;
 use crate::{
     common::{ApiResponse, AppError},
     dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams, PriceStatusPaginationParams, PriceCreateDTO},
-    dto::products::ProductDailyPriceComparisonDTO,
+    dto::products::{PaginatedProductDailyPriceComparison},
     middleware::context::RequestContext,
     repositories::price_traits::PriceRepository,
     utils::validate_json_fmt::Json,
@@ -84,12 +84,12 @@ where
 
 
 /// 获取产品价格
-pub(crate) async fn get_pricer_published_prices<T>(
+pub(crate) async fn get_pricer_daily_price_comparison<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     Query(query): Query<PriceStatusPaginationParams>,
-) -> Result<Json<ApiResponse<Vec<ProductDailyPriceComparisonDTO>>>, AppError>
+) -> Result<Json<ApiResponse<PaginatedProductDailyPriceComparison>>, AppError>
 where
     T: PriceRepository + Send + Sync,
 {
@@ -98,7 +98,7 @@ where
 
     debug!("合并后的查询参数: {:?}", query_with_defaults);
     let product_prices = repo
-        .user_daily_price_comparison(
+        .list_pricer_daily_price_comparison(
             &claims.username,
             &claims.roles[0],
             &query_with_defaults,
@@ -106,6 +106,45 @@ where
         .await?;
     Ok(Json(ApiResponse::new(Some(product_prices), &context)))
 }
+
+/// Get user's price products by status
+///
+/// This function fetches products associated with the user's categories
+/// that have prices with specified status for the current day.
+/// Supports PENDING (待审核), REJECTED (已拒绝), PUBLISHED (已发布) statuses.
+/// This is for PRICER role to see products with different price statuses
+/// # Parameters
+///
+/// * `repo`: Repository implementation for database operations
+/// * `context`: Request context for response metadata
+/// * `claims`: User claims for authentication and authorization
+/// * `query`: Pagination and filtering parameters, including optional status parameter
+///
+/// # Returns
+///
+/// Returns a JSON response containing paginated list of products with specified status prices
+pub(crate) async fn get_user_pending_price_products<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Query(query): Query<PriceStatusPaginationParams>,
+) -> Result<Json<ApiResponse<PaginatedProductDailyPriceComparison>>, AppError>
+where
+    T: PriceRepository + Send + Sync,
+{
+    let mut query_with_defaults = PriceStatusPaginationParams::default();
+    query_with_defaults.merge_from(&query);
+    debug!("合并后的查询参数: {:?}", query_with_defaults);
+    let product_prices = repo
+        .list_price_products_by_status(
+            &claims.username,
+            &claims.roles[0],
+            &query_with_defaults,
+        )
+        .await?;
+    Ok(Json(ApiResponse::new(Some(product_prices), &context)))
+}
+
 
 /// 批量创建产品价格
 pub(crate) async fn batch_create_product_price<T>(
