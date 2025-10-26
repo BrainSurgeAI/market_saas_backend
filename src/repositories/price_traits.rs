@@ -70,7 +70,7 @@ pub(crate) trait PriceRepository: Send + Sync {
     ///
     /// Returns [`AppError`] if the database query or data mapping fails.
 
-    async fn find_price_announcements_by_category_product_name_and_date(
+    async fn list_price_announcements_by_category_product_name_and_date(
         &self,
         query: &PriceQueryParams,
     ) -> Result<Vec<PriceAnnouncement>, AppError>;
@@ -202,7 +202,7 @@ pub(crate) trait PriceRepository: Send + Sync {
 #[async_trait]
 impl PriceRepository for MySqlRepository {
 
-    async fn find_price_announcements_by_category_product_name_and_date(
+    async fn list_price_announcements_by_category_product_name_and_date(
         &self,
         params: &PriceQueryParams,
     ) -> Result<Vec<PriceAnnouncement>, AppError> {
@@ -512,6 +512,7 @@ impl PriceRepository for MySqlRepository {
 
         let mut builder: QueryBuilder<MySql> = QueryBuilder::new(sql);
 
+        debug!("Role: {}", role_name);
         if role_name == "AUDITOR" {
             if let Some(status) = &query.status {
                 builder.push(" AND EXISTS (SELECT 1 FROM product_prices WHERE product_id = p.id AND price_date = CURRENT_DATE AND status = '");
@@ -521,13 +522,14 @@ impl PriceRepository for MySqlRepository {
         }
 
         builder.push(" ORDER BY c.sort_order, p.id DESC LIMIT ? OFFSET ?;");
-
+    
         let status = if role_name == "PRICER" {
             "PUBLISHED"
         } else {
             "PENDING"
         };
 
+        debug!("Query price status: {}", status);
         let product_prices = builder
             .build_query_as::<ProductDailyPriceComparisonDTO>()
             .bind(role_name)

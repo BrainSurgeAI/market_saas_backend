@@ -44,7 +44,7 @@ where
     }
 
     let product_prices = repo
-        .find_price_announcements_by_category_product_name_and_date(&query)
+        .list_price_announcements_by_category_product_name_and_date(&query)
         .await?;
     Ok(Json(ApiResponse::new(Some(product_prices), &context)))
 }

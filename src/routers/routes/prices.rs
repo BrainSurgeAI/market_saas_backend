@@ -12,7 +12,7 @@ use crate::{
 pub(crate) fn prices_routes() -> Router {
     Router::new()
     .route(
-        "/api/v1/tenants/{tenant_hash}/prices/aprox_price",
+        "/api/v1/prices/aprox_price",
         patch(aprox_price::<MySqlRepository>),
     )
     .route(
