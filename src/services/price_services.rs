@@ -1,9 +1,9 @@
-use axum::{extract::Query, Extension};
+use axum::{{extract::Query, Extension}, response::IntoResponse,};
 use tracing::debug;
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams, PriceStatusPaginationParams},
+    dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams, PriceStatusPaginationParams, PriceCreateDTO},
     dto::products::ProductDailyPriceComparisonDTO,
     middleware::context::RequestContext,
     repositories::price_traits::PriceRepository,
@@ -84,7 +84,7 @@ where
 
 
 /// 获取产品价格
-pub async fn get_pricer_published_prices<T>(
+pub(crate) async fn get_pricer_published_prices<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -105,4 +105,24 @@ where
         )
         .await?;
     Ok(Json(ApiResponse::new(Some(product_prices), &context)))
+}
+
+/// 批量创建产品价格
+pub(crate) async fn batch_create_product_price<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Json(product_prices): Json<Vec<PriceCreateDTO>>,
+) -> Result<impl IntoResponse, AppError>
+where
+    T: PriceRepository + Send + Sync,
+{
+    debug!("product_prices: {:?}", product_prices);
+    let result = repo
+        .batch_create_product_price(&claims.username, &product_prices)
+        .await?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ApiResponse::new(Some(result), &context)),
+    ))
 }

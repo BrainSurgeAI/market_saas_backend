@@ -1,11 +1,15 @@
-use axum::{routing::{patch, get}, Router};
+use axum::{routing::{patch, get, post}, Router};
 
 use crate::{
     repositories::my_sql_repository::MySqlRepository, 
-    services::price_services::{aprox_price, get_pricer_published_prices},
+    services::price_services::{
+        aprox_price, 
+        get_pricer_published_prices,
+        batch_create_product_price,
+    },
 };
 
-pub fn prices_routes() -> Router {
+pub(crate) fn prices_routes() -> Router {
     Router::new()
     .route(
         "/api/v1/tenants/{tenant_hash}/prices/aprox_price",
@@ -13,6 +17,7 @@ pub fn prices_routes() -> Router {
     )
     .route(
         "/api/v1/product_prices",
-        get(get_pricer_published_prices::<MySqlRepository>),
+        get(get_pricer_published_prices::<MySqlRepository>)
+        .post(batch_create_product_price::<MySqlRepository>),
     )
 }

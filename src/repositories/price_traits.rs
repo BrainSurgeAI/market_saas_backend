@@ -1,7 +1,13 @@
 use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
-    dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams, PriceStatusPaginationParams},
+    dto::price::{
+        AproxPriceParam, 
+        PriceAnnouncement, 
+        PriceQueryParams, 
+        PriceStatusPaginationParams, 
+        PriceCreateDTO,
+    },
     dto::products::ProductDailyPriceComparisonDTO,
     map_db_err,
 };
@@ -11,7 +17,7 @@ use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
 
 #[async_trait]
-pub trait PriceRepository: Send + Sync {
+pub(crate) trait PriceRepository: Send + Sync {
 
     /// Fetches published price announcements with optional filtering by category, product name, and date.
     ///
@@ -185,6 +191,12 @@ pub trait PriceRepository: Send + Sync {
 
 
     async fn aprox_price(&self, query: &AproxPriceParam) -> Result<(), AppError>;
+
+    async fn batch_create_product_price(
+        &self,
+        username: &str,
+        product_prices: &[PriceCreateDTO],
+    ) -> Result<u64, AppError>;
 }
 
 #[async_trait]
@@ -549,5 +561,73 @@ impl PriceRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to update product price status"))?;
 
         Ok(())
+    }
+
+    async fn batch_create_product_price(
+        &self,
+        username: &str,
+        product_prices: &[PriceCreateDTO],
+    ) -> Result<u64, AppError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        // TODO: 检查产品是否存在或状态是否为REJECTED，如果存在并状态为REJECTED，则不进行插入
+        // 将原状态更改为PENDING，其他状态则不允许插入和更改
+
+        // 获取用户信息和市场ID
+        let user_info = sqlx::query!(
+            r#"
+            select u.name as name, t.id as market_id from users u INNER join tenants t on u.tenant_id = t.id where u.username=?;
+            "#,
+            username
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get user info"))?;
+
+        let created_by = user_info.name;
+        let market_id = user_info.market_id;
+
+        // 准备批量插入语句
+        let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(
+            "INSERT INTO product_prices (product_id, min_price, max_price, avg_price, min_price_change, max_price_change, avg_price_change, market_id, created_by) "
+        );
+
+        query_builder.push_values(product_prices, |mut b, price| {
+            b.push_bind(price.product_id)
+                .push_bind(price.min_price)
+                .push_bind(price.max_price)
+                .push_bind(price.avg_price)
+                .push_bind(price.min_price_change)
+                .push_bind(price.max_price_change)
+                .push_bind(price.avg_price_change)
+                .push_bind(market_id)
+                .push_bind(&created_by);
+        });
+
+        // 如果存在则更新，否则插入，并设置状态为PENDING
+        // 在业务流程上，产品数据第一次提交后除了在REJECTED状态外，其他状态在前端都设置为不编辑不可提交
+        // 所以这进行更新操作，意味着询价员对REJECTED状态的产品进行了修改
+        query_builder.push(
+            " ON DUPLICATE KEY UPDATE 
+            min_price = VALUES(min_price),
+            max_price = VALUES(max_price),
+            avg_price = VALUES(avg_price),
+            min_price_change = VALUES(min_price_change),
+            max_price_change = VALUES(max_price_change),
+            avg_price_change = VALUES(avg_price_change),
+            updated_at = NOW(),
+            status = 'PENDING'",
+        );
+
+        // 执行查询
+        let result = query_builder.build().execute(&mut *tx).await?;
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(result.rows_affected())
     }
 }

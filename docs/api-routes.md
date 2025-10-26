@@ -1,28 +1,30 @@
 # API Routes Documentation
 
+### 测试状态 ok 代表后端接口测试完成，但还没有与前端联调， P代表联调完成
+
 ## Public Path (公开路径)
 
 | 方法 | 路径 | 描述 | 测试状态 |
 |------|------|------|----------|
-| GET | `/api/v1/login` | 用户登录 | ok |
+| GET | `/api/v1/login` | 用户登录 | P |
 | GET | `/api/v1/register` | 用户注册页面 | |
-| GET | `/api/v1/categories` | 获取一级分类 | ok |
-| GET | `/api/v1/price_announcements` | 获取价格公告 | ok |
+| GET | `/api/v1/categories` | 获取一级分类 | P |
+| GET | `/api/v1/price_announcements` | 获取价格公告 | P |
 | GET | `/api/v1/openapi.json` | OpenAPI文档 | ok |
 
 ## Protected Path (受保护路径)
 
 ### 工作区
 
-| 方法 | 路径 | 描述 | 测试状态 |
+| 方法 | 路径 | 描述 | 测试状态 | 角色 |
 |------|------|------|----------|
-| GET | `/api/v1/workspace` | 工作区欢迎信息 | ok |
+| GET | `/api/v1/workspace` | 工作区欢迎信息 | ok | 无角色使用，可以删除 |
 
 ### 用户管理
 
 | 方法 | 路径 | 描述 | 测试状态 |
 |------|------|------|----------|
-| GET | `/api/v1/users/me` | 获取当前用户信息 | ok |
+| GET | `/api/v1/users/me` | 获取当前用户信息 | p | all |
 | GET | `/api/v1/notifications` | 获取用户通知列表 | ok |
 | PATCH | `/api/v1/notifications/{message_id}` | 标记信息已读 | ok |
 | PATCH | `/api/v1/users/{username}` | 更新用户 | |
@@ -32,7 +34,7 @@
 
 | 方法 | 路径 | 描述 | 测试状态 |
 |------|------|------|----------|
-| GET | `/api/v1/tenants/me` | 获取当前租户详情 | ok |
+| GET | `/api/v1/tenants/me` | 获取当前租户详情 | p | all |
 | GET | `/api/v1/users/{username}/tenants` | 获取用户所属租户信息 | |
 | GET | `/api/v1/tenants` | 根据市场获取租户列表 | |
 | GET | `/api/v1/financials` | 获取租户财务信息 | |
@@ -67,7 +69,7 @@
 
 | 方法 | 路径 | 描述 | 测试状态 |
 |------|------|------|----------|
-| GET | `/api/v1/product_price_status_stats` | 获取产品价格状态统计 | |
+| GET | `/api/v1/product_price_status_stats` | 获取产品价格状态统计 | ok |
 | GET | `/api/v1/tenants/{tenant_hash}/products/{product_code}` | 获取产品详情 | |
 | GET | `/api/v1/tenants/{tenant_hash}/products` | 获取产品概览 | |
 | GET | `/api/v1/customers/{tenant_hash}/products` | 获取产品列表 | |

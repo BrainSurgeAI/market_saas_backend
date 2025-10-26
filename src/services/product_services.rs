@@ -2,9 +2,13 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::{
         products::{
-            PriceStatusResponseDTO, ProcessingFeeDTO,
-            ProductDetailResponse, ProductListDTO, ProductListQueryParams, ProductOverviewResponse,
-            PriceCreateDTO, UpdateProductRequestDTO,
+            PriceStatusResponseDTO, 
+            ProcessingFeeDTO,
+            ProductDetailResponse,
+            ProductListDTO, 
+            ProductListQueryParams, 
+            ProductOverviewResponse,
+            UpdateProductRequestDTO,
         },
     },
     middleware::context::RequestContext,
@@ -14,7 +18,6 @@ use crate::{
 };
 use axum::{
     extract::{Path, Query},
-    response::IntoResponse,
     Extension,
 };
 use tracing::debug;
@@ -39,28 +42,8 @@ where
 }
 
 
-/// 批量创建产品价格
-pub async fn batch_create_product_price<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-    Path(username): Path<String>,
-    Json(product_prices): Json<Vec<PriceCreateDTO>>,
-) -> Result<impl IntoResponse, AppError>
-where
-    T: ProductRepository + Send + Sync,
-{
-    debug!("product_prices: {:?}", product_prices);
-    let result = repo
-        .batch_create_product_price(&username, &product_prices)
-        .await?;
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(ApiResponse::new(Some(result), &context)),
-    ))
-}
-
 /// 获取当日价格状态统计
-pub async fn get_product_price_status_stats<T>(
+pub(crate) async fn get_product_price_status_stats<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>
@@ -74,7 +57,7 @@ where
     Ok(Json(ApiResponse::new(Some(stats), &context)))
 }
 
-pub async fn get_product_list<T>(
+pub(crate) async fn get_product_list<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path(tenant_hash): Path<String>,
@@ -90,7 +73,7 @@ where
 /// 根据 tenant_hash 和 product_code 获取产品详情
 /// Path: /api/v1/tenants/{tenant_hash}/products/{product_code} 中的tenant_hash是market_hash
 /// 只有market类型租户可以维护产品信息，根据tenant_hash与claims.tenant_name对比，如果相同，则断定当前是market类型租户在访问
-pub async fn get_product_detail<T>(
+pub(crate) async fn get_product_detail<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -106,7 +89,7 @@ where
 }
 
 /// 更新产品状态
-pub async fn update_product_status<T>(
+pub(crate) async fn update_product_status<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path((_tenant_hash, product_code)): Path<(String, String)>,
@@ -119,7 +102,7 @@ where
 }
 
 /// 更新产品
-pub async fn update_product<T>(
+pub(crate) async fn update_product<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path((_tenant_hash, product_code)): Path<(String, String)>,
@@ -134,7 +117,7 @@ where
 }
 
 /// 获取产品处理费用
-pub async fn get_processing_fees<T>(
+pub(crate) async fn get_processing_fees<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
 ) -> Result<Json<ApiResponse<Vec<ProcessingFeeDTO>>>, AppError>

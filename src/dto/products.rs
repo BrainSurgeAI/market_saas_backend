@@ -172,30 +172,7 @@ pub struct ProductDetailResponse {
     pub processing_fees: Option<Vec<ProcessingFeeDTO>>,
 }
 
-// 批量创建产品价格 DTO
-#[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct PriceCreateDTO {
-    #[serde(rename = "productId")]
-    pub product_id: i32,
 
-    #[serde(rename = "minPrice")]
-    pub min_price: Decimal,
-
-    #[serde(rename = "minPriceDiff")]
-    pub min_price_change: Decimal,
-
-    #[serde(rename = "avgPrice")]
-    pub avg_price: Decimal,
-
-    #[serde(rename = "avgPriceDiff")]
-    pub avg_price_change: Decimal,
-
-    #[serde(rename = "maxPrice")]
-    pub max_price: Decimal,
-
-    #[serde(rename = "maxPriceDiff")]
-    pub max_price_change: Decimal,
-}
 
 // 价格状态统计 DTO
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -857,46 +834,6 @@ mod tests {
             let json = serde_json::to_value(&response).unwrap();
             assert!(json.get("product").is_some());
             assert!(json["processingFees"].is_null());
-        }
-    }
-
-    // Tests for ProductPriceCreateDTO
-    mod product_price_create_tests {
-        use super::*;
-
-        #[test]
-        fn test_field_mapping() {
-            let dto = PriceCreateDTO {
-                product_id: 1,
-                min_price: create_decimal("5.00"),
-                min_price_change: create_decimal("0.10"),
-                avg_price: create_decimal("6.00"),
-                avg_price_change: create_decimal("0.05"),
-                max_price: create_decimal("7.00"),
-                max_price_change: create_decimal("-0.05"),
-            };
-
-            let json = serde_json::to_value(&dto).unwrap();
-
-            // Test field renaming
-            assert!(json.get("productId").is_some());
-            assert!(json.get("minPrice").is_some());
-            assert!(json.get("minPriceDiff").is_some());
-            assert!(json.get("avgPrice").is_some());
-            assert!(json.get("avgPriceDiff").is_some());
-            assert!(json.get("maxPrice").is_some());
-            assert!(json.get("maxPriceDiff").is_some());
-
-            // Test original field names are not present
-            assert!(json.get("product_id").is_none());
-            assert!(json.get("min_price").is_none());
-            assert!(json.get("min_price_change").is_none());
-            assert!(json.get("avg_price_change").is_none());
-            assert!(json.get("max_price_change").is_none());
-
-            assert_eq!(json["productId"], 1);
-            assert_eq!(json["minPrice"], "5.00");
-            assert_eq!(json["avgPrice"], "6.00");
         }
     }
 

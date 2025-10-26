@@ -55,6 +55,31 @@ pub struct AproxPriceParam {
     pub products: Vec<i32>,
 }
 
+// 批量创建产品价格 DTO
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub(crate) struct PriceCreateDTO {
+    #[serde(rename = "productId")]
+    pub(crate) product_id: i32,
+
+    #[serde(rename = "minPrice")]
+    pub(crate) min_price: Decimal,
+
+    #[serde(rename = "minPriceDiff")]
+    pub(crate) min_price_change: Decimal,
+
+    #[serde(rename = "avgPrice")]
+    pub(crate) avg_price: Decimal,
+
+    #[serde(rename = "avgPriceDiff")]
+    pub(crate) avg_price_change: Decimal,
+
+    #[serde(rename = "maxPrice")]
+    pub(crate) max_price: Decimal,
+
+    #[serde(rename = "maxPriceDiff")]
+    pub(crate) max_price_change: Decimal,
+}
+
 /// 价格查询参数 DTO
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub(crate) struct PriceQueryParams {
