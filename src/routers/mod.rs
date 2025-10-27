@@ -1,4 +1,12 @@
-pub mod router;
-pub mod routes;
-
-pub use routes::*;
+mod categories;
+mod delivery_staff;
+mod discounts;
+mod orders;
+mod prices;
+mod products;
+mod reconciliation_statement;
+mod roles;
+pub mod router_config;
+mod tenants;
+mod users;
+mod workspace;

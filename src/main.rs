@@ -19,7 +19,7 @@ use crate::acl_core::{
 };
 use crate::{
     acl_core::acl_snapshot::ACL_SNAPSHOT,
-    routers::router::create_router,
+    routers::router_config::create_router
 };
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
