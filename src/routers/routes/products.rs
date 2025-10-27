@@ -46,7 +46,7 @@ pub(crate) fn products_routes() -> Router {
             get(get_product_list::<MySqlRepository>),
         )
         .route(
-            "/api/v1/processing_fees",
+            "/api/v1/processing-fees",
             get(get_processing_fees::<MySqlRepository>),
         )
 }
