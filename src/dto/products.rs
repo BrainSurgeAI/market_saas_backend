@@ -135,6 +135,9 @@ pub struct ProductDetailDTO {
     pub tax_rate: Option<Decimal>,
 
     pub image: Option<String>,
+
+    #[serde(rename = "isDisabled")]
+    pub is_disabled: bool
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -458,6 +461,7 @@ mod tests {
             tips: Some("建议冷藏".to_string()),
             tax_rate: Some(create_decimal("0.13")),
             image: Some("apple.jpg".to_string()),
+            is_disabled: false
         }
     }
 
@@ -713,6 +717,7 @@ mod tests {
                 tips: None,
                 tax_rate: None,
                 image: None,
+                is_disabled: false
             };
 
             let json = serde_json::to_value(&dto).unwrap();

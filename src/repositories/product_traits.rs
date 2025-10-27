@@ -397,12 +397,12 @@ ORDER BY
         // 根据是否是owner，获取不同的产品信息，owner获取该信息主要用于产品管理，非owner获取该信息主要用于客户获取产品信息
         let sql = if is_owner {
             r#"SELECT p.product_code, p.name, p.unit, p.product_description, p.brand, p.shelf_life,
-         p.storage_conditions, p.pricing_method, p.tips, p.special_notes, p.min_order_quantity, p.tax_rate, img.temp_url as image FROM products p 
+         p.storage_conditions, p.pricing_method, p.tips, p.special_notes, p.min_order_quantity, p.tax_rate, img.temp_url as image, p.is_disabled FROM products p 
          JOIN temp_image_urls img ON p.product_code = img.product_code
          WHERE p.product_code = ?"#
         } else {
             r#"SELECT p.product_code, p.name, p.unit, p.product_description, p.brand, p.shelf_life,
-         p.storage_conditions, p.pricing_method, p.tips, p.special_notes, p.min_order_quantity, p.tax_rate, img.temp_url as image FROM products p 
+         p.storage_conditions, p.pricing_method, p.tips, p.special_notes, p.min_order_quantity, p.tax_rate, img.temp_url as image, p.is_disabled FROM products p 
          INNER JOIN product_prices pp ON p.id = pp.product_id 
          INNER JOIN temp_image_urls img ON p.product_code = img.product_code
          WHERE p.is_disabled = 0 AND pp.price_date = (CURDATE()) AND p.product_code = ?"#
@@ -457,6 +457,7 @@ ORDER BY
                     tips: product_detail.tips,
                     tax_rate: product_detail.tax_rate,
                     image: product_detail.image,
+                    is_disabled: product_detail.is_disabled
                 },
                 processing_fees: Some(processing_fees),
             };
@@ -484,7 +485,10 @@ ORDER BY
         let mut tx = self.pool.begin().await?;
 
         // 更新产品基本信息
-        let sql = "UPDATE products SET name = ?, unit = ?, product_description = ?, brand = ?, shelf_life = ?, storage_conditions = ?, pricing_method = ?, tips = ?, special_notes = ?, min_order_quantity = ?, tax_rate = ? WHERE product_code = ?";
+        let sql = r#"UPDATE products SET name = ?, unit = ?, product_description = ?, brand = ?, 
+            shelf_life = ?, storage_conditions = ?, pricing_method = ?, tips = ?, special_notes = ?, 
+            min_order_quantity = ?, tax_rate = ? 
+            WHERE product_code = ?"#;
         sqlx::query(sql)
             .bind(&product.name)
             .bind(&product.unit)
