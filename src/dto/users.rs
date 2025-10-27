@@ -57,15 +57,15 @@ pub struct UserResponseDto {
 #[derive(
     Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Validate, FromRow, utoipa::ToSchema,
 )]
-pub struct UserUpdateDto {
+pub(crate) struct UserUpdateDto {
     #[validate(length(min = 2, max = 16))]
-    pub name: String,
+    pub(crate) name: String,
 
     #[validate(custom(function = validate_email))]
-    pub email: String,
+    pub(crate) email: String,
 
     #[validate(custom(function = validate_phone))]
-    pub phone: String,
+    pub(crate) phone: String,
 }
 
 // Constructor methods for better ergonomics

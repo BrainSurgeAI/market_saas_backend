@@ -2,13 +2,10 @@ use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     dto::price::{
-        AproxPriceParam, 
-        PriceAnnouncement, 
-        PriceQueryParams, 
-        PriceStatusPaginationParams, 
-        PriceCreateDTO,
+        PriceAnnouncement, PriceApprovalParam, PriceCreateDTO, PriceQueryParams,
+        PriceStatusPaginationParams,
     },
-    dto::products::{ProductDailyPriceComparisonDTO, PaginatedProductDailyPriceComparison},
+    dto::products::{PaginatedProductDailyPriceComparison, ProductDailyPriceComparisonDTO},
     map_db_err,
 };
 use async_trait::async_trait;
@@ -18,10 +15,9 @@ use tracing::{debug, error};
 
 #[async_trait]
 pub(crate) trait PriceRepository: Send + Sync {
-
     /// Fetches published price announcements with optional filtering by category, product name, and date.
     ///
-    /// This function dynamically builds and executes a SQL query to retrieve the latest published prices 
+    /// This function dynamically builds and executes a SQL query to retrieve the latest published prices
     /// for products, including their price changes (min, avg, max) compared to the previous record.
     ///
     /// ### Date logic
@@ -50,7 +46,7 @@ pub(crate) trait PriceRepository: Send + Sync {
     /// ### Implementation details
     /// - Uses [`sqlx::QueryBuilder`] to dynamically assemble a complex SQL query.  
     /// - Joins category hierarchy (`level1 → level2 → level3`) and product tables.  
-    /// - Uses a subquery to identify the latest published price date per product, 
+    /// - Uses a subquery to identify the latest published price date per product,
     ///   handling cases where the current date has no published record.
     /// - Computes price changes based on whether the current time is before or after noon.
     ///
@@ -74,7 +70,6 @@ pub(crate) trait PriceRepository: Send + Sync {
         &self,
         query: &PriceQueryParams,
     ) -> Result<Vec<PriceAnnouncement>, AppError>;
-
 
     async fn list_pricer_daily_price_comparison(
         &self,
@@ -122,8 +117,13 @@ pub(crate) trait PriceRepository: Send + Sync {
         order_by: &str,
     ) -> Result<PaginatedProductDailyPriceComparison, AppError>;
 
-
-    async fn aprox_price(&self, query: &AproxPriceParam) -> Result<(), AppError>;
+    /// Aprox price by auditor user
+    /// This method is batch operation
+    async fn approve_price(
+        &self,
+        apprived_by: &str,
+        approval_params: &PriceApprovalParam,
+    ) -> Result<(), AppError>;
 
     async fn batch_create_product_price(
         &self,
@@ -134,7 +134,6 @@ pub(crate) trait PriceRepository: Send + Sync {
 
 #[async_trait]
 impl PriceRepository for MySqlRepository {
-
     async fn list_price_announcements_by_category_product_name_and_date(
         &self,
         params: &PriceQueryParams,
@@ -319,7 +318,6 @@ impl PriceRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to get product prices"))
     }
 
-
     /// Get daily price comparison for PRICER users
     ///
     /// Retrieves products associated with the PRICER user's assigned categories
@@ -416,7 +414,8 @@ impl PriceRepository for MySqlRepository {
             select_fields,
             additional_joins,
             order_by,
-        ).await
+        )
+        .await
     }
 
     async fn list_price_products_by_status(
@@ -429,13 +428,20 @@ impl PriceRepository for MySqlRepository {
         let target_status = if let Some(status) = &query.status {
             match status.as_str() {
                 "PENDING" | "REJECTED" | "PUBLISHED" => status.as_str(),
-                _ => return Err(AppError::validation("Invalid status. Must be one of: PENDING, REJECTED, PUBLISHED")),
+                _ => {
+                    return Err(AppError::validation(
+                        "Invalid status. Must be one of: PENDING, REJECTED, PUBLISHED",
+                    ))
+                }
             }
         } else {
             "PENDING"
         };
 
-        debug!("Querying {} status products for user: {}, username: {}", target_status, role_name, username);
+        debug!(
+            "Querying {} status products for user: {}, username: {}",
+            target_status, role_name, username
+        );
 
         let select_fields = r#"p.id AS product_id,
         p.name AS product_name,
@@ -553,7 +559,10 @@ impl PriceRepository for MySqlRepository {
         }
         count_sql.push_str(where_clause);
 
-        debug!("Counting products for user: {}, username: {}, where: {}, is_pricer: {}", role_name, username, where_clause, is_pricer_role);
+        debug!(
+            "Counting products for user: {}, username: {}, where: {}, is_pricer: {}",
+            role_name, username, where_clause, is_pricer_role
+        );
 
         let total: i64 = if is_pricer_role {
             sqlx::query_scalar(&count_sql)
@@ -601,7 +610,7 @@ impl PriceRepository for MySqlRepository {
         final_query.push_str(order_by);
         final_query.push_str(" LIMIT ? OFFSET ?");
 
-       // debug!("Querying products for user: {}, username: {}, SQL: {}", role_name, username, &final_query);
+        // debug!("Querying products for user: {}, username: {}, SQL: {}", role_name, username, &final_query);
 
         let product_prices = if is_pricer_role {
             sqlx::query_as::<_, ProductDailyPriceComparisonDTO>(&final_query)
@@ -633,7 +642,6 @@ impl PriceRepository for MySqlRepository {
         })
     }
 
-    
     /// 通用辅助函数：执行用户产品分页查询
     ///
     /// # Arguments
@@ -712,7 +720,10 @@ impl PriceRepository for MySqlRepository {
             count_sql.push_str(where_clause);
         }
 
-        debug!("Counting products for user: {}, username: {}, where: {}", role_name, username, where_clause);
+        debug!(
+            "Counting products for user: {}, username: {}, where: {}",
+            role_name, username, where_clause
+        );
 
         let total: i64 = sqlx::query_scalar(&count_sql)
             .bind(role_name)
@@ -756,7 +767,10 @@ impl PriceRepository for MySqlRepository {
         final_query.push_str(order_by);
         final_query.push_str(" LIMIT ? OFFSET ?");
 
-        debug!("Querying products for user: {}, username: {}, SQL: {}", role_name, username, &final_query);
+        debug!(
+            "Querying products for user: {}, username: {}, SQL: {}",
+            role_name, username, &final_query
+        );
 
         let product_prices = sqlx::query_as::<_, ProductDailyPriceComparisonDTO>(&final_query)
             .bind(role_name)
@@ -775,25 +789,49 @@ impl PriceRepository for MySqlRepository {
         })
     }
 
-    async fn aprox_price(&self, query: &AproxPriceParam) -> Result<(), AppError> {
+    async fn approve_price(
+        &self,
+        approved_by: &str,
+        approval_params: &PriceApprovalParam,
+    ) -> Result<(), AppError> {
+        let tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Faild to begin transaction"))?;
+
         let mut builder = QueryBuilder::new("UPDATE product_prices SET status = ");
 
-        builder.push_bind(&query.status);
+        let status = approval_params.status.to_uppercase();
+        builder.push_bind(status);
+        builder.push(" ,approved_by = ").push_bind(approved_by);
+        builder.push(" ,approved_at = CURRENT_TIMESTAMP ");
+
+        if approval_params.remark.is_some() {
+            builder
+                .push(", remark = ")
+                .push_bind(approval_params.remark.as_ref());
+        }
         builder.push(" WHERE price_date = CURRENT_DATE AND product_id IN (");
 
         let mut separated = builder.separated(", ");
-        for product_id in &query.products {
+        for product_id in &approval_params.products {
             separated.push_bind(product_id);
         }
 
-        separated.push_unseparated(")");
+        separated.push_unseparated(");");
+
+        debug!("Row sql: {}", builder.sql());
 
         builder
             .build()
             .execute(&self.pool)
             .await
             .map_err(map_db_err!("Failed to update product price status"))?;
-
+        debug!("Row sql: {}", builder.sql());
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
         Ok(())
     }
 

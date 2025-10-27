@@ -1,14 +1,26 @@
-use axum::{{extract::Query, Extension}, response::IntoResponse,};
+use axum::{
+    response::IntoResponse,
+    {
+        extract::Query,
+        Extension,
+    },
+};
+
 use tracing::debug;
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::price::{AproxPriceParam, PriceAnnouncement, PriceQueryParams, PriceStatusPaginationParams, PriceCreateDTO},
-    dto::products::{PaginatedProductDailyPriceComparison},
+    dto::{
+        price::{
+            PriceAnnouncement, PriceApprovalParam, PriceCreateDTO, PriceQueryParams,
+            PriceStatusPaginationParams,
+        },
+        products::PaginatedProductDailyPriceComparison, ValidatedJSON,
+    },
     middleware::context::RequestContext,
+    models::claims::Claims,
     repositories::price_traits::PriceRepository,
     utils::validate_json_fmt::Json,
-    models::claims::Claims
 };
 
 /// Get price announcements
@@ -54,10 +66,10 @@ where
 /// 此接口用于变更产品每日价格的状态，可以将状态从 PENDING 变更为 APPROVE、REJECTED 或 PUBLISHED。
 ///
 /// ## 请求路径
-/// `PATCH /api/v1/tenants/{tenant_id}/products/aprox_price`
+/// `PATCH /api/v1/tenants/{hashed_name}/products/approve_price`
 ///
 /// ## 路径参数
-/// - `tenant_id`: 租户ID
+/// - `hashed_name`: hashed name of tenant name
 /// - `product_code`: 产品编码
 ///
 /// ## 请求体
@@ -69,19 +81,23 @@ where
 /// ## 权限要求
 /// 需要 `price:update` 权限
 
-pub(crate) async fn aprox_price<T>(
+pub(crate) async fn approve_price<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Json(query): Json<AproxPriceParam>,
+    Extension(claims): Extension<Claims>,
+    ValidatedJSON(approve): ValidatedJSON<PriceApprovalParam>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: PriceRepository + Send + Sync,
 {
-    debug!("AproxPrice: {:?}", query);
-    repo.aprox_price(&query).await?;
+    debug!("AproxPrice: {:?}", approve);
+    if approve.products.is_empty() {
+        return Err(AppError::Validation("Products is empty".to_string()));
+    }
+    
+    repo.approve_price(&claims.username,&approve).await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
-
 
 /// 获取产品价格
 pub(crate) async fn get_pricer_daily_price_comparison<T>(
@@ -136,15 +152,10 @@ where
     query_with_defaults.merge_from(&query);
     debug!("合并后的查询参数: {:?}", query_with_defaults);
     let product_prices = repo
-        .list_price_products_by_status(
-            &claims.username,
-            &claims.roles[0],
-            &query_with_defaults,
-        )
+        .list_price_products_by_status(&claims.username, &claims.roles[0], &query_with_defaults)
         .await?;
     Ok(Json(ApiResponse::new(Some(product_prices), &context)))
 }
-
 
 /// 批量创建产品价格
 pub(crate) async fn batch_create_product_price<T>(

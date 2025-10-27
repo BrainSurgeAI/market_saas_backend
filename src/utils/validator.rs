@@ -1,3 +1,4 @@
+//use anyhow::Ok;
 use regex::Regex;
 use validator::ValidationError;
 
@@ -13,7 +14,7 @@ use validator::ValidationError;
 /// * `bool` - True if username meets all requirements, false otherwise
 ///
 
-pub fn validate_username(username: &str) -> bool {
+pub(crate) fn validate_username(username: &str) -> bool {
     let username_regex = Regex::new(r"^[a-zA-Z0-9]{6,32}$").unwrap();
     username_regex.is_match(username)
 }
@@ -34,7 +35,7 @@ pub fn validate_username(username: &str) -> bool {
 /// * `bool` - True if password meets all requirements, false otherwise
 ///
 
-pub fn check_password(password: &str) -> bool {
+pub(crate) fn check_password(password: &str) -> bool {
     if password.len() < 8 || password.len() > 16 || password.contains(' ') {
         return false;
     }
@@ -50,7 +51,7 @@ pub fn check_password(password: &str) -> bool {
 }
 
 // 适配函数，将bool返回转换为Result返回
-pub fn validate_password(password: &str) -> Result<(), ValidationError> {
+pub(crate) fn validate_password(password: &str) -> Result<(), ValidationError> {
     if check_password(password) {
         Ok(())
     } else {
@@ -58,7 +59,7 @@ pub fn validate_password(password: &str) -> Result<(), ValidationError> {
     }
 }
 
-pub fn validate_email(email: &str) -> Result<(), ValidationError> {
+pub(crate) fn validate_email(email: &str) -> Result<(), ValidationError> {
     let email_regex = Regex::new(
         r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$"
     ).unwrap();
@@ -72,6 +73,15 @@ pub fn validate_email(email: &str) -> Result<(), ValidationError> {
     }
     Ok(())
 }
+
+pub(crate) fn validate_apprive_status(status: &str) -> Result<(), ValidationError> {
+    if status.to_lowercase() != "approved" && status.to_lowercase() != "rejected" {
+        return Err(ValidationError::new("Invalid status"));
+    }
+
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -138,5 +148,15 @@ mod tests {
         assert!(validate_email("user@exam ple.com").is_err());
         assert!(validate_email("user@@example.com").is_err());
         assert!(validate_email("user@example..com").is_err());
+    }
+
+    #[test]
+    fn test_validate_approve_status() {
+        assert!(validate_apprive_status("PUBLISHED").is_err());
+        assert!(validate_apprive_status("Unknown").is_err());
+        assert!(validate_apprive_status("REJECT").is_ok());
+        assert!(validate_apprive_status("APPROVE").is_ok());
+        assert!(validate_apprive_status("reject").is_ok());
+        assert!(validate_apprive_status("approve").is_ok());
     }
 }

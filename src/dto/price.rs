@@ -1,8 +1,10 @@
 use chrono::NaiveDate;
-
 use serde::{Deserialize, Serialize};
 use sqlx::types::Decimal;
 use sqlx::FromRow;
+use validator::Validate;
+
+use crate::utils::validator::validate_apprive_status;
 
 /// 价格公示数据 DTO
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -48,11 +50,15 @@ pub struct PriceAnnouncement {
     pub price_date: Option<NaiveDate>,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct AproxPriceParam {
-    pub status: String,
-    pub remark: Option<String>,
-    pub products: Vec<i32>,
+#[derive(Debug, Serialize, Deserialize, FromRow, Validate)]
+pub(crate) struct PriceApprovalParam {
+
+    #[validate(custom(function = validate_apprive_status))]
+    pub(crate) status: String,
+    pub(crate) products: Vec<i32>,
+
+    #[validate(length(min =4, max = 32))]
+    pub(crate) remark: Option<String>,
 }
 
 // 批量创建产品价格 DTO
@@ -269,8 +275,8 @@ mod tests {
         }
     }
 
-    fn create_test_aprox_price_param() -> AproxPriceParam {
-        AproxPriceParam {
+    fn create_test_aprox_price_param() -> PriceApprovalParam {
+        PriceApprovalParam {
             status: "APPROVED".to_string(),
             remark: Some("价格合理".to_string()),
             products: vec![1, 2, 3],
@@ -416,7 +422,7 @@ mod tests {
 
         #[test]
         fn test_aprox_price_param_with_none_remark() {
-            let param = AproxPriceParam {
+            let param = PriceApprovalParam {
                 status: "REJECTED".to_string(),
                 remark: None,
                 products: vec![5, 10],
@@ -430,7 +436,7 @@ mod tests {
 
         #[test]
         fn test_aprox_price_param_empty_products() {
-            let param = AproxPriceParam {
+            let param = PriceApprovalParam {
                 status: "PENDING".to_string(),
                 remark: Some("无产品".to_string()),
                 products: vec![],
@@ -450,7 +456,7 @@ mod tests {
                 "products": [100, 200, 300, 400]
             });
 
-            let param: AproxPriceParam = serde_json::from_value(json_data).unwrap();
+            let param: PriceApprovalParam = serde_json::from_value(json_data).unwrap();
             assert_eq!(param.status, "PUBLISHED");
             assert_eq!(param.remark, Some("批量发布".to_string()));
             assert_eq!(param.products, vec![100, 200, 300, 400]);
