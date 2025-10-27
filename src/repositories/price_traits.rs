@@ -427,7 +427,7 @@ impl PriceRepository for MySqlRepository {
         // 确定要查询的状态，默认为PENDING
         let target_status = if let Some(status) = &query.status {
             match status.as_str() {
-                "PENDING" | "REJECTED" | "PUBLISHED" => status.as_str(),
+                "PENDING" | "REJECTED" | "PUBLISHED" | "APPROVED" => status,
                 _ => {
                     return Err(AppError::validation(
                         "Invalid status. Must be one of: PENDING, REJECTED, PUBLISHED",
