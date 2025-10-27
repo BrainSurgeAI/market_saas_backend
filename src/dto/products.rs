@@ -244,12 +244,15 @@ pub struct ProcessingFeeDTO {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ProductListQueryParams {
-    pub page: Option<i32>,
-    pub page_size: Option<i32>,
-    pub category_id: Option<i32>,
-    pub name: Option<String>,
-    pub is_disabled: Option<bool>,
+pub(crate) struct ProductListQueryParams {
+    pub(crate) page: Option<i32>,
+
+    #[serde(rename="pageSize")]
+    pub(crate) page_size: Option<i32>,
+
+    pub(crate) category_id: Option<i32>,
+    pub(crate) name: Option<String>,
+    pub(crate) is_disabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]

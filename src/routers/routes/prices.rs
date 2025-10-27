@@ -22,7 +22,7 @@ pub(crate) fn prices_routes() -> Router {
             get(get_user_pending_price_products::<MySqlRepository>),
         )
         .route(
-            "/api/v1/tenants/{hashed_name}/prices/approve_price",
+            "/api/v1/tenants/{hashed_name}/prices/approve-price",
             patch(approve_price::<MySqlRepository>),
         )
 }
