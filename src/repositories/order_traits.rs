@@ -34,7 +34,7 @@ use tracing::{debug, error, info};
 ///
 /// 所有方法都返回 `Result<T, AppError>` 类型，以便统一错误处理
 #[async_trait]
-pub trait OrderRepository: Send + Sync {
+pub(crate) trait OrderRepository: Send + Sync {
     async fn create_order(
         &self,
         market_id: i32,
@@ -1160,6 +1160,7 @@ impl OrderRepository for MySqlRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(map_db_err!("Failed to get accepted orders"))?,
+            TenantType::Unknown => return Err(AppError::Validation("Unknown tenant type".to_string()))
         };
 
         Ok(orders)

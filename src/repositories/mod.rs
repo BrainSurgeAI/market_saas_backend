@@ -1,6 +1,6 @@
 use chrono::Utc;
 use rand::Rng;
-use std::fmt;
+use std::fmt::{self, write};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::debug;
 
@@ -51,6 +51,7 @@ pub(crate) enum TenantType {
     Customer,
     Provider,
     Market,
+    Unknown
 }
 
 impl fmt::Display for TenantType {
@@ -59,6 +60,7 @@ impl fmt::Display for TenantType {
             TenantType::Customer => write!(f, "CUSTOMER"),
             TenantType::Provider => write!(f, "PROVIDER"),
             TenantType::Market => write!(f, "MARKET"),
+            TenantType::Unknown => write!(f, "UnknownType")
         }
     }
 }
@@ -66,10 +68,10 @@ impl fmt::Display for TenantType {
 impl From<&str> for TenantType {
     fn from(s: &str) -> Self {
         match s {
-            "CUSTOMER" => TenantType::Customer,
-            "PROVIDER" => TenantType::Provider,
-            "MARKET" => TenantType::Market,
-            _ => panic!("未知的租户类型: {}", s),
+            "CUSTOMER" | "customer" => TenantType::Customer,
+            "PROVIDER" | "provider" => TenantType::Provider,
+            "MARKET"   | "market"   => TenantType::Market,
+            _ => TenantType::Unknown,
         }
     }
 }
