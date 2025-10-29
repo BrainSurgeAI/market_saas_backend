@@ -237,7 +237,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     mock! {
-        pub OrderRepo {}
+        pub OrderRepo {} 
 
         #[async_trait]
         impl OrderRepository for OrderRepo {
@@ -257,7 +257,6 @@ mod tests {
     #[tokio::test]
     async fn test_create_order_success() {
         // 1. 准备测试数据
-        let customer_hash = "test_customer_hash".to_string();
 
         let delivery_info = DeliveryInfo {
             delivery_date: "2023-05-15".to_string(),
@@ -311,7 +310,7 @@ mod tests {
         // 3. 设置mock行为 - 模拟repository返回成功响应
         mock_repo
             .expect_create_order()
-            .with(eq(1), eq(customer_hash.clone()), predicate::always())
+            .with(eq(1), eq("test_tenant_hash".to_string()), predicate::always())
             .times(1)
             .returning(|_, _, _| {
                 // 返回模拟的成功响应
@@ -351,7 +350,6 @@ mod tests {
     #[tokio::test]
     async fn test_create_order_customer_not_found() {
         // 1. 准备测试数据
-        let invalid_customer_hash = "invalid_hash".to_string();
 
         let order = CreateOrderDTO {
             total_amount: Decimal::new(200, 0),
@@ -389,7 +387,7 @@ mod tests {
             .expect_create_order()
             .with(
                 eq(1),
-                eq(invalid_customer_hash.clone()),
+                eq("test_tenant_hash".to_string()),
                 predicate::always(),
             )
             .times(1)
@@ -507,5 +505,228 @@ mod tests {
         assert_eq!(order_detail.order.order_code, "ODR-123456");
         assert_eq!(order_detail.order.order_status, "PENDING");
         assert_eq!(order_detail.items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_create_order_with_provider_forbidden() {
+        // 测试 PROVIDER 类型租户尝试创建订单（应该失败）
+        let order = CreateOrderDTO {
+            total_amount: Decimal::new(200, 0),
+            delivery_info: DeliveryInfo {
+                delivery_date: "2023-05-15".to_string(),
+                delivery_address: "测试地址".to_string(),
+                contact_name: "测试用户".to_string(),
+                contact_phone: "13800138000".to_string(),
+            },
+            items: vec![],
+        };
+
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        let claims = Claims {
+            tenant_type: "PROVIDER".to_string(),
+            tenant_name: "测试供应商".to_string(),
+            tenant_hash: "test_provider_hash".to_string(),
+            username: "test_provider".to_string(),
+            roles: vec!["PROVIDER".to_string()],
+            exp: chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::days(1))
+                .expect("Invalid timestamp")
+                .timestamp() as usize,
+            is_super_admin: false,
+        };
+
+        let mock_repo = MockOrderRepo::new();
+
+        let result = create_order(
+            Extension(mock_repo),
+            Extension(context),
+            Extension(claims),
+            Json(order),
+        )
+        .await;
+
+        // 验证结果应该是权限错误
+        assert!(result.is_err());
+        match result {
+            Err(AppError::Forbidden(msg)) => {
+                assert!(msg.contains("Only customer type can create order"));
+            }
+            _ => panic!("Expected Forbidden error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_order_with_market_forbidden() {
+        // 测试 MARKET 类型租户尝试创建订单（应该失败）
+        let order = CreateOrderDTO {
+            total_amount: Decimal::new(200, 0),
+            delivery_info: DeliveryInfo {
+                delivery_date: "2023-05-15".to_string(),
+                delivery_address: "测试地址".to_string(),
+                contact_name: "测试用户".to_string(),
+                contact_phone: "13800138000".to_string(),
+            },
+            items: vec![],
+        };
+
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        let claims = Claims {
+            tenant_type: "MARKET".to_string(),
+            tenant_name: "测试市场".to_string(),
+            tenant_hash: "test_market_hash".to_string(),
+            username: "test_market".to_string(),
+            roles: vec!["MARKET".to_string()],
+            exp: chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::days(1))
+                .expect("Invalid timestamp")
+                .timestamp() as usize,
+            is_super_admin: false,
+        };
+
+        let mock_repo = MockOrderRepo::new();
+
+        let result = create_order(
+            Extension(mock_repo),
+            Extension(context),
+            Extension(claims),
+            Json(order),
+        )
+        .await;
+
+        // 验证结果应该是权限错误
+        assert!(result.is_err());
+        match result {
+            Err(AppError::Forbidden(msg)) => {
+                assert!(msg.contains("Only customer type can create order"));
+            }
+            _ => panic!("Expected Forbidden error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_order_with_invalid_tenant_type() {
+        // 测试无效的租户类型（应该失败）
+        let order = CreateOrderDTO {
+            total_amount: Decimal::new(200, 0),
+            delivery_info: DeliveryInfo {
+                delivery_date: "2023-05-15".to_string(),
+                delivery_address: "测试地址".to_string(),
+                contact_name: "测试用户".to_string(),
+                contact_phone: "13800138000".to_string(),
+            },
+            items: vec![],
+        };
+
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        let claims = Claims {
+            tenant_type: "INVALID_TYPE".to_string(),
+            tenant_name: "测试无效类型".to_string(),
+            tenant_hash: "test_invalid_hash".to_string(),
+            username: "test_invalid".to_string(),
+            roles: vec!["INVALID".to_string()],
+            exp: chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::days(1))
+                .expect("Invalid timestamp")
+                .timestamp() as usize,
+            is_super_admin: false,
+        };
+
+        let mock_repo = MockOrderRepo::new();
+
+        let result = create_order(
+            Extension(mock_repo),
+            Extension(context),
+            Extension(claims),
+            Json(order),
+        )
+        .await;
+
+        // 验证结果应该是验证错误（无效的租户类型）
+        assert!(result.is_err());
+        match result {
+            Err(AppError::Validation(msg)) => {
+                assert!(msg.contains("Unknown tenant type"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_order_with_customer_success() {
+        // 测试 CUSTOMER 类型租户成功创建订单（权限验证通过）
+        let order = CreateOrderDTO {
+            total_amount: Decimal::new(200, 0),
+            delivery_info: DeliveryInfo {
+                delivery_date: "2023-05-15".to_string(),
+                delivery_address: "测试地址".to_string(),
+                contact_name: "测试用户".to_string(),
+                contact_phone: "13800138000".to_string(),
+            },
+            items: vec![],
+        };
+
+        let context = RequestContext {
+            request_id: "test-request-id".to_string(),
+            client_ip: None,
+        };
+
+        let claims = Claims {
+            tenant_type: "CUSTOMER".to_string(),
+            tenant_name: "测试客户".to_string(),
+            tenant_hash: "test_customer_hash".to_string(),
+            username: "test_customer".to_string(),
+            roles: vec!["CUSTOMER".to_string()],
+            exp: chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::days(1))
+                .expect("Invalid timestamp")
+                .timestamp() as usize,
+            is_super_admin: false,
+        };
+
+        let mut mock_repo = MockOrderRepo::new();
+        mock_repo
+            .expect_create_order()
+            .with(eq(1), eq("test_customer_hash".to_string()), predicate::always())
+            .times(1)
+            .returning(|_, _, _| {
+                Ok(OrderResponse {
+                    order_code: "ODR-20230515123456-TEST".to_string(),
+                    total_amount: Decimal::new(200, 0),
+                    actual_amount: Decimal::new(200, 0),
+                    delivery_date: NaiveDate::from_ymd_opt(2023, 5, 15).unwrap(),
+                    delivery_address: "测试地址".to_string(),
+                    order_status: "PENDING".to_string(),
+                    created_at: None,
+                    after_sale_at: None,
+                })
+            });
+
+        let result = create_order(
+            Extension(mock_repo),
+            Extension(context),
+            Extension(claims),
+            Json(order),
+        )
+        .await;
+
+        // 验证结果成功
+        assert!(result.is_ok());
+        let api_response = result.unwrap().0;
+        assert_eq!(api_response.code, 200);
+        let order_response = api_response.data.unwrap();
+        assert_eq!(order_response.order_status, "PENDING");
+        assert_eq!(order_response.order_code, "ODR-20230515123456-TEST");
     }
 }
