@@ -1,5 +1,4 @@
 use axum::{Extension, Json};
-use tower_http::classify::ClassifiedResponse;
 use tracing::{error, info, warn};
 
 use crate::common::{ApiResponse, AppError};
@@ -7,7 +6,7 @@ use crate::dto::auth::{ResetPasswordDto, SuperAdminLoginRequest};
 use crate::dto::ValidatedJSON;
 use crate::middleware::auth::create_jwt;
 use crate::middleware::context::RequestContext;
-use crate::models::claims::{self, Claims};
+use crate::models::claims::Claims;
 use crate::repositories::superadmin_traits::SuperAdminRepository;
 use crate::repositories::user_traits::UserRepository;
 

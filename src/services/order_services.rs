@@ -16,8 +16,8 @@ use crate::{
         ValidatedJSON,
     },
     middleware::context::RequestContext,
-    models::claims::Claims,
-    repositories::{order_traits::OrderRepository, TenantType},
+    models::{claims::Claims, order_action::OrderAction, tenant_type::TenantType},
+    repositories::order_traits::OrderRepository,
     utils::validate_json_fmt::Json,
 };
 
@@ -25,20 +25,20 @@ pub async fn create_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(customer_hash): Path<String>,
     Json(order): Json<CreateOrderDTO>,
 ) -> Result<Json<ApiResponse<OrderResponse>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
-    let customer_type = TenantType::from(claims.tenant_type.as_str());
-    if !matches!(customer_type, TenantType::Customer) {
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+
+    if !tenant_type.can_perform_action(&OrderAction::Create) {
         return Err(AppError::Forbidden(
-            "Only customer can create order".to_string(),
+            "Only customer type can create order".to_string(),
         ));
     }
 
-    let order_response = repo.create_order(1, &customer_hash, &order).await?;
+    let order_response = repo.create_order(1, &claims.tenant_hash, &order).await?;
     info!(
         "User {} create order {} success",
         claims.username, order_response.order_code
@@ -50,14 +50,13 @@ pub async fn get_orders<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(tenant_hash): Path<String>,
     Query(query_params): Query<OrderQueryParams>,
 ) -> Result<Json<ApiResponse<Vec<OrderResponse>>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
     let orders = repo
-        .get_orders_by_tenant(&tenant_hash, &claims.tenant_type, &query_params)
+        .get_orders_by_tenant(&claims.tenant_hash, &claims.tenant_type, &query_params)
         .await?;
     Ok(Json(ApiResponse::new(Some(orders), &context)))
 }
@@ -78,6 +77,7 @@ where
 pub async fn dispatch_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
     Path((_, order_code)): Path<(String, String)>,
     Json(dispatch_order_dto): Json<DispatchOrderDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
@@ -85,7 +85,14 @@ where
     T: OrderRepository + Send + Sync,
 {
     debug!("Dispatch order to provider: {:?}", dispatch_order_dto);
-    repo.dispatch_order(
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    if !tenant_type.can_perform_action(&OrderAction::AssignSupplier) {
+        return Err(AppError::Forbidden(
+            "Only Market type can create order".to_string(),
+        ));
+    }
+
+    repo.assign_order(
         &order_code,
         dispatch_order_dto.provider_id,
         &dispatch_order_dto.confirmed_by,
@@ -238,7 +245,7 @@ mod tests {
             async fn create_order(&self, market_id: i32, customer_hash: &str, order: &CreateOrderDTO) -> Result<OrderResponse, AppError>;
             async fn get_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &str, query_params: &OrderQueryParams) -> Result<Vec<OrderResponse>, AppError>;
             async fn get_order_by_order_code(&self, order_code: &str) -> Result<Option<OrderDetailResponse>, AppError>;
-            async fn dispatch_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
+            async fn assign_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
             async fn update_order_status_to_processing(&self, order_code: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
             async fn update_actual_quantity(&self, order_code: &str, actual_quantity_dto: &ActualQuantityDTO) -> Result<(), AppError>;
             async fn process_order_receipt(&self, receipt: &crate::dto::order::OrderReceipt, operator: &str, transaction_id: &str) -> Result<(), AppError>;
@@ -325,7 +332,6 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path(customer_hash),
             Json(order),
         )
         .await;
@@ -396,7 +402,6 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path(invalid_customer_hash),
             Json(order),
         )
         .await;

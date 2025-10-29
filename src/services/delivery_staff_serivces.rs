@@ -6,7 +6,8 @@ use crate::{
     dto::{delivery_staff::DeliveryStaffDTO, ValidatedJSON},
     middleware::context::RequestContext,
     models::claims::Claims,
-    repositories::{delivery_staff_traits::DeliveryStaffRepository, TenantType},
+    repositories::{delivery_staff_traits::DeliveryStaffRepository},
+    models::tenant_type::TenantType,
     utils::validate_json_fmt::Json,
 };
 

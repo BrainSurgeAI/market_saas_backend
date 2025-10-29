@@ -1,6 +1,5 @@
 use chrono::Utc;
 use rand::Rng;
-use std::fmt::{self, write};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::debug;
 
@@ -30,7 +29,6 @@ macro_rules! map_db_err {
     };
 }
 
-
 pub(crate) mod my_sql_repository {
     use sqlx::MySqlPool;
 
@@ -46,39 +44,9 @@ pub(crate) mod my_sql_repository {
     }
 }
 
-
-pub(crate) enum TenantType {
-    Customer,
-    Provider,
-    Market,
-    Unknown
-}
-
-impl fmt::Display for TenantType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TenantType::Customer => write!(f, "CUSTOMER"),
-            TenantType::Provider => write!(f, "PROVIDER"),
-            TenantType::Market => write!(f, "MARKET"),
-            TenantType::Unknown => write!(f, "UnknownType")
-        }
-    }
-}
-
-impl From<&str> for TenantType {
-    fn from(s: &str) -> Self {
-        match s {
-            "CUSTOMER" | "customer" => TenantType::Customer,
-            "PROVIDER" | "provider" => TenantType::Provider,
-            "MARKET"   | "market"   => TenantType::Market,
-            _ => TenantType::Unknown,
-        }
-    }
-}
-
 /// Generate a hash for a given tenant name
 ///
-/// This function generates a hash for a given tenant name. 
+/// This function generates a hash for a given tenant name.
 /// Because we don't use uuid, the hash is used to identify the tenant uniquely.
 ///
 /// # Parameters
@@ -92,7 +60,7 @@ impl From<&str> for TenantType {
 /// # Errors
 ///
 /// Returns an `AppError` if the tenant name is empty.
-pub(crate) fn generate_tenant_name_hash(name: &str) -> Result<String, AppError> {
+pub(super) fn generate_tenant_name_hash(name: &str) -> Result<String, AppError> {
     debug!("Hashing tenant name: {}", name);
 
     if name.trim().is_empty() {
@@ -135,7 +103,7 @@ pub(crate) enum CodeType {
 
 /// Generate a order code or reconciliation statement code for a given code type
 ///
-/// This function generates a order code or reconciliation statement code for a given code type. 
+/// This function generates a order code or reconciliation statement code for a given code type.
 ///
 /// # Parameters
 ///

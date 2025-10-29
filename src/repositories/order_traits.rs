@@ -6,7 +6,11 @@ use crate::{
         ProductsSummaryWithOrdersDTO, ReceiptOperationType,
     },
     map_db_err,
-    repositories::{generate_code, CodeType, TenantType},
+    models::{
+        order_action::OrderAction, order_machine::OrderStateMachine, order_status::OrderStatus,
+        tenant_type::TenantType,
+    },
+    repositories::{generate_code, CodeType},
 };
 
 use super::my_sql_repository::MySqlRepository;
@@ -18,21 +22,6 @@ use rust_decimal::Decimal;
 use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error, info};
 
-/// 订单仓库特性
-///
-/// 该特性定义了与订单相关的数据库操作接口
-///
-/// # 方法
-///
-/// * `create_order` - 创建新订单
-/// * `get_customer_orders` - 获取客户的所有订单
-/// * `get_order_by_order_code` - 根据ID获取订单详情
-/// * `update_order_status` - 更新订单状态
-/// * `cancel_order` - 取消订单
-///
-/// # 错误处理
-///
-/// 所有方法都返回 `Result<T, AppError>` 类型，以便统一错误处理
 #[async_trait]
 pub(crate) trait OrderRepository: Send + Sync {
     async fn create_order(
@@ -54,7 +43,7 @@ pub(crate) trait OrderRepository: Send + Sync {
         order_code: &str,
     ) -> Result<Option<OrderDetailResponse>, AppError>;
 
-    async fn dispatch_order(
+    async fn assign_order(
         &self,
         order_code: &str,
         provider_id: i32,
@@ -154,23 +143,18 @@ impl OrderRepository for MySqlRepository {
             r#"SELECT id, name FROM tenants WHERE name_hash = ?"#,
             customer_hash
         )
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(map_db_err!("Failed to get customer id"))?;
 
-        let customer_id = record.id;
-        if customer_id == 0 {
-            return Err(AppError::NotFound(format!(
-                "Customer {} not found",
-                customer_hash
-            )));
-        }
+        let customer = record.ok_or_else(|| AppError::NotFound("Customer not found".to_string()))?;
 
         let total_amount = order
             .items
             .iter()
             .map(|item| item.original_amount)
             .sum::<Decimal>();
+
         let discount_amount = order
             .items
             .iter()
@@ -182,6 +166,7 @@ impl OrderRepository for MySqlRepository {
             .begin()
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
+
         let order_code = generate_code(CodeType::Order);
 
         let order_id = sqlx::query!(
@@ -189,7 +174,7 @@ impl OrderRepository for MySqlRepository {
             delivery_address, contact_name, contact_phone, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             order_code,
             market_id,
-            customer_id,
+            customer.id,
             total_amount,
             discount_amount,
             order.total_amount, // 前端传入的total_amount是实际数量x折扣价
@@ -197,7 +182,7 @@ impl OrderRepository for MySqlRepository {
             order.delivery_info.delivery_address,
             order.delivery_info.contact_name,
             order.delivery_info.contact_phone,
-            record.name
+            customer.name
         ).execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to create order"))?
@@ -252,7 +237,8 @@ impl OrderRepository for MySqlRepository {
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
-        info!("Order created: {}", order_code);
+
+        info!("Order: {} created success", order_code);
         Ok(OrderResponse {
             order_code,
             total_amount,
@@ -261,9 +247,8 @@ impl OrderRepository for MySqlRepository {
             delivery_date: NaiveDate::parse_from_str(
                 &order.delivery_info.delivery_date,
                 "%Y-%m-%d",
-            )
-            .unwrap_or_else(|_| NaiveDate::from_ymd_opt(2023, 1, 1).unwrap()),
-            order_status: "PENDING".to_string(),
+            ).unwrap_or_else(|_| NaiveDate::from_ymd_opt(2023, 1, 1).unwrap()),
+            order_status: OrderStatus::Pending.to_string(),
             created_at: None,
             after_sale_at: None,
         })
@@ -450,7 +435,7 @@ impl OrderRepository for MySqlRepository {
             Vec::with_capacity(records_len),
             |mut acc, r| {
                 let operation_type = ReceiptOperationType::try_from(r.operation_type)
-                .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
+                    .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
 
                 acc.push(OrderReceipt {
                     order_detail_id: r.order_detail_id,
@@ -475,15 +460,17 @@ impl OrderRepository for MySqlRepository {
         }))
     }
 
-    async fn dispatch_order(
+    async fn assign_order(
         &self,
         order_code: &str,
         provider_id: i32,
         confirmed_by: &str,
     ) -> Result<(), AppError> {
+        let current = OrderStatus::Pending;
         let order = sqlx::query!(
-            r#"SELECT id FROM orders WHERE order_code = ? AND order_status = 'PENDING'"#,
-            order_code
+            r#"SELECT id FROM orders WHERE order_code = ? AND order_status = ?"#,
+            order_code,
+            current.to_str()
         )
         .fetch_one(&self.pool)
         .await
@@ -498,6 +485,16 @@ impl OrderRepository for MySqlRepository {
 
         let order_id = order.id;
 
+        let next = OrderStateMachine::next_state(
+            OrderStatus::Pending,
+            OrderAction::AssignSupplier,
+            TenantType::Market,
+        )
+        .map_err(|e| {
+            error!("{}", e);
+            return AppError::Validation("Invalid transition".to_string());
+        })?;
+
         let mut tx = self
             .pool
             .begin()
@@ -506,13 +503,14 @@ impl OrderRepository for MySqlRepository {
 
         // update order status to confirmed
         sqlx::query!(
-            r#"UPDATE orders SET order_status = 'CONFIRMED', confirmed_at = NOW(), confirmed_by = ? WHERE id = ? AND order_status = 'PENDING'"#,
+            r#"UPDATE orders SET order_status = ?, confirmed_at = NOW(), confirmed_by = ? WHERE id = ? AND order_status = 'PENDING'"#,
+            next.to_str(),
             confirmed_by,
             order_id
         )
         .execute(&mut *tx)
         .await
-        .map_err(map_db_err!("Failed to update order status"))?;
+        .map_err(map_db_err!("Failed to update order status from PENDING to ASSIGNED"))?;
 
         // dispatch order to provider
         sqlx::query!(
@@ -526,7 +524,7 @@ impl OrderRepository for MySqlRepository {
 
         sqlx::query!(
             r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, "PENDING", "CONFIRMED", confirmed_by, "ORDER_DISPATCH"
+            order_id, "PENDING", next.to_str(), confirmed_by, "ORDER_DISPATCH"
         )
         .execute(&mut *tx)
         .await
@@ -928,12 +926,12 @@ impl OrderRepository for MySqlRepository {
             let order_id = order.id;
 
             // validate the status transition and tenant permission using the state machine
-            use crate::dto::order::OrderStatus;
-            OrderStatus::validate_transition_with_tenant(
-                current_status.as_ref(),
-                new_status,
-                tenant_type,
-            )?;
+            // use crate::models::order_status::OrderStatus;
+            // OrderStatus::validate_transition_with_tenant(
+            //     current_status.as_ref(),
+            //     new_status,
+            //     tenant_type,
+            // )?;
 
             // execute different SQL updates based on the target status and tenant type
             let result = match new_status {
@@ -1160,7 +1158,6 @@ impl OrderRepository for MySqlRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(map_db_err!("Failed to get accepted orders"))?,
-            TenantType::Unknown => return Err(AppError::Validation("Unknown tenant type".to_string()))
         };
 
         Ok(orders)
@@ -1242,7 +1239,7 @@ mod tests {
                 order_code: &str,
             ) -> Result<Option<OrderDetailResponse>, AppError>;
 
-            async fn dispatch_order(
+            async fn assign_order(
                 &self,
                 order_code: &str,
                 provider_id: i32,
