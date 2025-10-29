@@ -40,7 +40,7 @@ pub(super) fn tenant_routes() -> Router {
             patch(update_tenant_by_self::<MySqlRepository>),
         )
         .route(
-            "/api/v1/markets/{market_hash}/providers",
+            "/api/v1/providers",
             get(get_all_providers_by_market::<MySqlRepository>),
         )
         .route(

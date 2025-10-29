@@ -222,15 +222,15 @@ where
     ),
     tag = "Tenants"
 )]
-pub async fn get_all_providers_by_market<T>(
+pub(crate) async fn get_all_providers_by_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(market_hash): Path<String>,
+    Extension(claims): Extension<Claims>
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    let providers = repo.get_all_providers_by_market(&market_hash).await?;
+    let providers = repo.get_all_providers_by_market(&claims.tenant_hash).await?;
     Ok(Json(ApiResponse::new(Some(providers), &context)))
 }
 

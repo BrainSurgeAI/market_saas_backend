@@ -26,7 +26,7 @@ pub(crate) trait ProductRepository: Send + Sync {
         role_name: &str,
     ) -> Result<Vec<PriceStatusResponseDTO>, AppError>;
 
-    async fn get_product_list(
+    async fn list_customer_products(
         &self,
         query: &ProductListQueryParams,
         tenant_hash: &str,
@@ -299,7 +299,7 @@ ORDER BY
     }
 
     // 客户获取产品列表
-    async fn get_product_list(
+    async fn list_customer_products(
         &self,
         query: &ProductListQueryParams,
         tenant_hash: &str,

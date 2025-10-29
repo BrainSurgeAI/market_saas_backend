@@ -6,7 +6,7 @@ use axum::{
 use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::order_services::{
-        create_order, dispatch_order, get_after_sale_orders_by_provider, get_order_by_order_code,
+        create_order, assign_order_to_provider, get_after_sale_orders_by_provider, get_order_by_order_code,
         get_orders, get_provider_today_product_order_summary, return_exchange_order,
         update_actual_quantity, update_order_status, update_order_status_to_processing,
     },
@@ -15,20 +15,17 @@ use crate::{
 pub(super) fn order_routes() -> Router {
     Router::new()
         .route(
-            "/api/v1/customers/{customer_hash}/orders",
-            post(create_order::<MySqlRepository>),
+            "/api/v1/orders",
+            post(create_order::<MySqlRepository>)
+            .get(get_orders::<MySqlRepository>),
         )
         .route(
-            "/api/v1/tenants/{tenant_hash}/orders",
-            get(get_orders::<MySqlRepository>),
-        )
-        .route(
-            "/api/v1/tenants/{tenant_hash}/orders/{order_code}",
+            "/api/v1/orders/{order_code}",
             get(get_order_by_order_code::<MySqlRepository>),
         )
         .route(
-            "/api/v1/markets/{market_hash}/orders/{order_code}/dispatch",
-            patch(dispatch_order::<MySqlRepository>),
+            "/api/v1/orders/{order_code}/assign",
+            patch(assign_order_to_provider::<MySqlRepository>),
         )
         .route(
             "/api/v1/providers/{provider_hash}/orders/{order_code}/processing",

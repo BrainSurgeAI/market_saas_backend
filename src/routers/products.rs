@@ -3,7 +3,7 @@ use crate::{
     services::product_services::{
         get_processing_fees,
         get_product_detail, 
-        get_product_list, 
+        customer_products, 
         get_product_price_status_stats,
         get_products_overview, 
         update_product, 
@@ -22,7 +22,7 @@ pub(super) fn products_routes() -> Router {
             get(get_product_price_status_stats::<MySqlRepository>),
         )
         .route(
-            "/api/v1/tenants/{tenant_hash}/products/{product_code}",
+            "/api/v1/products/{product_code}",
             get(get_product_detail::<MySqlRepository>)
             .put(update_product::<MySqlRepository>),
         )
@@ -40,7 +40,7 @@ pub(super) fn products_routes() -> Router {
         )
         .route(
             "/api/v1/customers/{tenant_hash}/products",
-            get(get_product_list::<MySqlRepository>),
+            get(customer_products::<MySqlRepository>),
         )
         .route(
             "/api/v1/processing-fees",

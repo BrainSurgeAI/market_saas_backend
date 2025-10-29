@@ -21,7 +21,7 @@ use crate::{
     utils::validate_json_fmt::Json,
 };
 
-pub async fn create_order<T>(
+pub(crate) async fn create_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -46,7 +46,7 @@ where
     Ok(Json(ApiResponse::new(Some(order_response), &context)))
 }
 
-pub async fn get_orders<T>(
+pub(crate) async fn get_orders<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -61,37 +61,28 @@ where
     Ok(Json(ApiResponse::new(Some(orders), &context)))
 }
 
-pub async fn get_order_by_order_code<T>(
+pub(crate) async fn get_order_by_order_code<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path((_, order_code)): Path<(String, String)>,
+    Path(order_code): Path<String>,
 ) -> Result<Json<ApiResponse<Option<OrderDetailResponse>>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
-    let order = repo.get_order_by_order_code(&order_code).await?;
+    let order = repo.order_by_order_code(&order_code).await?;
     Ok(Json(ApiResponse::new(Some(order), &context)))
 }
 
 /// Dispatch order to provider
-pub async fn dispatch_order<T>(
+pub async fn assign_order_to_provider<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Path((_, order_code)): Path<(String, String)>,
+    Path(order_code): Path<String>,
     Json(dispatch_order_dto): Json<DispatchOrderDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
-    debug!("Dispatch order to provider: {:?}", dispatch_order_dto);
-    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
-    if !tenant_type.can_perform_action(&OrderAction::AssignSupplier) {
-        return Err(AppError::Forbidden(
-            "Only Market type can create order".to_string(),
-        ));
-    }
-
     repo.assign_order(
         &order_code,
         dispatch_order_dto.provider_id,
@@ -244,7 +235,7 @@ mod tests {
             async fn get_after_sale_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &TenantType) -> Result<Vec<crate::dto::order::AcceptedOrderResponseDTO>, AppError>;
             async fn create_order(&self, market_id: i32, customer_hash: &str, order: &CreateOrderDTO) -> Result<OrderResponse, AppError>;
             async fn get_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &str, query_params: &OrderQueryParams) -> Result<Vec<OrderResponse>, AppError>;
-            async fn get_order_by_order_code(&self, order_code: &str) -> Result<Option<OrderDetailResponse>, AppError>;
+            async fn order_by_order_code(&self, order_code: &str) -> Result<Option<OrderDetailResponse>, AppError>;
             async fn assign_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
             async fn update_order_status_to_processing(&self, order_code: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
             async fn update_actual_quantity(&self, order_code: &str, actual_quantity_dto: &ActualQuantityDTO) -> Result<(), AppError>;
@@ -430,7 +421,7 @@ mod tests {
 
         // 3. 设置mock行为 - 模拟订单查询成功
         mock_repo
-            .expect_get_order_by_order_code()
+            .expect_order_by_order_code()
             .with(eq(order_code.clone()))
             .times(1)
             .returning(|_| {
@@ -492,7 +483,7 @@ mod tests {
         let result = get_order_by_order_code(
             Extension(mock_repo),
             Extension(context),
-            Path((tenant_hash, order_code)),
+            Path(order_code),
         )
         .await;
 

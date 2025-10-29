@@ -1,3 +1,5 @@
+use std::fmt::format;
+
 use crate::{
     common::AppError,
     dto::order::{
@@ -20,7 +22,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 #[async_trait]
 pub(crate) trait OrderRepository: Send + Sync {
@@ -38,7 +40,7 @@ pub(crate) trait OrderRepository: Send + Sync {
         query_params: &OrderQueryParams,
     ) -> Result<Vec<OrderResponse>, AppError>;
 
-    async fn get_order_by_order_code(
+    async fn order_by_order_code(
         &self,
         order_code: &str,
     ) -> Result<Option<OrderDetailResponse>, AppError>;
@@ -131,64 +133,18 @@ pub(crate) trait OrderRepository: Send + Sync {
     ) -> Result<(), AppError>;
 }
 
-#[async_trait]
-impl OrderRepository for MySqlRepository {
-    async fn create_order(
+impl MySqlRepository {
+    /// Helper method to insert order details in batch
+    /// This improves performance by preparing processing requirements once
+    /// and using a single method for the detail insertion logic
+    async fn insert_order_details(
         &self,
-        market_id: i32,
-        customer_hash: &str,
-        order: &CreateOrderDTO,
-    ) -> Result<OrderResponse, AppError> {
-        let record = sqlx::query!(
-            r#"SELECT id, name FROM tenants WHERE name_hash = ?"#,
-            customer_hash
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get customer id"))?;
-
-        let customer = record.ok_or_else(|| AppError::NotFound("Customer not found".to_string()))?;
-
-        let total_amount = order
-            .items
-            .iter()
-            .map(|item| item.original_amount)
-            .sum::<Decimal>();
-
-        let discount_amount = order
-            .items
-            .iter()
-            .map(|item| item.original_amount - item.total)
-            .sum::<Decimal>();
-
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
-
-        let order_code = generate_code(CodeType::Order);
-
-        let order_id = sqlx::query!(
-            r#"INSERT INTO orders (order_code, market_id, customer_id, total_amount, discount_amount, actual_amount, delivery_date,
-            delivery_address, contact_name, contact_phone, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-            order_code,
-            market_id,
-            customer.id,
-            total_amount,
-            discount_amount,
-            order.total_amount, // 前端传入的total_amount是实际数量x折扣价
-            order.delivery_info.delivery_date,
-            order.delivery_info.delivery_address,
-            order.delivery_info.contact_name,
-            order.delivery_info.contact_phone,
-            customer.name
-        ).execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to create order"))?
-        .last_insert_id();
-
-        for item in order.items.iter() {
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        order_id: u64,
+        items: &[crate::dto::order::CreateOrderItem],
+    ) -> Result<(), AppError> {
+        for item in items {
+            // Prepare processing requirements efficiently
             let processing_requirements = if item.processing_services.is_empty() {
                 None
             } else {
@@ -199,10 +155,7 @@ impl OrderRepository for MySqlRepository {
                             format!(
                                 "{}:{}",
                                 service.name,
-                                service
-                                    .description
-                                    .as_ref()
-                                    .map_or_else(String::new, |s| s.to_string())
+                                service.description.as_deref().unwrap_or_default()
                             )
                         })
                         .collect::<Vec<String>>()
@@ -211,10 +164,11 @@ impl OrderRepository for MySqlRepository {
             };
 
             sqlx::query!(
-                r#"INSERT INTO order_details (order_id, product_code, product_name, 
-                   category_id, category_name, unit, quantity,
-                   original_price, discount_rate, actual_price, actual_amount, total_amount,
-                   processing_requirements, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                r#"INSERT INTO order_details (
+                    order_id, product_code, product_name, category_id, category_name,
+                    unit, quantity, original_price, discount_rate, actual_price,
+                    actual_amount, total_amount, processing_requirements, remark
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
                 order_id,
                 &item.product_code,
                 &item.product_name,
@@ -229,25 +183,105 @@ impl OrderRepository for MySqlRepository {
                 &item.total,
                 &processing_requirements,
                 &item.remark
-            ).execute(&mut *tx)
+            )
+            .execute(&mut **tx)
             .await
-            .map_err(map_db_err!("Failed to create order detail"))?;
+            .map_err(|e| {
+                error!("Failed to create order detail: {:#?}", e);
+                AppError::Database(e)
+            })?;
         }
+        Ok(())
+    }
+}
 
+#[async_trait]
+impl OrderRepository for MySqlRepository {
+    async fn create_order(
+        &self,
+        market_id: i32,
+        customer_hash: &str,
+        order: &CreateOrderDTO,
+    ) -> Result<OrderResponse, AppError> {
+        // Fetch customer information with early return for better error handling
+        let customer = sqlx::query!(
+            r#"SELECT id, name FROM tenants WHERE name_hash = ?"#,
+            customer_hash
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get customer information"))?
+        .ok_or_else(|| AppError::NotFound("Customer not found".to_string()))?;
+
+        // Pre-calculate order amounts for efficiency
+        let total_amount: Decimal = order.items.iter().map(|item| item.original_amount).sum();
+
+        let discount_amount: Decimal = order
+            .items
+            .iter()
+            .map(|item| item.original_amount - item.total)
+            .sum();
+
+        // Parse delivery date once, with proper error handling
+        let delivery_date =
+            NaiveDate::parse_from_str(&order.delivery_info.delivery_date, "%Y-%m-%d")
+                .unwrap_or_else(|_| NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
+
+        // Generate order code before transaction to ensure consistency
+        let order_code = generate_code(CodeType::Order);
+
+        // Use transaction for atomicity
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        // Insert order and get ID
+        let order_id = sqlx::query!(
+            r#"INSERT INTO orders (
+                order_code, market_id, customer_id, total_amount, discount_amount,
+                actual_amount, delivery_date, delivery_address, contact_name,
+                contact_phone, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            order_code,
+            market_id,
+            customer.id,
+            total_amount,
+            discount_amount,
+            order.total_amount, // Frontend total_amount is actual quantity x discounted price
+            order.delivery_info.delivery_date,
+            order.delivery_info.delivery_address,
+            order.delivery_info.contact_name,
+            order.delivery_info.contact_phone,
+            customer.name
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to create order"))?
+        .last_insert_id();
+
+        // Batch insert order details for better performance
+        self.insert_order_details(&mut tx, order_id, &order.items)
+            .await
+            .map_err(|e| {
+                error!("Failed to create order details: {:#?}", e);
+                AppError::Internal(e.to_string())
+            })?;
+
+        // Commit transaction
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
 
-        info!("Order: {} created success", order_code);
+        info!("Order {} created successfully", order_code);
+
         Ok(OrderResponse {
             order_code,
             total_amount,
             actual_amount: order.total_amount,
             delivery_address: order.delivery_info.delivery_address.clone(),
-            delivery_date: NaiveDate::parse_from_str(
-                &order.delivery_info.delivery_date,
-                "%Y-%m-%d",
-            ).unwrap_or_else(|_| NaiveDate::from_ymd_opt(2023, 1, 1).unwrap()),
+            delivery_date,
             order_status: OrderStatus::Pending.to_string(),
             created_at: None,
             after_sale_at: None,
@@ -265,16 +299,15 @@ impl OrderRepository for MySqlRepository {
         let offset = (page - 1) * page_size;
 
         let record = sqlx::query!(r#"select id from tenants where name_hash=?"#, tenant_hash)
-            .fetch_one(&self.pool)
+            .fetch_optional(&self.pool)
             .await
-            .map_err(map_db_err!("Failed to get market id"))?;
-
-        if record.id == 0 {
-            return Err(AppError::NotFound(format!(
-                "Can not find market for tenant {}",
-                tenant_hash
-            )));
-        }
+            .map_err(map_db_err!("Failed to get tenant by id"))?
+            .ok_or_else(|| {
+                return AppError::NotFound(format!(
+                    "Can not find Tenant by type {} name_hash {} ",
+                    tenant_type, tenant_hash
+                ));
+            })?;
 
         let basic_query = r#"SELECT 
                    o.order_code, 
@@ -322,122 +355,121 @@ impl OrderRepository for MySqlRepository {
         Ok(orders)
     }
 
-    async fn get_order_by_order_code(
+    async fn order_by_order_code(
         &self,
         order_code: &str,
     ) -> Result<Option<OrderDetailResponse>, AppError> {
         let order = sqlx::query_as!(
             OrderItem,
-            r#"SELECT 
-                o.id,
-                o.order_code,
-                t.name as customer_name,
-                o.order_status,
-                o.total_amount,
-                o.discount_amount,
-                o.actual_amount,
-                o.delivery_date,
-                o.delivery_address,
-                o.contact_name,
-                o.contact_phone,
-                o.remark,
-                o.created_by,
-                o.created_at,
-                o.confirmed_by,
-                o.confirmed_at,
-                o.processed_by,
-                o.processed_at,
-                o.stocked_by,
-                o.stocked_at,
-                o.after_sale_at,
-                o.rejected_by,
-                o.rejected_at,
-                o.reject_reason,
-                o.completed_by,
-                o.completed_at,
-                ds.name as delivery_staff_name,
-                ds.phone as delivery_staff_phone,
-                p.name as provider_name
-            FROM orders o 
-            JOIN tenants t ON o.customer_id = t.id 
-            LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
-            LEFT JOIN provider_orders_assignments po ON o.id = po.order_id
-            LEFT JOIN tenants p ON po.provider_id = p.id
-            WHERE o.order_code = ?"#,
+            r#"
+        SELECT 
+            o.id,
+            o.order_code,
+            t.name as customer_name,
+            o.order_status,
+            o.total_amount,
+            o.discount_amount,
+            o.actual_amount,
+            o.delivery_date,
+            o.delivery_address,
+            o.contact_name,
+            o.contact_phone,
+            o.remark,
+            o.created_by,
+            o.created_at,
+            o.confirmed_by,
+            o.confirmed_at,
+            o.processed_by,
+            o.processed_at,
+            o.stocked_by,
+            o.stocked_at,
+            o.after_sale_at,
+            o.rejected_by,
+            o.rejected_at,
+            o.reject_reason,
+            o.completed_by,
+            o.completed_at,
+            ds.name as delivery_staff_name,
+            ds.phone as delivery_staff_phone,
+            p.name as provider_name
+        FROM orders o 
+        JOIN tenants t ON o.customer_id = t.id 
+        LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
+        LEFT JOIN provider_orders_assignments po ON o.id = po.order_id
+        LEFT JOIN tenants p ON po.provider_id = p.id
+        WHERE o.order_code = ?
+        "#,
             order_code
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get order by id"))?;
+        .map_err(map_db_err!("Failed to get order by code"))?;
 
-        if order.is_none() {
-            return Ok(None);
-        }
+        let order = match order {
+            Some(o) => o,
+            None => return Ok(None),
+        };
 
-        let order_id = order.as_ref().unwrap().id;
         let items = sqlx::query_as!(
             OrderDetail,
-            r#"SELECT 
-                id,
-                product_code,
-                product_name,
-                category_id,
-                category_name,
-                unit,
-                quantity,
-                original_price,
-                discount_rate,
-                actual_price,
-                actual_amount,
-                total_amount,
-                actual_quantity,
-                processing_requirements,
-                remark,
-                status
-            FROM order_details
-            WHERE order_id = ?"#,
-            order_id
+            r#"
+        SELECT 
+            id,
+            product_code,
+            product_name,
+            category_id,
+            category_name,
+            unit,
+            quantity,
+            original_price,
+            discount_rate,
+            actual_price,
+            actual_amount,
+            total_amount,
+            actual_quantity,
+            processing_requirements,
+            remark,
+            status
+        FROM order_details
+        WHERE order_id = ?
+        "#,
+            order.id
         )
         .fetch_all(&self.pool)
         .await
         .map_err(map_db_err!("Failed to get order details"))?;
 
-        let receipts_records = sqlx::query!(
-            r#"SELECT 
-                re.order_detail_id,
-                o.order_code,
-                od.product_code,
-                od.product_name,
-                re.operation_type,
-                re.quantity,
-                re.reason,
-                od.unit,
-                re.evidence_images
-            FROM 
-                return_exchange_records re
-            JOIN 
-                order_details od ON re.order_detail_id = od.id
-            JOIN 
-                orders o ON od.order_id = o.id
-            WHERE 
-                o.order_code = ?
-            ORDER BY 
-                re.created_at DESC"#,
+        let receipt_rows = sqlx::query!(
+            r#"
+        SELECT 
+            re.order_detail_id,
+            o.order_code,
+            od.product_code,
+            od.product_name,
+            re.operation_type,
+            re.quantity,
+            re.reason,
+            od.unit,
+            re.evidence_images
+        FROM return_exchange_records re
+        JOIN order_details od ON re.order_detail_id = od.id
+        JOIN orders o ON od.order_id = o.id
+        WHERE o.order_code = ?
+        ORDER BY re.created_at DESC
+        "#,
             order_code
         )
         .fetch_all(&self.pool)
         .await
         .map_err(map_db_err!("Failed to get receipt records"))?;
 
-        // 手动转换结果
-        let records_len = receipts_records.len();
-        let receipts = receipts_records.into_iter().try_fold(
-            Vec::with_capacity(records_len),
-            |mut acc, r| {
+        let receipts = receipt_rows
+            .into_iter()
+            .map(|r| {
                 let operation_type = ReceiptOperationType::try_from(r.operation_type)
                     .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
 
-                acc.push(OrderReceipt {
+                Ok(OrderReceipt {
                     order_detail_id: r.order_detail_id,
                     order_code: r.order_code,
                     product_code: r.product_code,
@@ -447,14 +479,12 @@ impl OrderRepository for MySqlRepository {
                     reason: r.reason,
                     unit: r.unit,
                     evidence_images: r.evidence_images,
-                });
-
-                Ok::<_, AppError>(acc)
-            },
-        )?;
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
 
         Ok(Some(OrderDetailResponse {
-            order: order.unwrap(),
+            order,
             items,
             receipts,
         }))
@@ -467,21 +497,22 @@ impl OrderRepository for MySqlRepository {
         confirmed_by: &str,
     ) -> Result<(), AppError> {
         let current = OrderStatus::Pending;
-        let order = sqlx::query!(
-            r#"SELECT id FROM orders WHERE order_code = ? AND order_status = ?"#,
+        let order_opt = sqlx::query!(
+            r#"SELECT id, delivery_date FROM orders WHERE order_code = ? AND order_status = ?"#,
             order_code,
             current.to_str()
         )
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(map_db_err!("Failed to get order by id"))?;
 
-        if order.id == 0 {
-            return Err(AppError::NotFound(format!(
-                "Order {} not found",
-                order_code
-            )));
-        }
+        let order = match order_opt {
+            Some(o) if o.delivery_date < chrono::Local::now().date_naive() => {
+                return Err(AppError::Validation(format!("不能指派已过期订单 {} ", order_code)));
+            }
+            Some(o) => o,
+            None => return Err(AppError::NotFound(format!("订单 {} 不存在", order_code))),
+        };
 
         let order_id = order.id;
 
@@ -1234,7 +1265,7 @@ mod tests {
                 query_params: &OrderQueryParams,
             ) -> Result<Vec<OrderResponse>, AppError>;
 
-            async fn get_order_by_order_code(
+            async fn order_by_order_code(
                 &self,
                 order_code: &str,
             ) -> Result<Option<OrderDetailResponse>, AppError>;

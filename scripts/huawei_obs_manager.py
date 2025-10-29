@@ -113,7 +113,7 @@ class OBSManager:
                 logger.error(f"检查OBS对象失败 {object_key}: {e}")
                 return False
 
-    def generate_temp_url(self, bucket_name: str, object_key: str, expires_in: int = 3600) -> Optional[str]:
+    def generate_temp_url(self, bucket_name: str, object_key: str, expires_in: int = 7200) -> Optional[str]:
         """
         生成OBS对象的临时URL
 

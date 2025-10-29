@@ -57,7 +57,7 @@ where
     Ok(Json(ApiResponse::new(Some(stats), &context)))
 }
 
-pub(crate) async fn get_product_list<T>(
+pub(crate) async fn customer_products<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path(tenant_hash): Path<String>,
@@ -66,7 +66,7 @@ pub(crate) async fn get_product_list<T>(
 where
     T: ProductRepository + Send + Sync,
 {
-    let products = repo.get_product_list(&query, &tenant_hash).await?;
+    let products = repo.list_customer_products(&query, &tenant_hash).await?;
     Ok(Json(ApiResponse::new(Some(products), &context)))
 }
 
@@ -77,7 +77,7 @@ pub(crate) async fn get_product_detail<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path((_tenant_hash, product_code)): Path<(String, String)>,
+    Path(product_code): Path<String>,
 ) -> Result<Json<ApiResponse<Option<ProductDetailResponse>>>, AppError>
 where
     T: ProductRepository + Send + Sync,

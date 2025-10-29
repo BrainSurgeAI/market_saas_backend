@@ -102,9 +102,6 @@ impl OrderStateMachine {
             (OrderStatus::ExchangeInspecting, OrderAction::MarketAccept, TenantType::Market) => {
                 OrderStatus::ExchangeCompleted  // 只有一次换货，这里直接换货完毕
             }
-            (OrderStatus::ExchangeCompleted, OrderAction::DeliverToCustomer, TenantType::Market) => {
-                OrderStatus::MarketDelivering
-            }
             
            
             // 客户验收异常流程
@@ -233,5 +230,631 @@ mod test {
             TenantType::Market,
         );
         assert!(!result.success);
+    }
+
+    // ==================== 基础状态转移测试 ====================
+
+    #[test]
+    fn test_order_assign_supplier() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Pending,
+            OrderAction::AssignSupplier,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.previous, OrderStatus::Pending);
+        assert_eq!(result.next, OrderStatus::Assigned);
+        assert_eq!(result.action, OrderAction::AssignSupplier);
+        assert_eq!(result.actor, TenantType::Market);
+    }
+
+    #[test]
+    fn test_provider_start_preparing() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Assigned,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::SupplierPreparing);
+    }
+
+    #[test]
+    fn test_provider_deliver_to_market() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::SupplierPreparing,
+            OrderAction::DeliverToMarket,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::SupplierDelivering);
+    }
+
+    #[test]
+    fn test_market_inspect() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::SupplierDelivering,
+            OrderAction::MarketInspect,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::MarketInspecting);
+    }
+
+    #[test]
+    fn test_market_accept() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::MarketInspecting,
+            OrderAction::MarketAccept,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::MarketAccepted);
+    }
+
+    #[test]
+    fn test_market_deliver_to_customer() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::MarketAccepted,
+            OrderAction::DeliverToCustomer,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::MarketDelivering);
+    }
+
+    #[test]
+    fn test_customer_inspect() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::MarketDelivering,
+            OrderAction::CustomerInspect,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::CustomerInspecting);
+    }
+
+    #[test]
+    fn test_customer_complete() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::CustomerInspecting,
+            OrderAction::Complete,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Completed);
+    }
+
+    // ==================== 换货流程测试 ====================
+
+    #[test]
+    fn test_market_exchange_request() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::MarketInspecting,
+            OrderAction::MarketExchange,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeRequested);
+    }
+
+    #[test]
+    fn test_provider_start_exchange_preparing() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::ExchangeRequested,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeInProgress);
+    }
+
+    #[test]
+    fn test_provider_deliver_exchange_to_market() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::ExchangeInProgress,
+            OrderAction::DeliverToMarket,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeNewDelivering);
+    }
+
+    #[test]
+    fn test_market_inspect_exchange() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::ExchangeNewDelivering,
+            OrderAction::MarketInspect,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeInspecting);
+    }
+
+    #[test]
+    fn test_market_accept_exchange() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::ExchangeInspecting,
+            OrderAction::MarketAccept,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeCompleted);
+    }
+
+    #[test]
+    fn test_exchange_completed_is_terminal() {
+        // ExchangeCompleted 是终态，不能进一步操作
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::ExchangeCompleted,
+            OrderAction::DeliverToCustomer,
+            TenantType::Market,
+        );
+
+        // 应该失败，因为 ExchangeCompleted 是终态
+        assert!(!result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeCompleted); // 状态保持不变
+    }
+
+    #[test]
+    fn test_customer_exchange_request() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::CustomerInspecting,
+            OrderAction::CustomerExchange,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeRequested);
+    }
+
+    // ==================== 退货流程测试 ====================
+
+    #[test]
+    fn test_market_return() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::MarketInspecting,
+            OrderAction::MarketReturn,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Returned);
+    }
+
+    #[test]
+    fn test_customer_return() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::ReturnRequested,
+            OrderAction::CustomerReturn,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Returned);
+    }
+
+    // ==================== 取消订单测试 ====================
+
+    #[test]
+    fn test_customer_cancel_pending_order() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Pending,
+            OrderAction::Cancel,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_market_cannot_cancel_order() {
+        // 根据租户权限定义，Market 不能执行 Cancel 操作
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Assigned,
+            OrderAction::Cancel,
+            TenantType::Market,
+        );
+        assert!(!result.success);
+    }
+
+    // ==================== 无效状态转移测试 ====================
+
+    #[test]
+    fn test_invalid_customer_assign_supplier() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Pending,
+            OrderAction::AssignSupplier,
+            TenantType::Customer,
+        );
+        assert!(!result.success);
+        assert_eq!(result.next, OrderStatus::Pending); // 状态不变
+    }
+
+    #[test]
+    fn test_invalid_provider_assign_supplier() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Pending,
+            OrderAction::AssignSupplier,
+            TenantType::Provider,
+        );
+        assert!(!result.success);
+        assert_eq!(result.next, OrderStatus::Pending);
+    }
+
+    #[test]
+    fn test_invalid_market_start_preparing() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Assigned,
+            OrderAction::StartPreparing,
+            TenantType::Market,
+        );
+        assert!(!result.success);
+        assert_eq!(result.next, OrderStatus::Assigned);
+    }
+
+    #[test]
+    fn test_invalid_customer_start_preparing() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Assigned,
+            OrderAction::StartPreparing,
+            TenantType::Customer,
+        );
+        assert!(!result.success);
+        assert_eq!(result.next, OrderStatus::Assigned);
+    }
+
+    #[test]
+    fn test_invalid_wrong_status_transition() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Pending,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+        );
+        assert!(!result.success);
+        assert_eq!(result.next, OrderStatus::Pending);
+    }
+
+    // ==================== 终态操作测试 ====================
+
+    #[test]
+    fn test_cannot_cancel_completed_order() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Completed,
+            OrderAction::Cancel,
+            TenantType::Customer,
+        );
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn test_cannot_cancel_cancelled_order() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Cancelled,
+            OrderAction::Cancel,
+            TenantType::Market,
+        );
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn test_cannot_operate_on_returned_order() {
+        let result = OrderStateMachine::try_transition(
+            OrderStatus::Returned,
+            OrderAction::Complete,
+            TenantType::Customer,
+        );
+        assert!(!result.success);
+    }
+
+    // ==================== 错误类型测试 ====================
+
+    #[test]
+    fn test_transition_error_invalid_action() {
+        let result = OrderStateMachine::next_state(
+            OrderStatus::Pending,
+            OrderAction::AssignSupplier,
+            TenantType::Customer,
+        );
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            TransitionError::InvalidAction { current_status, action, actor } => {
+                assert_eq!(current_status, OrderStatus::Pending);
+                assert_eq!(action, OrderAction::AssignSupplier);
+                assert_eq!(actor, TenantType::Customer);
+            }
+            _ => panic!("Expected InvalidAction error"),
+        }
+    }
+
+    #[test]
+    fn test_transition_error_terminal_state() {
+        let result = OrderStateMachine::next_state(
+            OrderStatus::Completed,
+            OrderAction::Cancel,
+            TenantType::Customer,
+        );
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            TransitionError::TerminalState { status } => {
+                assert_eq!(status, OrderStatus::Completed);
+            }
+            _ => panic!("Expected TerminalState error"),
+        }
+    }
+
+    // ==================== 完整业务流程测试 ====================
+
+    #[test]
+    fn test_complete_normal_workflow() {
+        let mut current_status = OrderStatus::Pending;
+
+        // 市场分配订单
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::AssignSupplier,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::Assigned);
+
+        // 供应商开始准备
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::SupplierPreparing);
+
+        // 供应商配送至市场
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::DeliverToMarket,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::SupplierDelivering);
+
+        // 市场验收
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::MarketInspect,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::MarketInspecting);
+
+        // 市场接受
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::MarketAccept,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::MarketAccepted);
+
+        // 配送给客户
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::DeliverToCustomer,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::MarketDelivering);
+
+        // 客户验收
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::CustomerInspect,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::CustomerInspecting);
+
+        // 订单完成
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::Complete,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::Completed);
+    }
+
+    #[test]
+    fn test_complete_exchange_workflow() {
+        let mut current_status = OrderStatus::MarketInspecting;
+
+        // 市场申请换货
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::MarketExchange,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ExchangeRequested);
+
+        // 供应商准备换货
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ExchangeInProgress);
+
+        // 供应商配送换货商品
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::DeliverToMarket,
+            TenantType::Provider,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ExchangeNewDelivering);
+
+        // 市场验收换货商品
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::MarketInspect,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ExchangeInspecting);
+
+        // 市场接受换货
+        let result = OrderStateMachine::try_transition(
+            current_status,
+            OrderAction::MarketAccept,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ExchangeCompleted);
+
+        // ExchangeCompleted 是终态，流程结束
+        // 换货完成后直接结束，不需要再配送给客户
+        assert_eq!(current_status, OrderStatus::ExchangeCompleted);
+    }
+
+    // ==================== get_available_actions 测试 ====================
+
+    #[test]
+    fn test_available_actions_for_pending_state() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Pending,
+            TenantType::Market,
+        );
+
+        // 市场只能分配订单（根据租户权限，Market 不能 Cancel）
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].0, OrderAction::AssignSupplier);
+        assert_eq!(actions[0].1, OrderStatus::Assigned);
+    }
+
+    #[test]
+    fn test_available_actions_for_customer_pending() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Pending,
+            TenantType::Customer,
+        );
+
+        // 客户只能取消订单
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].0, OrderAction::Cancel);
+        assert_eq!(actions[0].1, OrderStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_available_actions_for_provider_assigned() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Assigned,
+            TenantType::Provider,
+        );
+
+        // 供应商可以开始准备
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].0, OrderAction::StartPreparing);
+        assert_eq!(actions[0].1, OrderStatus::SupplierPreparing);
+    }
+
+    #[test]
+    fn test_available_actions_for_market_inspecting() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::MarketInspecting,
+            TenantType::Market,
+        );
+
+        // 市场可以接受、退货、换货（Market 不能 Cancel）
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().any(|(action, _)| *action == OrderAction::MarketAccept));
+        assert!(actions.iter().any(|(action, _)| *action == OrderAction::MarketReturn));
+        assert!(actions.iter().any(|(action, _)| *action == OrderAction::MarketExchange));
+    }
+
+    #[test]
+    fn test_available_actions_for_customer_inspecting() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::CustomerInspecting,
+            TenantType::Customer,
+        );
+
+        // 客户可以完成、换货或取消
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().any(|(action, _)| *action == OrderAction::Complete));
+        assert!(actions.iter().any(|(action, _)| *action == OrderAction::CustomerExchange));
+        assert!(actions.iter().any(|(action, _)| *action == OrderAction::Cancel));
+    }
+
+    #[test]
+    fn test_available_actions_for_terminal_states() {
+        // 已完成订单
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Completed,
+            TenantType::Customer,
+        );
+        assert_eq!(actions.len(), 0);
+
+        // 已取消订单
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Cancelled,
+            TenantType::Market,
+        );
+        assert_eq!(actions.len(), 0);
+
+        // 已退货订单
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Returned,
+            TenantType::Provider,
+        );
+        assert_eq!(actions.len(), 0);
+    }
+
+    // ==================== 边界情况测试 ====================
+
+    #[test]
+    fn test_provider_cannot_cancel_order() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::Assigned,
+            TenantType::Provider,
+        );
+
+        // 供应商不能取消订单
+        assert!(!actions.iter().any(|(action, _)| *action == OrderAction::Cancel));
+    }
+
+    #[test]
+    fn test_market_cannot_complete_order() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::CustomerInspecting,
+            TenantType::Market,
+        );
+
+        // 市场不能完成订单（只有客户可以）
+        assert!(!actions.iter().any(|(action, _)| *action == OrderAction::Complete));
+    }
+
+    #[test]
+    fn test_all_actions_for_exchange_status() {
+        let actions = OrderStateMachine::get_available_actions(
+            OrderStatus::ExchangeRequested,
+            TenantType::Provider,
+        );
+
+        // 供应商可以开始准备换货
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].0, OrderAction::StartPreparing);
+        assert_eq!(actions[0].1, OrderStatus::ExchangeInProgress);
     }
 }
