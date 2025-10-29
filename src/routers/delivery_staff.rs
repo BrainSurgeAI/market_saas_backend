@@ -13,12 +13,12 @@ use axum::{
 pub(super) fn delivery_staff_routes() -> Router {
     Router::new()
         .route(
-            "/api/v1/tenants/{tenant_hash}/delivery_staffs",
+            "/api/v1/deliveries",
             post(create_delivery_staff::<MySqlRepository>)
             .get(get_delivery_staff_by_provider::<MySqlRepository>)
         )
         .route(
-            "/api/v1/tenants/{tenant_hash}/delivery_staffs/{id_card}/status",
+            "/api/v1/deliveries/{id_card}/status",
             patch(disable_or_enable_delivery_staff::<MySqlRepository>),
         )
     // .layer(CompressionLayer::new())

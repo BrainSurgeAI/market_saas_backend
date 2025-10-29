@@ -1,5 +1,5 @@
 use axum::{extract::Path, Extension};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     common::{ApiResponse, AppError},
@@ -11,11 +11,10 @@ use crate::{
     utils::validate_json_fmt::Json,
 };
 
-pub async fn get_delivery_staff_by_provider<T>(
+pub(crate) async fn get_delivery_staff_by_provider<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Path(tenant_hash): Path<String>,
+    Extension(claims): Extension<Claims>
 ) -> Result<Json<ApiResponse<Vec<DeliveryStaffDTO>>>, AppError>
 where
     T: DeliveryStaffRepository + Send + Sync,
@@ -26,29 +25,21 @@ where
         ));
     }
 
-    info!("Getting delivery staff for provider: {}", tenant_hash);
+    info!("Getting delivery staff for provider: {}", claims.tenant_hash);
 
-    let delivery_staff = repo.get_delivery_staff_by_provider(&tenant_hash).await?;
+    let delivery_staff = repo.get_delivery_staff_by_provider(&claims.tenant_hash).await?;
     Ok(Json(ApiResponse::new(Some(delivery_staff), &context)))
 }
 
-pub async fn create_delivery_staff<T>(
+pub(crate) async fn create_delivery_staff<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(tenant_hash): Path<String>,
     ValidatedJSON(delivery_staff): ValidatedJSON<DeliveryStaffDTO>,
 ) -> Result<Json<ApiResponse<DeliveryStaffDTO>>, AppError>
 where
     T: DeliveryStaffRepository + Send + Sync,
 {
-    // 验证权限
-    if claims.tenant_type != TenantType::Provider.to_string() {
-        return Err(AppError::Forbidden(
-            "Only provider can create delivery staff".to_string(),
-        ));
-    }
-
     // 检查身份证是否存在
     if repo.is_id_card_exists(&delivery_staff.id_card).await? {
         return Err(AppError::Conflict(format!(
@@ -59,36 +50,27 @@ where
 
     // 创建配送员
     let delivery_staff = repo
-        .create_delivery_staff(&tenant_hash, &delivery_staff)
+        .create_delivery_staff(&claims.tenant_hash, &delivery_staff)
         .await?;
     Ok(Json(ApiResponse::new(Some(delivery_staff), &context)))
 }
 
 /// 禁用或启用配送员
-pub async fn disable_or_enable_delivery_staff<T>(
+pub(crate) async fn disable_or_enable_delivery_staff<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path((tenant_hash, id_card)): Path<(String, String)>,
+    Path(id_card): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: DeliveryStaffRepository + Send + Sync,
 {
     info!(
         "Disabling or enabling delivery staff for tenant: {}",
-        tenant_hash
+        claims.tenant_hash
     );
-    if claims.tenant_type != TenantType::Provider.to_string() {
-        return Err(AppError::Forbidden(
-            "Only provider can disable or enable delivery staff".to_string(),
-        ));
-    }
-
-    debug!(
-        "Disabling or enabling delivery staff for tenant: {}",
-        tenant_hash
-    );
-    repo.disable_or_enable_delivery_staff(&tenant_hash, &id_card)
+    
+    repo.disable_or_enable_delivery_staff(&claims.tenant_hash, &id_card)
         .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
@@ -208,7 +190,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path(provider_hash),
+        
         )
         .await;
 
@@ -226,7 +208,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_delivery_staff_forbidden() {
         // 准备测试数据 - 使用非供应商角色
-        let (context, customer_hash) = create_test_context();
+        let (context, _customer_hash) = create_test_context();
         let claims = create_customer_claims();
 
         // 创建Mock实例
@@ -237,7 +219,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path(customer_hash),
+           
         )
         .await;
 
@@ -272,7 +254,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path(provider_hash),
+            
         )
         .await;
 
@@ -308,7 +290,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -321,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn test_disable_or_enable_delivery_staff_forbidden() {
         // 准备测试数据 - 使用非供应商角色
-        let (context, tenant_hash) = create_test_context();
+        let (context, _tenant_hash) = create_test_context();
         let claims = create_customer_claims();
         let id_card = "110101199001011234".to_string();
 
@@ -333,7 +315,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -369,7 +351,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -405,7 +387,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -441,7 +423,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -477,7 +459,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -513,7 +495,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
@@ -549,7 +531,7 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            Path((tenant_hash, id_card)),
+            Path(id_card),
         )
         .await;
 
