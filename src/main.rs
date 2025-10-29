@@ -9,7 +9,6 @@ mod acl_core;
 mod common;
 mod dto;
 
-
 use dashmap::DashMap;
 use dotenv::dotenv;
 use hyper::Method;
@@ -28,7 +27,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use tracing::{info, debug};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
