@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::error;
+use tracing::{error, debug};
 
 #[async_trait]
 pub trait RoleRepository: Send + Sync {
@@ -206,6 +206,8 @@ impl RoleRepository for MySqlRepository {
     }
 
     async fn get_menus_by_role_name(&self, role_name: &str) -> Result<Vec<MenuConfig>, AppError> {
+        debug!("get menus by role {}", role_name);
+
         let menu_items = sqlx::query_as!(
             MenuItem,
             r#"

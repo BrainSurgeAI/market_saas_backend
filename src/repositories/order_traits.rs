@@ -22,7 +22,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 #[async_trait]
 pub(crate) trait OrderRepository: Send + Sync {

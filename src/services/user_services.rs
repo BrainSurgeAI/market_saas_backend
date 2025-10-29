@@ -7,6 +7,7 @@ use crate::repositories::user_traits::UserRepository;
 use crate::utils::validate_json_fmt::Json;
 use axum::extract::Path;
 use axum::Extension;
+use tracing::debug;
 
 /// Create a user in a tenant.
 ///
@@ -30,6 +31,7 @@ pub async fn create_tenant_user<T>(
 where
     T: UserRepository + Send + Sync,
 {
+    debug!("UserCreateDto: {:?}", payload);
     repo.create_tenant_user(&tenant_hash, &payload).await?;
     Ok(Json(ApiResponse::new(None, &context)))
 }

@@ -16,6 +16,7 @@ use crate::dto::tenants::{
 };
 use crate::utils::validate_json_fmt::Json;
 
+
 /// Retrieves a tenant by username.
 ///
 /// # Arguments
@@ -111,7 +112,9 @@ where
         ));
     }
 
-    let res = repo.get_all_tenants_by_market(&claims.tenant_hash, &query).await?;
+    let res = repo
+        .get_all_tenants_by_market(&claims.tenant_hash, &query)
+        .await?;
     Ok(Json(ApiResponse::new(Some(res), &context)))
 }
 
@@ -127,7 +130,7 @@ where
     Ok(Json(ApiResponse::new(financials, &context)))
 }
 
-pub async fn get_tenant_users<T>(
+pub(crate) async fn get_tenant_users<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path(hashed_name): Path<String>,
@@ -138,6 +141,19 @@ where
     let users = repo.get_tenant_users(&hashed_name).await?;
     Ok(Json(ApiResponse::new(Some(users), &context)))
 }
+
+pub(crate) async fn get_users<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>
+) -> Result<impl IntoResponse, AppError>
+where
+    T: TenantRepository + Send + Sync,
+{
+    let users = repo.get_tenant_users(&claims.tenant_hash).await?;
+    Ok(Json(ApiResponse::new(Some(users), &context)))
+}
+
 
 /// Add a user to a tenant
 ///
@@ -225,12 +241,14 @@ where
 pub(crate) async fn get_all_providers_by_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>
+    Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    let providers = repo.get_all_providers_by_market(&claims.tenant_hash).await?;
+    let providers = repo
+        .get_all_providers_by_market(&claims.tenant_hash)
+        .await?;
     Ok(Json(ApiResponse::new(Some(providers), &context)))
 }
 
@@ -258,25 +276,17 @@ pub async fn update_tenant_by_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path((market_hash, tenant_hash)): Path<(String, String)>,
+    Path(tenant_hash): Path<String>,
     ValidatedJSON(payload): ValidatedJSON<TenantCreateDTO>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    if claims.roles[0].to_uppercase() != "MARKET_ADMIN" {
-        return Err(AppError::Forbidden(
-            "Only market admin can disable tenant".to_string(),
-        ));
-    }
-
     let rows_affected = repo
-        .update_tenant_by_market(&market_hash, &tenant_hash, &payload)
+        .update_tenant_by_market(&claims.tenant_hash, &tenant_hash, &payload)
         .await?;
     Ok(Json(ApiResponse::new(Some(rows_affected), &context)))
 }
-
-
 
 /// Get tenant detail by hashed name of tenant.
 /// Use hashed name from JWT claims, so it is used for tenant to get its own detail.
@@ -288,14 +298,32 @@ where
 /// * On success: Status 200 with the tenant details
 /// * On DB error: Status 500 for database errors
 /// * On other errors: Status 417 for unexpected errors
-pub async fn get_tenant_detail_by_name_hash<T>(
+pub async fn get_tenant_detail_by_self<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>
+    Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    let tenant = repo.find_tenant_detail_by_hashed_name(&claims.tenant_hash).await?;
+    let tenant = repo
+        .find_tenant_detail_by_hashed_name(&claims.tenant_hash)
+        .await?;
     Ok(Json(ApiResponse::new(tenant, &context)))
 }
+
+
+pub async fn get_tenant_detail_by_hashed_name<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Path(tenant_hash): Path<String>
+) -> Result<impl IntoResponse, AppError>
+where
+    T: TenantRepository + Send + Sync,
+{
+    let tenant = repo
+        .find_tenant_detail_by_hashed_name(&tenant_hash)
+        .await?;
+    Ok(Json(ApiResponse::new(tenant, &context)))
+}
+

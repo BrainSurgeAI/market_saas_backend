@@ -9,7 +9,7 @@ use arc_swap::ArcSwap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::LazyLock;
-use tracing::{error, debug};
+use tracing::{debug, error};
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct AclSnapshot {
@@ -84,7 +84,9 @@ impl AclSnapshot {
         if let Some(hashed_name) = params.get("hashed_name") {
             debug!("Extracted hashed_name parameter: {}", hashed_name);
             debug!("Route {} is tenant-specific, verifying hashed_name", path);
-            if hashed_name != &claim.tenant_hash {
+
+            if hashed_name != &claim.tenant_hash && claim.roles.iter().any(|r| r != "MARKET_ADMIN")
+            {
                 error!(
                     "Tenant-only route {} accessed by tenant {} (expected: {})",
                     path, claim.tenant_hash, hashed_name

@@ -1,11 +1,11 @@
 use crate::{
     common::AppError,
     dto::{
+        financial::FinancialResponseDto,
         tenants::{
             BaseTenantDTO, Provider, QueryTenantByType, TenantAddressUpdate, TenantCreateDTO,
             TenantDetailDTO,
         },
-        financial::FinancialResponseDto,
         users::UserResponseDto,
     },
     map_db_err,
@@ -16,7 +16,28 @@ use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
 
-use super::{my_sql_repository::MySqlRepository, generate_tenant_name_hash};
+use super::{generate_tenant_name_hash, my_sql_repository::MySqlRepository};
+
+impl MySqlRepository {
+    async fn tenant_users(&self, hashed_name: &str) -> Result<Vec<UserResponseDto>, AppError> {
+        let users = sqlx::query_as::<_, UserResponseDto>(
+            r#"SELECT u.id, u.name, u.username, u.email, u.phone, r.name as role,
+                    t.name as tenant_name, u.created_at, u.updated_at, u.deleted_at
+                    FROM users u 
+                    INNER JOIN tenants t ON u.tenant_id = t.id 
+                    INNER JOIN user_roles ur ON u.id = ur.user_id
+                    INNER JOIN roles r ON ur.role_id = r.id
+                    WHERE t.name_hash = ?
+                    ORDER BY u.created_at DESC"#,
+        )
+        .bind(hashed_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get tenant users"))?;
+
+        Ok(users)
+    }
+}
 
 #[async_trait]
 pub trait TenantRepository: Send + Sync {
@@ -34,8 +55,10 @@ pub trait TenantRepository: Send + Sync {
     async fn tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError>;
 
     // get the financials of a tenant
-    async fn get_tenant_financials(&self, hashed_name: &str)
-        -> Result<Option<FinancialResponseDto>, AppError>;
+    async fn get_tenant_financials(
+        &self,
+        hashed_name: &str,
+    ) -> Result<Option<FinancialResponseDto>, AppError>;
 
     // check if a tenant name hash exists
     // async fn is_tenant_exist(&self, name_hash: &str) -> Result<bool, AppError>;
@@ -231,22 +254,23 @@ impl TenantRepository for MySqlRepository {
     // }
 
     async fn get_tenant_users(&self, hashed_name: &str) -> Result<Vec<UserResponseDto>, AppError> {
-        let users = sqlx::query_as::<_, UserResponseDto>(
-            r#"SELECT u.id, u.name, u.username, u.email, u.phone, r.name as role,
-            t.name as tenant_name, u.created_at, u.updated_at, u.deleted_at
-            FROM users u 
-            INNER JOIN tenants t ON u.tenant_id = t.id 
-            INNER JOIN user_roles ur ON u.id = ur.user_id
-            INNER JOIN roles r ON ur.role_id = r.id
-            WHERE t.name_hash = ?
-            ORDER BY u.created_at DESC"#,
-        )
-        .bind(hashed_name)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get tenant users"))?;
+        // let users = sqlx::query_as::<_, UserResponseDto>(
+        //     r#"SELECT u.id, u.name, u.username, u.email, u.phone, r.name as role,
+        //     t.name as tenant_name, u.created_at, u.updated_at, u.deleted_at
+        //     FROM users u 
+        //     INNER JOIN tenants t ON u.tenant_id = t.id 
+        //     INNER JOIN user_roles ur ON u.id = ur.user_id
+        //     INNER JOIN roles r ON ur.role_id = r.id
+        //     WHERE t.name_hash = ?
+        //     ORDER BY u.created_at DESC"#,
+        // )
+        // .bind(hashed_name)
+        // .fetch_all(&self.pool)
+        // .await
+        // .map_err(map_db_err!("Failed to get tenant users"))?;
 
-        Ok(users)
+
+        self.tenant_users(hashed_name).await
     }
 
     // async fn add_user_to_tenant(&self, hashed_name: &str, user: &User) -> Result<u64, AppError> {
@@ -360,13 +384,13 @@ impl TenantRepository for MySqlRepository {
         query: &QueryTenantByType,
     ) -> Result<Vec<BaseTenantDTO>, AppError> {
         let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "SELECT t.id, t.name, t.tenant_type, t.address, t.business_scope, \
-             t.license_image, t.status, t.name_hash, t.created_at, t.updated_at, \
-             t.verified_at, t.deleted_at \
-             FROM tenants t \
-             JOIN tenant_relationships tr ON t.id = tr.provider_id \
-             JOIN tenants market ON tr.market_id = market.id \
-             WHERE market.name_hash = ",
+            r#"SELECT t.id, t.name, t.tenant_type, t.address, t.business_scope,
+             t.license_image, t.status, t.name_hash, t.created_at, t.updated_at, 
+             t.verified_at, t.deleted_at 
+             FROM tenants t 
+             JOIN tenant_relationships tr ON t.id = tr.provider_id 
+             JOIN tenants market ON tr.market_id = market.id
+             WHERE market.name_hash = "#,
         );
         builder.push_bind(market_hash);
         builder.push(" AND market.tenant_type = 'MARKET'");

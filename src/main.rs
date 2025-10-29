@@ -61,10 +61,10 @@ async fn main() {
         .expect("Failed to initialize ACL snapshot");
 
     let snapshot = ACL_SNAPSHOT.load();
-    debug!(
-        "ACL Snapshot initialized {:?}",
-        snapshot
-    );
+    // debug!(
+    //     "ACL Snapshot initialized {:?}",
+    //     snapshot
+    // );
 
     let app = create_router(&pool);
 

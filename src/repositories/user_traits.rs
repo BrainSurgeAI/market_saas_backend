@@ -6,7 +6,7 @@ use crate::{
 };
 
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 use super::my_sql_repository::MySqlRepository;
 
@@ -104,13 +104,12 @@ impl UserRepository for MySqlRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Error fetching tenant id"))?;
+        .map_err(map_db_err!("Error fetching tenant id"))?
+        .ok_or_else(|| {
+            error!("Tenant {} not found", tenant_hash);
+            return AppError::NotFound("Tenant not found".to_string());
+        })?;
 
-        if tenant.is_none() {
-            return Err(AppError::NotFound("Tenant not found".to_string()));
-        }
-
-        let tenant = tenant.unwrap();
         let user_exists = self.is_user_exists(&user.username).await?;
         if user_exists {
             return Err(AppError::Conflict("User already exists".to_string()));
@@ -125,15 +124,16 @@ impl UserRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Error beginning transaction"))?;
 
-        let new_user = sqlx::query_scalar!(
+        let user_id = sqlx::query!(
             "INSERT INTO users (name, username, password_hash, email, phone, tenant_id) VALUES (?, ?, ?, ?, ?, ?)",
             user.name, user.username, hashed_password, user.email, user.phone, tenant.id
         )
         .execute(&mut *tx)
         .await
-        .map_err(map_db_err!("Error creating user"))?;
+        .map_err(map_db_err!("Error creating user"))?
+        .last_insert_id();
 
-        let user_id = new_user.last_insert_id();
+        debug!("new user id: {} role {} tenant type {}", user_id, user.role, tenant.tenant_type);
 
         let res = sqlx::query(
             "INSERT INTO user_roles (user_id, role_id) 
