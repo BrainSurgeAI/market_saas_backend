@@ -7,13 +7,11 @@ use tracing::{debug, info};
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        delivery_staff::DeliveryStaffIdDTO,
-        order::{
+        ValidatedJSON, delivery_staff::DeliveryStaffIdDTO, order::{
             AcceptedOrderResponseDTO, ActualQuantityDTO, CreateOrderDTO, DispatchOrderDTO,
             OrderDetailResponse, OrderQueryParams, OrderReceiptDTO, OrderResponse,
             ProductsSummaryWithOrdersDTO, UpdateOrderStatusDTO,
-        },
-        ValidatedJSON,
+        }
     },
     middleware::context::RequestContext,
     models::{claims::Claims, order_action::OrderAction, tenant_type::TenantType},
@@ -93,18 +91,19 @@ where
 }
 
 /// Update order status to processing
-pub async fn update_order_status_to_processing<T>(
+pub async fn start_preparing<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path((provider_hash, order_code)): Path<(String, String)>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
     ValidatedJSON(delivery_staff_id_dto): ValidatedJSON<DeliveryStaffIdDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
-    repo.update_order_status_to_processing(
+    repo.order_start_progress(
         &order_code,
-        &provider_hash,
+        &claims.tenant_hash,
         &delivery_staff_id_dto.id_card,
     )
     .await?;
@@ -237,7 +236,7 @@ mod tests {
             async fn get_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &str, query_params: &OrderQueryParams) -> Result<Vec<OrderResponse>, AppError>;
             async fn order_by_order_code(&self, order_code: &str) -> Result<Option<OrderDetailResponse>, AppError>;
             async fn assign_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
-            async fn update_order_status_to_processing(&self, order_code: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
+            async fn order_start_progress(&self, order_code: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
             async fn update_actual_quantity(&self, order_code: &str, actual_quantity_dto: &ActualQuantityDTO) -> Result<(), AppError>;
             async fn process_order_receipt(&self, receipt: &crate::dto::order::OrderReceipt, operator: &str, transaction_id: &str) -> Result<(), AppError>;
             async fn update_order_status(&self, tenant_hash: &str, order_code: &str, new_status: &str, operator: &str) -> Result<(), AppError>;
@@ -409,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_order_by_order_code_success() {
         // 1. 准备测试数据
-        let tenant_hash = "test_tenant".to_string();
+     
         let order_code = "ODR-123456".to_string();
 
         // 2. 创建Mock实例和请求上下文

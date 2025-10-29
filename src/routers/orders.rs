@@ -8,7 +8,7 @@ use crate::{
     services::order_services::{
         create_order, assign_order_to_provider, get_after_sale_orders_by_provider, get_order_by_order_code,
         get_orders, get_provider_today_product_order_summary, return_exchange_order,
-        update_actual_quantity, update_order_status, update_order_status_to_processing,
+        update_actual_quantity, update_order_status, start_preparing,
     },
 };
 
@@ -28,8 +28,8 @@ pub(super) fn order_routes() -> Router {
             patch(assign_order_to_provider::<MySqlRepository>),
         )
         .route(
-            "/api/v1/providers/{provider_hash}/orders/{order_code}/processing",
-            patch(update_order_status_to_processing::<MySqlRepository>),
+            "/api/v1/orders/{order_code}/preparing",  // 供应商备货
+            patch(start_preparing::<MySqlRepository>),
         )
         .route(
             "/api/v1/providers/{provider_hash}/orders/{order_code}/update-quantities",

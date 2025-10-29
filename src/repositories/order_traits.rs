@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use crate::{
     common::AppError,
     dto::order::{
@@ -52,7 +50,7 @@ pub(crate) trait OrderRepository: Send + Sync {
         confirmed_by: &str,
     ) -> Result<(), AppError>;
 
-    async fn update_order_status_to_processing(
+    async fn order_start_progress(
         &self,
         order_code: &str,
         provider_hash: &str,
@@ -496,6 +494,7 @@ impl OrderRepository for MySqlRepository {
         provider_id: i32,
         confirmed_by: &str,
     ) -> Result<(), AppError> {
+        // Only `PENDING` status of the order can be assigned
         let current = OrderStatus::Pending;
         let order_opt = sqlx::query!(
             r#"SELECT id, delivery_date FROM orders WHERE order_code = ? AND order_status = ?"#,
@@ -506,13 +505,15 @@ impl OrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to get order by id"))?;
 
-        let order = match order_opt {
-            Some(o) if o.delivery_date < chrono::Local::now().date_naive() => {
-                return Err(AppError::Validation(format!("不能指派已过期订单 {} ", order_code)));
-            }
-            Some(o) => o,
-            None => return Err(AppError::NotFound(format!("订单 {} 不存在", order_code))),
-        };
+        let order =
+            order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
+
+        if order.delivery_date < chrono::Local::now().date_naive() {
+            return Err(AppError::Validation(format!(
+                "不能指派已过期订单 {}",
+                order_code
+            )));
+        }
 
         let order_id = order.id;
 
@@ -567,42 +568,39 @@ impl OrderRepository for MySqlRepository {
         Ok(())
     }
 
-    async fn update_order_status_to_processing(
+    async fn order_start_progress(
         &self,
         order_code: &str,
         provider_hash: &str,
         delivery_staff_id: &str,
     ) -> Result<(), AppError> {
-        let record = sqlx::query!(
-            r#"SELECT name FROM tenants WHERE name_hash = ?"#,
-            provider_hash
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get provider id"))?;
-
-        if record.name.is_empty() {
-            return Err(AppError::NotFound(format!(
-                "Provider {} not found",
-                provider_hash
-            )));
-        }
-
-        let provider_name = record.name;
         let order = sqlx::query!(
-            r#"SELECT id FROM orders WHERE order_code = ? AND order_status = 'CONFIRMED'"#,
+            r#"SELECT o.id, o.order_status, t.name AS tenant_name FROM tenants t
+               INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
+               INNER JOIN orders o ON poa.order_id = o.id
+               WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ?"#,
+            provider_hash,
             order_code
         )
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get order by id"))?;
+        .map_err(map_db_err!("Failed to get order"))?
+        .ok_or_else(|| {
+            error!("Order {} was not found, can not preparing", order_code);
+            return AppError::NotFound(format!("订单 {} 没有找到，不能备货", order_code));
+        })?;
 
-        if order.id == 0 {
-            return Err(AppError::NotFound(format!(
-                "Order {} not found or order status is not confirmed",
-                order_code
-            )));
-        }
+        let current_status = OrderStatus::try_from(order.order_status.as_str())?;
+
+        let next = OrderStateMachine::next_state(
+            current_status,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+        )
+        .map_err(|e| {
+            error!("{}", e);
+            return AppError::Validation("订单状态错误，不能进行备货".to_string());
+        })?;
 
         let order_id = order.id;
 
@@ -622,14 +620,17 @@ impl OrderRepository for MySqlRepository {
 
         if delivery_staff_id.id == 0 {
             return Err(AppError::NotFound(format!(
-                "Delivery staff id {} not found",
+                "配送员 {} 没有找到",
                 delivery_staff_id.id
             )));
         }
+
         sqlx::query!(
-            r#"UPDATE orders SET order_status = 'PROCESSING', delivery_staff_id = ? WHERE id = ? AND order_status = 'CONFIRMED'"#,
+            r#"UPDATE orders SET order_status = ?, delivery_staff_id = ? WHERE id = ? AND order_status = ?"#,
+            next.to_str(),
             delivery_staff_id.id,
-            order_id
+            order_id,
+            current_status.to_str()
         )
         .execute(&mut *tx)
         .await
@@ -637,7 +638,7 @@ impl OrderRepository for MySqlRepository {
 
         sqlx::query!(
             r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, "CONFIRMED", "PROCESSING", provider_name, "ORDER_PROCESSING"
+            order_id, current_status.to_str(), next.to_str(), order.tenant_name, "Preparing stock"
         )
         .execute(&mut *tx)
         .await
@@ -924,7 +925,7 @@ impl OrderRepository for MySqlRepository {
 
     async fn update_order_status(
         &self,
-        tenant_type: &str,
+        _tenant_type: &str,
         order_code: &str,
         new_status: &str,
         operator: &str,
@@ -1277,7 +1278,7 @@ mod tests {
                 confirmed_by: &str,
             ) -> Result<(), AppError>;
 
-            async fn update_order_status_to_processing(
+            async fn order_start_progress(
                 &self,
                 order_code: &str,
                 provider_hash: &str,
