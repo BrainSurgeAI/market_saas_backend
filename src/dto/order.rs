@@ -582,19 +582,19 @@ pub struct OrderDetail {
 // }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct ActualQuantity {
-    pub id: i32,
+pub(crate) struct ActualQuantity {
+    pub(crate) id: i32,
 
     #[serde(rename = "actualQuantity")]
-    pub actual_quantity: Decimal,
+    pub(crate) actual_quantity: Decimal,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct ActualQuantityDTO {
+pub(crate) struct DeliverToMarketDTO {
     #[serde(rename = "stockedBy")]
-    pub stocked_by: String,
+    pub(crate) stocked_by: String,
 
-    pub items: Vec<ActualQuantity>,
+    pub(crate) items: Vec<ActualQuantity>,
 }
 
 // impl ActualQuantityDTO {
@@ -794,11 +794,11 @@ pub struct OrderReceipt {
 // }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct UpdateOrderStatusDTO {
+pub(crate) struct UpdateOrderStatusDTO {
     #[serde(rename = "operateBy")]
-    pub operate_by: String,
+    pub(crate) operate_by: String,
 
-    pub status: String,
+    pub(crate) status: String,
 }
 
 // impl UpdateOrderStatusDTO {
@@ -814,12 +814,12 @@ pub struct UpdateOrderStatusDTO {
 // }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct DispatchOrderDTO {
+pub(crate) struct DispatchOrderDTO {
     #[serde(rename = "providerId")]
-    pub provider_id: i32,
+    pub(crate) provider_id: i32,
 
     #[serde(rename = "confirmedBy")]
-    pub confirmed_by: String,
+    pub(crate) confirmed_by: String,
 }
 
 // impl DispatchOrderDTO {

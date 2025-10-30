@@ -8,13 +8,13 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::{
         ValidatedJSON, delivery_staff::DeliveryStaffIdDTO, order::{
-            AcceptedOrderResponseDTO, ActualQuantityDTO, CreateOrderDTO, DispatchOrderDTO,
+            AcceptedOrderResponseDTO, DeliverToMarketDTO, CreateOrderDTO, DispatchOrderDTO,
             OrderDetailResponse, OrderQueryParams, OrderReceiptDTO, OrderResponse,
             ProductsSummaryWithOrdersDTO, UpdateOrderStatusDTO,
         }
     },
     middleware::context::RequestContext,
-    models::{claims::Claims, order_action::OrderAction, tenant_type::TenantType},
+    models::{claims::Claims, order_action::OrderAction, order_status::OrderStatus, tenant_type::TenantType},
     repositories::order_traits::OrderRepository,
     utils::validate_json_fmt::Json,
 };
@@ -62,17 +62,18 @@ where
 pub(crate) async fn get_order_by_order_code<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
     Path(order_code): Path<String>,
 ) -> Result<Json<ApiResponse<Option<OrderDetailResponse>>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
-    let order = repo.order_by_order_code(&order_code).await?;
+    let order = repo.order_by_order_code(&order_code, &claims.tenant_hash).await?;
     Ok(Json(ApiResponse::new(Some(order), &context)))
 }
 
 /// Dispatch order to provider
-pub async fn assign_order_to_provider<T>(
+pub(crate) async fn assign_order_to_provider<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Path(order_code): Path<String>,
@@ -91,7 +92,7 @@ where
 }
 
 /// Update order status to processing
-pub async fn start_preparing<T>(
+pub(crate) async fn start_preparing<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -103,6 +104,7 @@ where
 {
     repo.order_start_progress(
         &order_code,
+        &claims.username,
         &claims.tenant_hash,
         &delivery_staff_id_dto.id_card,
     )
@@ -110,17 +112,18 @@ where
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
-pub async fn update_actual_quantity<T>(
+pub(crate) async fn deliver_to_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path((_, order_code)): Path<(String, String)>,
-    Json(actual_quantity_dto): Json<ActualQuantityDTO>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+    Json(deliver_to_market_dto): Json<DeliverToMarketDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
-    debug!("Update actual quantity: {:?}", actual_quantity_dto);
-    repo.update_actual_quantity(&order_code, &actual_quantity_dto)
+    debug!("Deliver to market: {:?}", deliver_to_market_dto);
+    repo.deliver_to_market(&order_code, &claims.username, &claims.tenant_hash, &deliver_to_market_dto)
         .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
@@ -160,35 +163,39 @@ where
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
-pub async fn update_order_status<T>(
+
+/// Market or Customer begin to inspect the order
+pub(crate) async fn inspect_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path((_, order_code)): Path<(String, String)>,
+    Path(order_code): Path<String>,
     Json(update_order_status_dto): Json<UpdateOrderStatusDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
     info!(
-        "Update order {} status to: {}",
-        &order_code, &update_order_status_dto.status
+        "Inspect order {} by market {} user {}",
+        &order_code, &claims.tenant_type, &claims.username
     );
 
-    let new_status = &update_order_status_dto.status;
-    let tenant_type = claims.tenant_type.to_string();
+    let target_status =  OrderStatus::try_from(update_order_status_dto.status.as_str())?;
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
 
     repo.update_order_status(
-        &tenant_type,
+        tenant_type,
+        &claims.tenant_hash,
         &order_code,
-        new_status,
+        OrderAction::MarketInspect,
+        target_status,
         &update_order_status_dto.operate_by,
     )
     .await?;
 
     info!(
         "订单 {}  更新为 {} (执行者: {})",
-        &order_code, new_status, &update_order_status_dto.operate_by
+        &order_code, target_status, &update_order_status_dto.operate_by
     );
 
     Ok(Json(ApiResponse::new(Some(()), &context)))
@@ -213,7 +220,7 @@ mod tests {
     use super::*;
     use crate::dto::order::{
         CreateOrderDTO, CreateOrderItem, DeliveryInfo, OrderDetail, OrderDetailResponse, OrderItem,
-        OrderQueryParams, OrderResponse,
+        OrderQueryParams, OrderResponse, OrderReceipt,
     };
     use crate::middleware::context::RequestContext;
     use crate::models::claims::Claims;
@@ -234,13 +241,13 @@ mod tests {
             async fn get_after_sale_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &TenantType) -> Result<Vec<crate::dto::order::AcceptedOrderResponseDTO>, AppError>;
             async fn create_order(&self, market_id: i32, customer_hash: &str, order: &CreateOrderDTO) -> Result<OrderResponse, AppError>;
             async fn get_orders_by_tenant(&self, tenant_hash: &str, tenant_type: &str, query_params: &OrderQueryParams) -> Result<Vec<OrderResponse>, AppError>;
-            async fn order_by_order_code(&self, order_code: &str) -> Result<Option<OrderDetailResponse>, AppError>;
+            async fn order_by_order_code(&self, order_code: &str, tenant_hash: &str) -> Result<Option<OrderDetailResponse>, AppError>;
             async fn assign_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
-            async fn order_start_progress(&self, order_code: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
-            async fn update_actual_quantity(&self, order_code: &str, actual_quantity_dto: &ActualQuantityDTO) -> Result<(), AppError>;
-            async fn process_order_receipt(&self, receipt: &crate::dto::order::OrderReceipt, operator: &str, transaction_id: &str) -> Result<(), AppError>;
-            async fn update_order_status(&self, tenant_hash: &str, order_code: &str, new_status: &str, operator: &str) -> Result<(), AppError>;
-            async fn fetch_today_product_order_summary_by_provider_hash(&self, provider_hash: &str) -> Result<Vec<crate::dto::order::ProductsSummaryWithOrdersDTO>, AppError>;
+            async fn order_start_progress(&self, order_code: &str, operator: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
+            async fn deliver_to_market(&self, order_code: &str, operator: &str, provider_hash: &str, deliver_to_market_dto: &DeliverToMarketDTO) -> Result<(), AppError>;
+            async fn process_order_receipt(&self, receipt: &OrderReceipt, operator: &str, transaction_id: &str) -> Result<(), AppError>;
+            async fn update_order_status(&self, tenant_type: TenantType, tenant_hash: &str, order_code: &str, action: OrderAction, next_status: OrderStatus, operator: &str) -> Result<(), AppError>;
+            async fn fetch_today_product_order_summary_by_provider_hash(&self, provider_hash: &str) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError>;
         }
     }
 
@@ -417,13 +424,22 @@ mod tests {
             request_id: "test-request-id".to_string(),
             client_ip: None,
         };
+        let claims = Claims {
+            tenant_name: "测试客户".to_string(),
+            roles: vec!["CUSTOMER".to_string()],
+            is_super_admin: false,
+            username: "test_user".to_string(),
+            tenant_hash: "test_tenant_hash".to_string(),
+            tenant_type: "CUSTOMER".to_string(),
+            exp: 9999999999,
+        };
 
         // 3. 设置mock行为 - 模拟订单查询成功
         mock_repo
             .expect_order_by_order_code()
-            .with(eq(order_code.clone()))
+            .with(eq(order_code.clone()), eq("test_tenant_hash".to_string()))
             .times(1)
-            .returning(|_| {
+            .returning(|_, _| {
                 Ok(Some(OrderDetailResponse {
                     order: OrderItem {
                         id: 1,
@@ -482,6 +498,7 @@ mod tests {
         let result = get_order_by_order_code(
             Extension(mock_repo),
             Extension(context),
+            Extension(claims),
             Path(order_code),
         )
         .await;

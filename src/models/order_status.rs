@@ -92,7 +92,7 @@ impl TryFrom<&str> for OrderStatus {
     type Error = AppError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::parse(s).ok_or_else(|| AppError::Validation("Unknown Order Status".to_string()))
+        Self::parse(s).ok_or_else(|| AppError::Validation(format!("Unknown Order Status: {}", s)))
     }
 }
 
