@@ -74,7 +74,6 @@ pub async fn create_tenant<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(market_hash): Path<String>,
     ValidatedJSON(payload): ValidatedJSON<TenantCreateDTO>,
 ) -> Result<impl IntoResponse, AppError>
 where
@@ -93,7 +92,8 @@ where
         ));
     }
 
-    repo.create_tenant(&market_hash, &payload).await?;
+    // Use tenant_hash from claims as market_hash since MARKET_ADMIN belongs to a market
+    repo.create_tenant(&claims.tenant_hash, &payload).await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 

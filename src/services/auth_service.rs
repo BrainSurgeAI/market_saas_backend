@@ -155,7 +155,7 @@ where
         AppError::Internal("Error hashing password".to_string())
     })?;
 
-    let tenant_hash_name = generate_tenant_name_hash(&payload.tenant_name).unwrap();
+    let tenant_hash_name = generate_tenant_name_hash();
     let tenant_admin_params = CreateTenantWithAdminParams::builder()
         .tenant_type(payload.tenant_type.to_uppercase())
         .tenant_name(&payload.tenant_name)

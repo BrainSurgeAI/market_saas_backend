@@ -1,9 +1,5 @@
 use chrono::Utc;
 use rand::Rng;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use tracing::debug;
-
-use crate::common::AppError;
 
 pub(crate) mod category_traits;
 pub(crate) mod delivery_staff_traits;
@@ -60,40 +56,16 @@ pub(crate) mod my_sql_repository {
 /// # Errors
 ///
 /// Returns an `AppError` if the tenant name is empty.
-pub(super) fn generate_tenant_name_hash(name: &str) -> Result<String, AppError> {
-    debug!("Hashing tenant name: {}", name);
-
-    if name.trim().is_empty() {
-        return Err(AppError::Validation(
-            "Tenant name cannot be empty".to_string(),
-        ));
-    }
-
-    // 1. 计算输入字符串的哈希值
-    let mut hasher = DefaultHasher::new();
-    // 使用完整的名字来计算哈希，确保唯一性
-    name.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    // 2. 定义字符集（移除容易混淆的字符如0o1l）
+pub(super) fn generate_tenant_name_hash() -> String {
+    use uuid::Uuid;
     const CHARSET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
-
-    // 3. 生成8位字符
-    let mut result = String::with_capacity(8);
-
-    // 确保第一位是字母
-    let first_idx = (hash % 24) as usize; // 24是字母的数量
-    result.push(CHARSET[first_idx] as char);
-
-    // 生成剩余7位
-    let mut remaining_hash = hash >> 6; // 移位操作以使用哈希值的不同部分
-    for _ in 0..7 {
-        let idx = (remaining_hash % (CHARSET.len() as u64)) as usize;
-        result.push(CHARSET[idx] as char);
-        remaining_hash /= CHARSET.len() as u64;
+    let uuid = Uuid::new_v4();
+    let bytes = uuid.as_bytes();
+    let mut code = String::with_capacity(8);
+    for &b in &bytes[..8] {
+        code.push(CHARSET[(b as usize) % CHARSET.len()] as char);
     }
-
-    Ok(result)
+    code
 }
 
 pub(crate) enum CodeType {

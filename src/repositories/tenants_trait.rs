@@ -16,7 +16,8 @@ use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
 
-use super::{generate_tenant_name_hash, my_sql_repository::MySqlRepository};
+use super::my_sql_repository::MySqlRepository;
+use crate::repositories::generate_tenant_name_hash;
 
 impl MySqlRepository {
     async fn tenant_users(&self, hashed_name: &str) -> Result<Vec<UserResponseDto>, AppError> {
@@ -115,7 +116,9 @@ pub trait TenantRepository: Send + Sync {
 
 #[async_trait]
 impl TenantRepository for MySqlRepository {
+
     async fn tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError> {
+        // 是否还要检查 name 是否存在？
         let tenant_exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM tenants WHERE name_hash = ?)",
         )
@@ -151,10 +154,8 @@ impl TenantRepository for MySqlRepository {
         market_hash: &str,
         tenant: &TenantCreateDTO,
     ) -> Result<(), AppError> {
-        let name_hash = generate_tenant_name_hash(&tenant.name).map_err(|e| {
-            error!("Error hashing tenant name: {:?}", e);
-            AppError::Internal("Error hashing tenant name".to_string())
-        })?;
+
+        let name_hash = generate_tenant_name_hash();
 
         let is_exist = self.tenant_exists(&name_hash).await?;
         if is_exist {
