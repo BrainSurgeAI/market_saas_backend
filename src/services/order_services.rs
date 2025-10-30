@@ -7,14 +7,19 @@ use tracing::{debug, info};
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        ValidatedJSON, delivery_staff::DeliveryStaffIdDTO, order::{
-            AcceptedOrderResponseDTO, DeliverToMarketDTO, CreateOrderDTO, DispatchOrderDTO,
+        delivery_staff::DeliveryStaffIdDTO,
+        order::{
+            AcceptedOrderResponseDTO, CreateOrderDTO, DeliverToMarketDTO, DispatchOrderDTO,
             OrderDetailResponse, OrderQueryParams, OrderReceiptDTO, OrderResponse,
-            ProductsSummaryWithOrdersDTO, UpdateOrderStatusDTO,
-        }
+            ProductsSummaryWithOrdersDTO, ReceiptOperationType, UpdateOrderStatusDTO,
+        },
+        ValidatedJSON,
     },
     middleware::context::RequestContext,
-    models::{claims::Claims, order_action::OrderAction, order_status::OrderStatus, tenant_type::TenantType},
+    models::{
+        claims::Claims, order_action::OrderAction, order_status::OrderStatus,
+        tenant_type::TenantType,
+    },
     repositories::order_traits::OrderRepository,
     utils::validate_json_fmt::Json,
 };
@@ -68,7 +73,9 @@ pub(crate) async fn get_order_by_order_code<T>(
 where
     T: OrderRepository + Send + Sync,
 {
-    let order = repo.order_by_order_code(&order_code, &claims.tenant_hash).await?;
+    let order = repo
+        .order_by_order_code(&order_code, &claims.tenant_hash)
+        .await?;
     Ok(Json(ApiResponse::new(Some(order), &context)))
 }
 
@@ -123,8 +130,13 @@ where
     T: OrderRepository + Send + Sync,
 {
     debug!("Deliver to market: {:?}", deliver_to_market_dto);
-    repo.deliver_to_market(&order_code, &claims.username, &claims.tenant_hash, &deliver_to_market_dto)
-        .await?;
+    repo.deliver_to_market(
+        &order_code,
+        &claims.username,
+        &claims.tenant_hash,
+        &deliver_to_market_dto,
+    )
+    .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
@@ -146,16 +158,48 @@ where
     Ok(Json(ApiResponse::new(Some(orders), &context)))
 }
 
-pub async fn return_exchange_order<T>(
+pub async fn inspect_sub_orders<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
     Json(return_exchange_dto): Json<OrderReceiptDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: OrderRepository + Send + Sync,
 {
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    let action = match return_exchange_dto.receipt.operation_type {
+        ReceiptOperationType::Sign => {
+            if tenant_type == TenantType::Market {
+                OrderAction::MarketAccept
+            } else {
+                OrderAction::Complete
+            }
+        }
+        ReceiptOperationType::Return => {
+            if tenant_type == TenantType::Market {
+                OrderAction::MarketReturn
+            } else {
+                OrderAction::CustomerReturn
+            }
+        }
+        ReceiptOperationType::Exchange => {
+            if tenant_type == TenantType::Market {
+                OrderAction::MarketExchange
+            } else {
+                OrderAction::CustomerExchange
+            }
+        }
+        _ => {
+            return Err(AppError::Validation("无效的操作类型".to_string()));
+        }
+    };
+
     repo.process_order_receipt(
         &return_exchange_dto.receipt,
+        tenant_type,
+        &claims.tenant_hash,
+        action,
         &return_exchange_dto.operate_by,
         &context.request_id,
     )
@@ -163,14 +207,13 @@ where
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
-
 /// Market or Customer begin to inspect the order
-pub(crate) async fn inspect_order<T>(
+pub(crate) async fn begin_inspect_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     Path(order_code): Path<String>,
-    Json(update_order_status_dto): Json<UpdateOrderStatusDTO>,
+  //  Json(update_order_status_dto): Json<UpdateOrderStatusDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: OrderRepository + Send + Sync,
@@ -179,25 +222,127 @@ where
         "Inspect order {} by market {} user {}",
         &order_code, &claims.tenant_type, &claims.username
     );
-
-    let target_status =  OrderStatus::try_from(update_order_status_dto.status.as_str())?;
+    
     let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    let (action, target_status) = match tenant_type {
+        TenantType::Market => (OrderAction::MarketInspect, OrderStatus::MarketInspecting),
+        TenantType::Customer => (OrderAction::CustomerInspect, OrderStatus::CustomerInspecting),
+        _ => {
+            return Err(AppError::Forbidden(format!("{} 不能执行验收操作", claims.tenant_type)));
+        }
+    };
 
     repo.update_order_status(
         tenant_type,
         &claims.tenant_hash,
         &order_code,
-        OrderAction::MarketInspect,
+        action,
         target_status,
-        &update_order_status_dto.operate_by,
+        &claims.username,
     )
     .await?;
 
     info!(
         "订单 {}  更新为 {} (执行者: {})",
-        &order_code, target_status, &update_order_status_dto.operate_by
+        &order_code, target_status, &claims.username
     );
 
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+
+/// 市场和客户通过订单验收, 针对主订单
+pub(crate) async fn accept_order<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    let (action, target_status) = match tenant_type {
+        TenantType::Market => (OrderAction::MarketAccept, OrderStatus::MarketAccepted),
+        TenantType::Customer => (OrderAction::Complete, OrderStatus::Completed),
+        _ => {
+            return Err(AppError::Forbidden(format!("{} 不能执行签收操作", claims.tenant_type)));
+        }
+    };
+
+    debug!("Accept order {} by {} action {}", &order_code, tenant_type, action);
+    repo.update_order_status(
+        tenant_type,
+        &claims.tenant_hash,
+        &order_code,
+        action,
+        target_status,
+        &claims.username,
+    )
+    .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+pub(crate) async fn deliver_to_customer<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    let (action, target_status) = match tenant_type {
+        TenantType::Market => (OrderAction::DeliverToCustomer, OrderStatus::MarketDelivering),
+        _ => {
+            return Err(AppError::Forbidden(format!("{} 不能执行配送到客户操作", claims.tenant_type)));
+        }
+    };
+    debug!("Deliver to customer {} by {} action {}", &order_code, tenant_type, action);
+    repo.update_order_status(
+        tenant_type,
+        &claims.tenant_hash,
+        &order_code,
+        action,
+        target_status,
+        &claims.username,
+    )
+    .await?;
+    Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+
+/// Cancel order
+pub(crate) async fn cancel_order<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+) -> Result<Json<ApiResponse<()>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    let (action, target_status) = match tenant_type {
+        TenantType::Market => (OrderAction::Cancel, OrderStatus::Cancelled),
+        TenantType::Customer => (OrderAction::Cancel, OrderStatus::Cancelled),
+        _ => {
+            return Err(AppError::Forbidden(format!("{} 不能执行取消操作", claims.tenant_type)));
+        }
+    };
+
+    debug!("Cancel order {} by {} action {}", &order_code, tenant_type, action);
+    
+    repo.update_order_status(
+        tenant_type,
+        &claims.tenant_hash,
+        &order_code,
+        action,
+        target_status,
+        &claims.username,
+    )
+    .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
@@ -220,7 +365,7 @@ mod tests {
     use super::*;
     use crate::dto::order::{
         CreateOrderDTO, CreateOrderItem, DeliveryInfo, OrderDetail, OrderDetailResponse, OrderItem,
-        OrderQueryParams, OrderResponse, OrderReceipt,
+        OrderQueryParams, OrderReceipt, OrderResponse,
     };
     use crate::middleware::context::RequestContext;
     use crate::models::claims::Claims;
@@ -234,7 +379,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     mock! {
-        pub OrderRepo {} 
+        pub OrderRepo {}
 
         #[async_trait]
         impl OrderRepository for OrderRepo {
@@ -245,7 +390,7 @@ mod tests {
             async fn assign_order(&self, order_code: &str, provider_id: i32, confirmed_by: &str) -> Result<(), AppError>;
             async fn order_start_progress(&self, order_code: &str, operator: &str, provider_hash: &str, delivery_staff_id: &str) -> Result<(), AppError>;
             async fn deliver_to_market(&self, order_code: &str, operator: &str, provider_hash: &str, deliver_to_market_dto: &DeliverToMarketDTO) -> Result<(), AppError>;
-            async fn process_order_receipt(&self, receipt: &OrderReceipt, operator: &str, transaction_id: &str) -> Result<(), AppError>;
+            async fn process_order_receipt(&self, receipt: &OrderReceipt, tenant_type: TenantType, tenant_hash: &str, action: OrderAction, operator: &str, transaction_id: &str) -> Result<(), AppError>;
             async fn update_order_status(&self, tenant_type: TenantType, tenant_hash: &str, order_code: &str, action: OrderAction, next_status: OrderStatus, operator: &str) -> Result<(), AppError>;
             async fn fetch_today_product_order_summary_by_provider_hash(&self, provider_hash: &str) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError>;
         }
@@ -307,7 +452,11 @@ mod tests {
         // 3. 设置mock行为 - 模拟repository返回成功响应
         mock_repo
             .expect_create_order()
-            .with(eq(1), eq("test_tenant_hash".to_string()), predicate::always())
+            .with(
+                eq(1),
+                eq("test_tenant_hash".to_string()),
+                predicate::always(),
+            )
             .times(1)
             .returning(|_, _, _| {
                 // 返回模拟的成功响应
@@ -415,7 +564,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_order_by_order_code_success() {
         // 1. 准备测试数据
-     
+
         let order_code = "ODR-123456".to_string();
 
         // 2. 创建Mock实例和请求上下文
@@ -705,7 +854,11 @@ mod tests {
         let mut mock_repo = MockOrderRepo::new();
         mock_repo
             .expect_create_order()
-            .with(eq(1), eq("test_customer_hash".to_string()), predicate::always())
+            .with(
+                eq(1),
+                eq("test_customer_hash".to_string()),
+                predicate::always(),
+            )
             .times(1)
             .returning(|_, _, _| {
                 Ok(OrderResponse {

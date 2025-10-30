@@ -47,6 +47,7 @@ impl TenantType {
                     | OrderAction::MarketExchange
                     | OrderAction::DeliverToCustomer
                     | OrderAction::StartPreparing
+                    | OrderAction::Cancel
             ),
         }
     }

@@ -76,6 +76,9 @@ pub(crate) trait OrderRepository: Send + Sync {
     async fn process_order_receipt(
         &self,
         receipt: &OrderReceipt,
+        tenant_type: TenantType,
+        tenant_hash: &str,
+        action: OrderAction,
         operator: &str,
         transaction_id: &str,
     ) -> Result<(), AppError>;
@@ -688,7 +691,7 @@ impl OrderRepository for MySqlRepository {
             .fetch_provider_order(
                 provider_hash,
                 order_code,
-                &format!("订单 {} 没有找到，不能配送到市场", order_code),
+                &format!("订单 {} 没有找到", order_code),
             )
             .await?;
 
@@ -795,36 +798,37 @@ impl OrderRepository for MySqlRepository {
     async fn process_order_receipt(
         &self,
         receipt: &OrderReceipt,
+        tenant_type: TenantType,
+        tenant_hash: &str,
+        action: OrderAction,
         operator: &str,
         transaction_id: &str,
     ) -> Result<(), AppError> {
         // 验证订单存在且状态正确
         let record = sqlx::query!(
-            r#"SELECT o.id, od.id as detail_id 
+            r#"SELECT o.id, od.id as detail_id, o.order_status
                FROM orders o 
                JOIN order_details od ON o.id = od.order_id 
-               WHERE o.order_code = ? AND od.id = ? AND o.order_status = 'STOCKED'"#,
+               WHERE o.order_code = ? AND od.id = ?"#,
             receipt.order_code,
             receipt.order_detail_id
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to find order"))?;
+        .map_err(map_db_err!("Failed to find order"))?
+        .ok_or_else(|| AppError::NotFound(format!("Order {} with order detail id {} not found", receipt.order_code, receipt.order_detail_id)))?;
 
-        if record.is_none() {
-            return Err(AppError::NotFound(format!(
-                "Order {} with order detail id {} not found or not in correct status",
-                receipt.order_code, receipt.order_detail_id
-            )));
-        }
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
-        let detail_id = record.unwrap().detail_id;
+        let next = Self::validate_and_transition_order_state(
+            &record.order_status.as_str(),
+            action,
+            tenant_type,
+            &format!("订单 {} 不能从状态 {} 转移通过 {}", receipt.order_code, record.order_status, tenant_type),
+        )?;
 
+        debug!("Order status updated to {}", next);
+
+        
         // 处理凭证证据（如果有的话）
         let evidence_json = match &receipt.evidence_images {
             Some(evidence_images) if !evidence_images.is_empty() => {
@@ -834,6 +838,14 @@ impl OrderRepository for MySqlRepository {
             }
             _ => None,
         };
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+        
+        let detail_id = record.detail_id;
 
         match receipt.operation_type {
             ReceiptOperationType::Sign => {
@@ -1000,7 +1012,7 @@ impl OrderRepository for MySqlRepository {
             order.order_status.as_str(),
             action,
             tenant_type,
-            format!("Order status is not correct: {} -> {}", order.order_status, target_status).as_str(),
+            format!("Order status is not correct: {} -> {}", order.order_status, target_status.to_str()).as_str(),
         )?;
 
         if next_status != target_status {
@@ -1009,7 +1021,7 @@ impl OrderRepository for MySqlRepository {
 
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
-            target_status.to_str(),
+            next_status.to_str(),
             order.id
         )
         .execute(&mut *tx)
@@ -1018,13 +1030,35 @@ impl OrderRepository for MySqlRepository {
 
         sqlx::query!(
             r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, order.order_status, target_status.to_str(), operator, action.description()
+            order.id, order.order_status, next_status.to_str(), operator, action.description()
         )
         .execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to insert order status history"))?;
 
-        debug!("Order status updated to {}", target_status);
+        debug!("Order status updated to {}", next_status);
+
+        // 如果是客户开始验收，则需要重置子订单状态到待验收
+        if tenant_type == TenantType::Customer && action == OrderAction::CustomerInspect {
+            sqlx::query!(
+                r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
+                order.id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to reset sub order status"))?;
+        }
+
+        // 如果客户直接确认收货，则将子订单更新到
+        if tenant_type == TenantType::Customer && action == OrderAction::Complete {
+            sqlx::query!(
+                r#"UPDATE order_details SET status = 'SIGN' WHERE order_id = ?"#,
+                order.id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to update sub order status"))?;
+        }
 
         tx.commit()
             .await
