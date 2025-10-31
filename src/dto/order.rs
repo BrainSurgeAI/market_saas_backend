@@ -793,13 +793,13 @@ pub struct OrderReceipt {
 //     }
 // }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub(crate) struct UpdateOrderStatusDTO {
-    #[serde(rename = "operateBy")]
-    pub(crate) operate_by: String,
+// #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+// pub(crate) struct UpdateOrderStatusDTO {
+//     #[serde(rename = "operateBy")]
+//     pub(crate) operate_by: String,
 
-    pub(crate) status: String,
-}
+//     pub(crate) status: String,
+// }
 
 // impl UpdateOrderStatusDTO {
 //     /// Create new update order status DTO

@@ -1,5 +1,5 @@
 mod error;
 mod response;
 
-pub use error::AppError;
-pub use response::ApiResponse;
+pub(crate) use error::AppError;
+pub(crate) use response::ApiResponse;

@@ -17,12 +17,12 @@ use crate::repositories::user_traits::UserRepository;
 ///
 /// ## Returns
 /// * `code` - Code of the user  Current mock code is 123456
-pub async fn request_verify_code(_phone_number: String) -> Result<(), AppError> {
-    //let code = "123456";
-    // TODO: send message to third party service
-    //send_message_to_user(phone_number, message).await?;
-    Ok(())
-}
+// pub async fn request_verify_code(_phone_number: String) -> Result<(), AppError> {
+//     //let code = "123456";
+//     // TODO: send message to third party service
+//     //send_message_to_user(phone_number, message).await?;
+//     Ok(())
+// }
 
 pub async fn super_admin_login<T, U>(
     Extension(super_admin_repo): Extension<T>,

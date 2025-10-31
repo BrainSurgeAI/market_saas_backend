@@ -19,22 +19,22 @@ use crate::middleware::context::RequestContext;
 /// let response: ApiResponse<()> = ApiResponse::error(404, "Resource not found");
 /// ```
 #[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ApiResponse<T> {
+pub(crate) struct ApiResponse<T> {
     /// HTTP status code
-    pub code: i32,
+    pub(crate) code: i32,
     /// Response message
-    pub message: String,
+    pub(crate) message: String,
 
     /// Response data (optional, skipped during serialization when None)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<T>,
+    pub(crate) data: Option<T>,
 
     /// Request unique identifier
     #[serde(rename = "requestId")]
-    pub request_id: String,
+    pub(crate) request_id: String,
 
     /// Response generation timestamp
-    pub timestamp: DateTime<Utc>,
+    pub(crate) timestamp: DateTime<Utc>,
 }
 
 impl<T> ApiResponse<T> {
@@ -48,7 +48,7 @@ impl<T> ApiResponse<T> {
     /// ```rust
     /// let response = ApiResponse::new(Some(user_data), &context);
     /// ```
-    pub fn new(data: Option<T>, context: &RequestContext) -> Self {
+    pub(crate) fn new(data: Option<T>, context: &RequestContext) -> Self {
         Self::with_code_and_message(200, "success", data, context)
     }
 
@@ -69,7 +69,7 @@ impl<T> ApiResponse<T> {
     ///     &context
     /// );
     /// ```
-    pub fn with_code_and_message(code: i32, message: impl Into<String>, data: Option<T>, context: &RequestContext) -> Self {
+    pub(crate) fn with_code_and_message(code: i32, message: impl Into<String>, data: Option<T>, context: &RequestContext) -> Self {
         Self {
             code,
             message: message.into(),
@@ -80,17 +80,17 @@ impl<T> ApiResponse<T> {
     }
 
     /// Creates a 201 Created response for successful resource creation
-    pub fn created(data: Option<T>, context: &RequestContext) -> Self {
+    pub(crate) fn created(data: Option<T>, context: &RequestContext) -> Self {
         Self::with_code_and_message(201, "created", data, context)
     }
 
     /// Creates a 202 Accepted response for accepted but not yet processed requests
-    pub fn accepted(data: Option<T>, context: &RequestContext) -> Self {
+    pub(crate) fn accepted(data: Option<T>, context: &RequestContext) -> Self {
         Self::with_code_and_message(202, "accepted", data, context)
     }
 
     /// Creates a 204 No Content response for successful operations with no return data
-    pub fn no_content(context: &RequestContext) -> Self {
+    pub(crate) fn no_content(context: &RequestContext) -> Self {
         Self::with_code_and_message(204, "no content", None, context)
     }
 
@@ -105,7 +105,7 @@ impl<T> ApiResponse<T> {
     /// let response: ApiResponse<()> = ApiResponse::error(404, "User not found");
     /// let response: ApiResponse<()> = ApiResponse::error(500, format!("Database error: {}", err));
     /// ```
-    pub fn error(code: i32, message: impl Into<String>) -> Self {
+    pub(crate) fn error(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -121,7 +121,7 @@ impl<T> ApiResponse<T> {
     /// - `code`: HTTP error status code
     /// - `message`: Error message
     /// - `request_id`: Custom request ID
-    pub fn error_with_request_id(
+    pub(crate) fn error_with_request_id(
         code: i32,
         message: impl Into<String>,
         request_id: String,
@@ -148,7 +148,7 @@ impl<T> ApiResponse<T> {
     /// ```rust
     /// let response = ApiResponse::ok(user_list, &context);
     /// ```
-    pub fn ok(data: T, context: &RequestContext) -> Self {
+    pub(crate) fn ok(data: T, context: &RequestContext) -> Self {
         Self::new(Some(data), context)
     }
 
@@ -161,7 +161,7 @@ impl<T> ApiResponse<T> {
     /// ```rust
     /// let response = ApiResponse::ok_empty(&context);
     /// ```
-    pub fn ok_empty(context: &RequestContext) -> Self {
+    pub(crate) fn ok_empty(context: &RequestContext) -> Self {
         Self::new(None, context)
     }
 }

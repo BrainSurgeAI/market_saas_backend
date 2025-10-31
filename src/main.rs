@@ -59,7 +59,7 @@ async fn main() {
         .await
         .expect("Failed to initialize ACL snapshot");
 
-    let snapshot = ACL_SNAPSHOT.load();
+    // let snapshot = ACL_SNAPSHOT.load();
     // debug!(
     //     "ACL Snapshot initialized {:?}",
     //     snapshot
