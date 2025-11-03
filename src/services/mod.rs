@@ -13,3 +13,5 @@ pub mod superadmin_services;
 pub mod system_log_service;
 pub mod tenant_services;
 pub mod user_services;
+
+pub mod orders;

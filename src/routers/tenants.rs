@@ -1,7 +1,7 @@
 use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::tenant_services::{
-        create_tenant, disable_tenant, get_all_providers_by_market, get_tenant_by_user,
+        create_tenant, activate_or_deactivate_tenant_by_market, get_all_providers_by_market, get_tenant_by_user,
         get_tenant_detail_by_hashed_name, get_tenant_detail_by_self, get_tenant_financials,
         get_tenant_users, get_users, list_tenants_by_market, update_tenant_by_market,
         update_tenant_by_self,
@@ -46,11 +46,11 @@ pub(super) fn tenant_routes() -> Router {
             get(get_all_providers_by_market::<MySqlRepository>),
         )
         .route(
-            "/api/v1/markets/{market_hash}/tenants/{tenant_hash}/status",
-            patch(disable_tenant::<MySqlRepository>),
+            "/api/v1/tenants/{hashed_name}/activate-or-deactivate",
+            patch(activate_or_deactivate_tenant_by_market::<MySqlRepository>),
         )
         .route(
-            "/api/v1/tenants/{tenant_hash}",
+            "/api/v1/tenants/{hashed_name}",
             patch(update_tenant_by_market::<MySqlRepository>)
                 .get(get_tenant_detail_by_hashed_name::<MySqlRepository>),
         )

@@ -6,7 +6,8 @@ mod prices;
 mod products;
 mod reconciliation_statement;
 mod roles;
-pub mod router_config;
 mod tenants;
 mod users;
 mod workspace;
+
+pub mod router_config;

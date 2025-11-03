@@ -86,7 +86,7 @@ pub trait TenantRepository: Send + Sync {
         query: &QueryTenantByType,
     ) -> Result<Vec<BaseTenantDTO>, AppError>;
 
-    async fn delete_tenant(&self, market_hash: &str, tenant_hash: &str) -> Result<u64, AppError>;
+    async fn activate_or_deactivate_tenant(&self, market_hash: &str, tenant_hash: &str) -> Result<u64, AppError>;
 
     async fn update_tenant_by_market(
         &self,
@@ -412,7 +412,7 @@ impl TenantRepository for MySqlRepository {
         Ok(tenants)
     }
 
-    async fn delete_tenant(&self, market_hash: &str, tenant_hash: &str) -> Result<u64, AppError> {
+    async fn activate_or_deactivate_tenant(&self, market_hash: &str, tenant_hash: &str) -> Result<u64, AppError> {
         self.has_relationship(market_hash, tenant_hash).await?;
 
         let result = sqlx::query("UPDATE tenants SET deleted_at = CASE 

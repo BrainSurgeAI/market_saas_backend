@@ -252,22 +252,22 @@ where
     Ok(Json(ApiResponse::new(Some(providers), &context)))
 }
 
-pub async fn disable_tenant<T>(
+pub async fn activate_or_deactivate_tenant_by_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path((market_hash, tenant_hash)): Path<(String, String)>,
+    Path(tenant_hash): Path<String>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
     if claims.roles[0].to_uppercase() != "MARKET_ADMIN" {
         return Err(AppError::Forbidden(
-            "Only market admin can disable tenant".to_string(),
+            "Only market admin can activate or deactivate tenant".to_string(),
         ));
     }
 
-    let rows_affected = repo.delete_tenant(&market_hash, &tenant_hash).await?;
+    let rows_affected = repo.activate_or_deactivate_tenant(&claims.tenant_hash, &tenant_hash).await?;
     Ok(Json(ApiResponse::new(Some(rows_affected), &context)))
 }
 
@@ -276,14 +276,14 @@ pub async fn update_tenant_by_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(tenant_hash): Path<String>,
+    Path(hashed_name): Path<String>,
     ValidatedJSON(payload): ValidatedJSON<TenantCreateDTO>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
     let rows_affected = repo
-        .update_tenant_by_market(&claims.tenant_hash, &tenant_hash, &payload)
+        .update_tenant_by_market(&claims.tenant_hash, &hashed_name, &payload)
         .await?;
     Ok(Json(ApiResponse::new(Some(rows_affected), &context)))
 }
@@ -316,13 +316,13 @@ where
 pub async fn get_tenant_detail_by_hashed_name<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(tenant_hash): Path<String>
+    Path(hashed_name): Path<String>
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
     let tenant = repo
-        .find_tenant_detail_by_hashed_name(&tenant_hash)
+        .find_tenant_detail_by_hashed_name(&hashed_name)
         .await?;
     Ok(Json(ApiResponse::new(tenant, &context)))
 }

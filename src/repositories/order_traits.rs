@@ -1,9 +1,10 @@
 use crate::{
     common::AppError,
     dto::order::{
-        AcceptedOrderResponseDTO, CreateOrderDTO, DeliverToMarketDTO, OrderDetail,
-        OrderDetailResponse, OrderItem, OrderQueryParams, OrderReceipt, OrderResponse,
-        ProductsSummaryWithOrdersDTO, ReceiptOperationType,
+        AcceptedOrderResponseDTO, CreateOrderDTO, DeliverToMarketDTO,
+        ExchangeAndReturnOrderDetailResponse, ExchangeDTO, OrderDetail, OrderDetailResponse,
+        OrderItem, OrderQueryParams, OrderReceipt, OrderResponse, ProductsSummaryWithOrdersDTO,
+        ReceiptOperationType,
     },
     map_db_err,
     models::{
@@ -26,7 +27,6 @@ use tracing::{debug, error, info};
 pub(crate) trait OrderRepository: Send + Sync {
     async fn create_order(
         &self,
-        market_id: i32,
         customer_hash: &str,
         order: &CreateOrderDTO,
     ) -> Result<OrderResponse, AppError>;
@@ -57,7 +57,14 @@ pub(crate) trait OrderRepository: Send + Sync {
         operator: &str,
         provider_hash: &str,
         delivery_staff_id: &str,
-    ) -> Result<(), AppError>;
+    ) -> Result<OrderStatus, AppError>;
+
+    async fn order_start_exchange_progress(
+        &self,
+        order_code: &str,
+        operator: &str,
+        provider_hash: &str,
+    ) -> Result<OrderStatus, AppError>;
 
     async fn deliver_to_market(
         &self,
@@ -65,6 +72,14 @@ pub(crate) trait OrderRepository: Send + Sync {
         operator: &str,
         provider_hash: &str,
         deliver_to_market_dto: &DeliverToMarketDTO,
+    ) -> Result<(), AppError>;
+
+    async fn exchange_deliver_to_market(
+        &self,
+        order_code: &str,
+        operator: &str,
+        provider_hash: &str,
+        exchange_dto: &ExchangeDTO,
     ) -> Result<(), AppError>;
 
     async fn get_after_sale_orders_by_tenant(
@@ -76,9 +91,9 @@ pub(crate) trait OrderRepository: Send + Sync {
     async fn process_order_receipt(
         &self,
         receipt: &OrderReceipt,
-        tenant_type: TenantType,
-        tenant_hash: &str,
-        action: OrderAction,
+        // tenant_type: TenantType,
+        // tenant_hash: &str,
+        // action: OrderAction,
         operator: &str,
         transaction_id: &str,
     ) -> Result<(), AppError>;
@@ -94,15 +109,22 @@ pub(crate) trait OrderRepository: Send + Sync {
         tenant_hash: &str,
         order_code: &str,
         action: OrderAction,
-        target_status: OrderStatus,
+        //  target_status: OrderStatus,
         operator: &str,
-    ) -> Result<(), AppError>;
+    ) -> Result<OrderStatus, AppError>;
+
+    /// Get order details which status is not SIGN
+    ///
+    async fn get_exchange_and_return_order_details_by_order_code(
+        &self,
+        order_code: &str,
+    ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError>;
 }
 
 impl MySqlRepository {
     /// Helper method to insert order details in batch
     /// This improves performance by preparing processing requirements once
-    /// and using a single method for the detail insertion logic
+    /// and using a single method for the detail insertion logic    
     async fn insert_order_details(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
@@ -183,7 +205,7 @@ impl MySqlRepository {
         let current_status = OrderStatus::try_from(current_status_str)?;
 
         OrderStateMachine::next_state(current_status, action, tenant_type).map_err(|e| {
-            error!("{}", e);
+            error!("Order state transition error: {}", e);
             AppError::Validation(error_msg.to_string())
         })
     }
@@ -228,13 +250,14 @@ impl MySqlRepository {
 impl OrderRepository for MySqlRepository {
     async fn create_order(
         &self,
-        market_id: i32,
         customer_hash: &str,
         order: &CreateOrderDTO,
     ) -> Result<OrderResponse, AppError> {
         // Fetch customer information with early return for better error handling
-        let customer = sqlx::query!(
-            r#"SELECT id, name FROM tenants WHERE name_hash = ?"#,
+        let record = sqlx::query!(
+            r#"SELECT t.id as customer_id, t.name as customer_name, tr.market_id from tenants t 
+               INNER JOIN tenant_relationships tr ON tr.provider_id = t.id 
+               WHERE t.name_hash = ? AND tr.status = 'ACTIVE'"#,
             customer_hash
         )
         .fetch_optional(&self.pool)
@@ -274,8 +297,8 @@ impl OrderRepository for MySqlRepository {
                 contact_phone, created_by
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             order_code,
-            market_id,
-            customer.id,
+            record.market_id,
+            record.customer_id,
             total_amount,
             discount_amount,
             order.total_amount, // Frontend total_amount is actual quantity x discounted price
@@ -283,7 +306,7 @@ impl OrderRepository for MySqlRepository {
             order.delivery_info.delivery_address,
             order.delivery_info.contact_name,
             order.delivery_info.contact_phone,
-            customer.name
+            record.customer_name
         )
         .execute(&mut *tx)
         .await
@@ -466,6 +489,7 @@ impl OrderRepository for MySqlRepository {
             actual_amount,
             total_amount,
             actual_quantity,
+            receipt_quantity,
             processing_requirements,
             remark,
             status
@@ -615,7 +639,7 @@ impl OrderRepository for MySqlRepository {
         operator: &str,
         provider_hash: &str,
         delivery_staff_id: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<OrderStatus, AppError> {
         // Use the shared helper method to fetch provider's order
         let (order_id, order_status_str) = self
             .fetch_provider_order(
@@ -625,14 +649,26 @@ impl OrderRepository for MySqlRepository {
             )
             .await?;
 
-        // Use the shared helper method for state transition validation
-        let next = Self::validate_and_transition_order_state(
-            &order_status_str,
-            OrderAction::StartPreparing,
-            TenantType::Provider,
-            "订单状态错误，不能进行备货",
-        )?;
+        let current_status = OrderStatus::try_from(order_status_str.as_str())?;
+        let action = if current_status == OrderStatus::Assigned
+            || current_status == OrderStatus::ExchangeRequested
+        {
+            OrderAction::StartPreparing
+        } else {
+            return Err(AppError::Validation(format!(
+                "订单 {} 状态错误，不能进行备货",
+                order_code
+            )));
+        };
 
+        // Use the shared helper method for state transition validation
+        let next = OrderStateMachine::next_state(current_status, action, TenantType::Provider)
+            .map_err(|e| {
+                error!("{}", e);
+                AppError::Validation(format!("订单 {} 状态错误，不能进行备货", order_code))
+            })?;
+
+        debug!("Order status updated to {}", next);
         let mut tx = self
             .pool
             .begin()
@@ -667,7 +703,7 @@ impl OrderRepository for MySqlRepository {
 
         sqlx::query!(
             r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, &order_status_str, next.to_str(), operator, OrderAction::StartPreparing.description()
+            order_id, &order_status_str, next.to_str(), operator, action.description()
         )
         .execute(&mut *tx)
         .await
@@ -676,7 +712,60 @@ impl OrderRepository for MySqlRepository {
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(())
+        Ok(next)
+    }
+
+    async fn order_start_exchange_progress(
+        &self,
+        order_code: &str,
+        operator: &str,
+        provider_hash: &str,
+    ) -> Result<OrderStatus, AppError> {
+        let (order_id, order_status_str) = self
+            .fetch_provider_order(
+                provider_hash,
+                order_code,
+                &format!("订单 {} 没有找到，不能进行换货", order_code),
+            )
+            .await?;
+
+        let next = Self::validate_and_transition_order_state(
+            &order_status_str,
+            OrderAction::StartPreparing,
+            TenantType::Provider,
+            &format!("订单 {} 状态错误，不能进行换货", order_code),
+        )?;
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        sqlx::query!(
+            r#"UPDATE orders SET order_status = ? WHERE id = ? AND order_status = ?"#,
+            next.to_str(),
+            order_id,
+            &order_status_str
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!(
+            "Failed to update order status from ExchangeRequested to ExchangeInProgress"
+        ))?;
+
+        sqlx::query!(
+            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+            order_id, &order_status_str, next.to_str(), operator, OrderAction::StartPreparing.description()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert order status history from ExchangeRequested to ExchangeInProgress"))?;
+
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(next)
     }
 
     async fn deliver_to_market(
@@ -776,31 +865,11 @@ impl OrderRepository for MySqlRepository {
         Ok(())
     }
 
-    /// Market, Customer 处理订单 Inspect 操作，包括签收、退货、换货
-    /// 
-    /// # Arguments
-    /// 
-    /// * `receipt` - 订单收据
-    /// * `operator` - 操作员
-    /// * `transaction_id` - 交易 ID
-    /// 
-    /// # Returns
-    /// 
-    /// * `Ok(())` - 成功
-    /// * `Err(AppError)` - 错误
-    /// 
-    /// # Errors
-    /// 
-    /// * `AppError::NotFound` - 订单不存在
-    /// * `AppError::Validation` - 订单状态错误
-    /// * `AppError::Internal` - 内部错误
-    /// 
+    /// 订单内商品签收，退货，换货操作
+    /// 该操作只对订单内单个商品进行操作，不涉及订单状态的变更
     async fn process_order_receipt(
         &self,
         receipt: &OrderReceipt,
-        tenant_type: TenantType,
-        tenant_hash: &str,
-        action: OrderAction,
         operator: &str,
         transaction_id: &str,
     ) -> Result<(), AppError> {
@@ -816,19 +885,13 @@ impl OrderRepository for MySqlRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_db_err!("Failed to find order"))?
-        .ok_or_else(|| AppError::NotFound(format!("Order {} with order detail id {} not found", receipt.order_code, receipt.order_detail_id)))?;
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Order {} with order detail id {} not found",
+                receipt.order_code, receipt.order_detail_id
+            ))
+        })?;
 
-
-        let next = Self::validate_and_transition_order_state(
-            &record.order_status.as_str(),
-            action,
-            tenant_type,
-            &format!("订单 {} 不能从状态 {} 转移通过 {}", receipt.order_code, record.order_status, tenant_type),
-        )?;
-
-        debug!("Order status updated to {}", next);
-
-        
         // 处理凭证证据（如果有的话）
         let evidence_json = match &receipt.evidence_images {
             Some(evidence_images) if !evidence_images.is_empty() => {
@@ -844,23 +907,28 @@ impl OrderRepository for MySqlRepository {
             .begin()
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
-        
+
         let detail_id = record.detail_id;
 
         match receipt.operation_type {
             ReceiptOperationType::Sign => {
                 // 处理正常签收
+                debug!("Process normal sign receipt: {:?}", receipt);
                 sqlx::query!(
                     r#"UPDATE order_details 
                       SET status = 'SIGN', 
                         receipt_quantity = ?, 
                         receipt_date = NOW(), 
                         receipt_notes = ?,
-                        receipt_evidence = ? 
+                        receipt_evidence = ?,
+                        actual_quantity = ?,
+                        actual_amount = actual_price * ?
                       WHERE id = ?"#,
                     receipt.quantity,
                     receipt.reason,
                     evidence_json,
+                    receipt.quantity,
+                    receipt.quantity,
                     detail_id
                 )
                 .execute(&mut *tx)
@@ -985,13 +1053,13 @@ impl OrderRepository for MySqlRepository {
 
     async fn update_order_status(
         &self,
-         tenant_type: TenantType,
+        tenant_type: TenantType,
         _tenant_hash: &str,
         order_code: &str,
         action: OrderAction,
-        target_status: OrderStatus,
+        // target_status: OrderStatus,
         operator: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<OrderStatus, AppError> {
         let mut tx = self
             .pool
             .begin()
@@ -1008,15 +1076,27 @@ impl OrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get order"))?
         .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
 
-        let next_status = Self::validate_and_transition_order_state(
-            order.order_status.as_str(),
-            action,
-            tenant_type,
-            format!("Order status is not correct: {} -> {}", order.order_status, target_status.to_str()).as_str(),
-        )?;
+        let current_status = OrderStatus::try_from(order.order_status.as_str())?;
 
-        if next_status != target_status {
-            return Err(AppError::Validation(format!("Order status is not correct: {} -> {}", order.order_status, target_status)));
+        let next_status = OrderStateMachine::next_state(current_status, action, tenant_type)
+            .map_err(|e| {
+                error!("Order state transition error: {}", e);
+                AppError::Validation(format!(
+                    "Order status is not correct: {} -> {}",
+                    order.order_status,
+                    action.description()
+                ))
+            })?;
+
+        debug!("Next status: {}", next_status);
+        if next_status == OrderStatus::MarketDelivering {
+            sqlx::query!(
+                r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
+                order.id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to update sub order status"))?;
         }
 
         sqlx::query!(
@@ -1063,7 +1143,7 @@ impl OrderRepository for MySqlRepository {
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(())
+        Ok(next_status)
     }
 
     async fn get_after_sale_orders_by_tenant(
@@ -1199,6 +1279,112 @@ impl OrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to get product summaries with orders"))?;
         Ok(orders)
+    }
+
+    async fn exchange_deliver_to_market(
+        &self,
+        order_code: &str,
+        operator: &str,
+        provider_hash: &str,
+        exchange_dto: &ExchangeDTO,
+    ) -> Result<(), AppError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        let order = sqlx::query!(
+            r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
+            order_code
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get order"))?
+        .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+
+        let next = Self::validate_and_transition_order_state(
+            order.order_status.as_str(),
+            OrderAction::DeliverToMarket,
+            TenantType::Provider,
+            &format!(
+                "Order status is not correct: {} -> {}",
+                order.order_status,
+                OrderStatus::ExchangeDelivering.to_str()
+            )
+            .as_str(),
+        )?;
+
+        for item in exchange_dto.items.iter() {
+            let id = item.id;
+            let actual_quantity = item.actual_quantity;
+            //let requested_quantity = item.requested_quantity;
+
+            sqlx::query!(
+                r#"UPDATE order_details SET actual_quantity = receipt_quantity + ?, actual_amount = actual_price * ( receipt_quantity + ? ),
+                   total_amount = original_price * ( receipt_quantity + ? ) WHERE order_id = ? AND id = ?"#,
+                actual_quantity, actual_quantity, actual_quantity, order.id, id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to update actual quantity"))?;
+        }
+
+        sqlx::query!(
+            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+            next.to_str(),
+            order.id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to update order status"))?;
+
+        sqlx::query!(
+            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+            order.id, order.order_status, next.to_str(), operator, OrderAction::DeliverToMarket.description()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert order status history"))?;
+
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(())
+    }
+
+    async fn get_exchange_and_return_order_details_by_order_code(
+        &self,
+        order_code: &str,
+    ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError> {
+        let order_details = sqlx::query_as!(
+            ExchangeAndReturnOrderDetailResponse,
+            r#"
+                SELECT
+                    rer.order_detail_id      AS "order_detail_id!",
+                    rer.operation_type       AS "operation_type!",
+                    rer.quantity             AS "quantity!",
+                    rer.reason               AS "reason!",
+                    p.unit                   AS "unit!",
+                    rer.status               AS "status!",
+                    p.name                   AS "product_name!",
+                    rer.evidence_images      AS "evidence_images?",
+                    rer.processed_by         AS "processed_by?",
+                    rer.processed_at         AS "processed_at?",
+                    rer.actual_quantity      AS "actual_quantity?"
+                FROM return_exchange_records rer
+                INNER JOIN order_details od ON od.id = rer.order_detail_id
+                INNER JOIN orders o ON o.id = od.order_id
+                INNER JOIN products p ON p.product_code = od.product_code
+                WHERE o.order_code = ?
+                ORDER BY rer.created_at DESC
+                "#,
+            order_code
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get exchange and return order details"))?;
+        Ok(order_details)
     }
 }
 

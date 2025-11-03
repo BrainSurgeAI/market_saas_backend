@@ -88,16 +88,19 @@ impl OrderStateMachine {
                 OrderStatus::ExchangeInProgress,
                 OrderAction::DeliverToMarket,
                 TenantType::Provider,
-            ) => OrderStatus::ExchangeNewDelivering,
+            ) => OrderStatus::ExchangeDelivering,
 
+            (OrderStatus::ExchangeDelivering, OrderAction::MarketInspect, TenantType::Market) => {
+                OrderStatus::ExchangeInspecting
+            }
+            (OrderStatus::ExchangeInspecting, OrderAction::MarketAccept, TenantType::Market) => {
+                OrderStatus::ExchangeNewDelivering // 只有一次换货，这里直接换货完毕
+            }
             (
                 OrderStatus::ExchangeNewDelivering,
-                OrderAction::MarketInspect,
+                OrderAction::DeliverToCustomer,
                 TenantType::Market,
-            ) => OrderStatus::ExchangeInspecting,
-            (OrderStatus::ExchangeInspecting, OrderAction::MarketAccept, TenantType::Market) => {
-                OrderStatus::ExchangeCompleted // 只有一次换货，这里直接换货完毕
-            }
+            ) => OrderStatus::CustomerInspecting,
 
             // 客户验收异常流程
             // 客户要求换货
@@ -106,20 +109,11 @@ impl OrderStateMachine {
                 OrderAction::CustomerExchange,
                 TenantType::Customer,
             ) => OrderStatus::ExchangeRequested,
-            // (OrderStatus::ExchangeRequested, OrderAction::StartPreparing, TenantType::Market) => {
-            //     OrderStatus::ExchangeInProgress
-            // }
+          
             (OrderStatus::ReturnRequested, OrderAction::CustomerReturn, TenantType::Customer) => {
                 OrderStatus::Returned // 退货直接退款，无需后续服务流程
             }
-            // (OrderStatus::ExchangeInProgress, OrderAction::DeliverToCustomer, TenantType::Market) => {
-            //     OrderStatus::ExchangeNewDelivering
-            // }
-
-            // (OrderStatus::ExchangeInProgress, OrderAction::Complete, TenantType::Customer) => {
-            //     OrderStatus::Completed // 一般只有一次换货过程，所以这里完成订单
-            // }
-
+          
             // 取消订单（只有市场和客户可在非终态都可以取消）
             (_, OrderAction::Cancel, TenantType::Customer | TenantType::Market)
                 if !current.is_terminal() =>
@@ -1127,7 +1121,10 @@ mod test {
             (OrderStatus::Assigned, OrderAction::StartPreparing),
             (OrderStatus::SupplierPreparing, OrderAction::DeliverToMarket),
             (OrderStatus::ExchangeRequested, OrderAction::StartPreparing),
-            (OrderStatus::ExchangeInProgress, OrderAction::DeliverToMarket),
+            (
+                OrderStatus::ExchangeInProgress,
+                OrderAction::DeliverToMarket,
+            ),
         ];
 
         for (status, action) in &provider_actions {
@@ -1135,8 +1132,7 @@ mod test {
             assert!(
                 result.success,
                 "Provider should be able to perform {:?} in status {:?}",
-                action,
-                status
+                action, status
             );
         }
     }
@@ -1157,8 +1153,7 @@ mod test {
             assert!(
                 result.success,
                 "Market should be able to perform {:?} in status {:?}",
-                action,
-                status
+                action, status
             );
         }
     }
@@ -1168,7 +1163,10 @@ mod test {
         let customer_actions = [
             (OrderStatus::MarketDelivering, OrderAction::CustomerInspect),
             (OrderStatus::CustomerInspecting, OrderAction::Complete),
-            (OrderStatus::CustomerInspecting, OrderAction::CustomerExchange),
+            (
+                OrderStatus::CustomerInspecting,
+                OrderAction::CustomerExchange,
+            ),
             (OrderStatus::Pending, OrderAction::Cancel),
             (OrderStatus::CustomerInspecting, OrderAction::Cancel),
         ];
@@ -1178,8 +1176,7 @@ mod test {
             assert!(
                 result.success,
                 "Customer should be able to perform {:?} in status {:?}",
-                action,
-                status
+                action, status
             );
         }
     }
