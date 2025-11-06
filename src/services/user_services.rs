@@ -301,7 +301,7 @@ pub async fn get_user<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-   // Path(username): Path<String>,
+    // Path(username): Path<String>,
 ) -> Result<Json<ApiResponse<UserResponseDto>>, AppError>
 where
     T: UserRepository + Send + Sync,

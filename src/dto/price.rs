@@ -52,12 +52,11 @@ pub struct PriceAnnouncement {
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Validate)]
 pub(crate) struct PriceApprovalParam {
-
     #[validate(custom(function = validate_apprive_status))]
     pub(crate) status: String,
     pub(crate) products: Vec<i32>,
 
-    #[validate(length(min =4, max = 32))]
+    #[validate(length(min = 4, max = 32))]
     pub(crate) remark: Option<String>,
 }
 
@@ -192,7 +191,6 @@ impl PriceStatusPaginationParams {
         }
     }
 }
-
 
 // 为了方便测试，实现一个简单的构建器
 #[cfg(test)]

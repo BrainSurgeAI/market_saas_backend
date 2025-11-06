@@ -16,7 +16,7 @@ pub(super) fn discount_routes() -> Router {
         .route(
             "/api/v1/tenants/{tenant_hash}/discounts",
             get(get_customer_discount_list::<MySqlRepository>)
-            .post(create_discount_by_tenant_and_category::<MySqlRepository>),
+                .post(create_discount_by_tenant_and_category::<MySqlRepository>),
         )
         .route(
             "/api/v1/tenants/{tenant_hash}/discounts/{discount_id}",

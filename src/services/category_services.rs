@@ -2,7 +2,7 @@ use axum::Extension;
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::category::{CategoryWithSubCategoriesResponseDto, CategoryDTO},
+    dto::category::{CategoryDTO, CategoryWithSubCategoriesResponseDto},
     middleware::context::RequestContext,
     repositories::category_traits::CategoryRepository,
     utils::validate_json_fmt::Json,
@@ -102,7 +102,6 @@ where
     Ok(Json(ApiResponse::new(Some(categories), &context)))
 }
 
-
 /// Get level one categories
 /// This is public API, no authentication required
 ///
@@ -111,7 +110,7 @@ where
 /// A vector of `CategoryDTO` objects.
 ///
 /// # Error
-/// 
+///
 /// Returns an `AppError` if the database query fails.
 pub async fn get_level_one_categories<T>(
     Extension(repo): Extension<T>,
@@ -169,11 +168,11 @@ mod tests {
 
     #[async_trait]
     impl CategoryRepository for MockCategoryRepository {
-        async fn list_categories_with_subcategories(&self) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError> {
+        async fn list_categories_with_subcategories(
+            &self,
+        ) -> Result<Vec<CategoryWithSubCategoriesResponseDto>, AppError> {
             if self.should_fail_internal {
-                return Err(AppError::internal(
-                    "Database connection failed"
-                ));
+                return Err(AppError::internal("Database connection failed"));
             }
 
             if self.should_fail_database {
@@ -187,9 +186,7 @@ mod tests {
 
         async fn list_level_one_categories(&self) -> Result<Vec<CategoryDTO>, AppError> {
             if self.should_fail_internal {
-                return Err(AppError::internal(
-                    "Database connection failed"
-                ));
+                return Err(AppError::internal("Database connection failed"));
             }
 
             if self.should_fail_database {
@@ -209,7 +206,6 @@ mod tests {
 
             Ok(level_one_categories)
         }
-
     }
 
     fn create_test_context() -> RequestContext {
@@ -262,8 +258,8 @@ mod tests {
         let context_extension = Extension(context.clone());
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -291,8 +287,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -316,8 +312,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_err());
@@ -355,8 +351,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -398,8 +394,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -418,16 +414,14 @@ mod tests {
     #[tokio::test]
     async fn test_get_categories_tree_single_subcategory() {
         // Arrange - Test boundary condition with exactly one subcategory
-        let categories_single_sub = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: 1,
-                category_name: "Single Subcategory".to_string(),
-                subcategories: SqlxJson(vec![SubCategoryResponseDto {
-                    id: 1,
-                    name: "Only Subcategory".to_string(),
-                }]),
-            },
-        ];
+        let categories_single_sub = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: 1,
+            category_name: "Single Subcategory".to_string(),
+            subcategories: SqlxJson(vec![SubCategoryResponseDto {
+                id: 1,
+                name: "Only Subcategory".to_string(),
+            }]),
+        }];
 
         let repo = MockCategoryRepository::with_categories(categories_single_sub);
         let context = create_test_context();
@@ -435,8 +429,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -449,28 +443,29 @@ mod tests {
         let actual_categories = api_response.data.as_ref().unwrap();
         assert_eq!(actual_categories.len(), 1);
         assert_eq!(actual_categories[0].subcategories.len(), 1);
-        assert_eq!(actual_categories[0].subcategories[0].name, "Only Subcategory");
+        assert_eq!(
+            actual_categories[0].subcategories[0].name,
+            "Only Subcategory"
+        );
     }
 
     #[tokio::test]
     async fn test_get_categories_tree_special_characters() {
         // Arrange - Test boundary condition with special characters and Unicode
-        let categories_special = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: 1,
-                category_name: "中文类别".to_string(),
-                subcategories: SqlxJson(vec![
-                    SubCategoryResponseDto {
-                        id: 1,
-                        name: "子类别 \"quoted\"".to_string(),
-                    },
-                    SubCategoryResponseDto {
-                        id: 2,
-                        name: "Category with 'apostrophe' & symbols!@#$%".to_string(),
-                    },
-                ]),
-            },
-        ];
+        let categories_special = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: 1,
+            category_name: "中文类别".to_string(),
+            subcategories: SqlxJson(vec![
+                SubCategoryResponseDto {
+                    id: 1,
+                    name: "子类别 \"quoted\"".to_string(),
+                },
+                SubCategoryResponseDto {
+                    id: 2,
+                    name: "Category with 'apostrophe' & symbols!@#$%".to_string(),
+                },
+            ]),
+        }];
 
         let repo = MockCategoryRepository::with_categories(categories_special);
         let context = create_test_context();
@@ -478,8 +473,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -493,29 +488,33 @@ mod tests {
         assert_eq!(actual_categories.len(), 1);
         assert_eq!(actual_categories[0].category_name, "中文类别");
         assert_eq!(actual_categories[0].subcategories.len(), 2);
-        assert_eq!(actual_categories[0].subcategories[0].name, "子类别 \"quoted\"");
-        assert_eq!(actual_categories[0].subcategories[1].name, "Category with 'apostrophe' & symbols!@#$%");
+        assert_eq!(
+            actual_categories[0].subcategories[0].name,
+            "子类别 \"quoted\""
+        );
+        assert_eq!(
+            actual_categories[0].subcategories[1].name,
+            "Category with 'apostrophe' & symbols!@#$%"
+        );
     }
 
     #[tokio::test]
     async fn test_get_categories_tree_max_id_values() {
         // Arrange - Test boundary condition with maximum ID values
-        let categories_max_ids = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: i32::MAX,
-                category_name: "Max ID Category".to_string(),
-                subcategories: SqlxJson(vec![
-                    SubCategoryResponseDto {
-                        id: i32::MAX,
-                        name: "Max ID Subcategory".to_string(),
-                    },
-                    SubCategoryResponseDto {
-                        id: i32::MIN,
-                        name: "Min ID Subcategory".to_string(),
-                    },
-                ]),
-            },
-        ];
+        let categories_max_ids = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: i32::MAX,
+            category_name: "Max ID Category".to_string(),
+            subcategories: SqlxJson(vec![
+                SubCategoryResponseDto {
+                    id: i32::MAX,
+                    name: "Max ID Subcategory".to_string(),
+                },
+                SubCategoryResponseDto {
+                    id: i32::MIN,
+                    name: "Min ID Subcategory".to_string(),
+                },
+            ]),
+        }];
 
         let repo = MockCategoryRepository::with_categories(categories_max_ids);
         let context = create_test_context();
@@ -523,8 +522,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -547,18 +546,14 @@ mod tests {
         let long_category_name = "A".repeat(1000);
         let long_subcategory_name = "B".repeat(1000);
 
-        let categories_long_names = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: 1,
-                category_name: long_category_name.clone(),
-                subcategories: SqlxJson(vec![
-                    SubCategoryResponseDto {
-                        id: 1,
-                        name: long_subcategory_name.clone(),
-                    },
-                ]),
-            },
-        ];
+        let categories_long_names = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: 1,
+            category_name: long_category_name.clone(),
+            subcategories: SqlxJson(vec![SubCategoryResponseDto {
+                id: 1,
+                name: long_subcategory_name.clone(),
+            }]),
+        }];
 
         let repo = MockCategoryRepository::with_categories(categories_long_names);
         let context = create_test_context();
@@ -566,8 +561,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert
         assert!(result.is_ok());
@@ -580,7 +575,10 @@ mod tests {
         let actual_categories = api_response.data.as_ref().unwrap();
         assert_eq!(actual_categories.len(), 1);
         assert_eq!(actual_categories[0].category_name, long_category_name);
-        assert_eq!(actual_categories[0].subcategories[0].name, long_subcategory_name);
+        assert_eq!(
+            actual_categories[0].subcategories[0].name,
+            long_subcategory_name
+        );
     }
 
     // Tests for different HTTP status code scenarios
@@ -593,8 +591,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert - Should return 500 Internal Server Error
         assert!(result.is_err());
@@ -616,8 +614,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         // Assert - Should return 500 Internal Server Error via AppError::Database
         assert!(result.is_err());
@@ -644,7 +642,10 @@ mod tests {
         // Since our function doesn't have direct validation, we test the error structure
         let validation_error = AppError::validation("Invalid request parameters");
         assert_eq!(validation_error.error_code(), 400);
-        assert_eq!(validation_error.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            validation_error.status_code(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]
@@ -653,7 +654,10 @@ mod tests {
         // In real middleware, this would occur before reaching our service
         let auth_error = AppError::auth("Missing or invalid authentication token");
         assert_eq!(auth_error.error_code(), 401);
-        assert_eq!(auth_error.status_code(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            auth_error.status_code(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
     }
 
     // Test error response structure matches expected API format
@@ -670,9 +674,18 @@ mod tests {
         assert_eq!(auth_error.error_code(), 401);
 
         // Verify error messages
-        assert_eq!(internal_error.to_string(), "Internal server error: Internal server error");
-        assert_eq!(validation_error.to_string(), "Validation error: Validation failed");
-        assert_eq!(auth_error.to_string(), "Authentication failed: Authentication failed");
+        assert_eq!(
+            internal_error.to_string(),
+            "Internal server error: Internal server error"
+        );
+        assert_eq!(
+            validation_error.to_string(),
+            "Validation error: Validation failed"
+        );
+        assert_eq!(
+            auth_error.to_string(),
+            "Authentication failed: Authentication failed"
+        );
     }
 
     // Test error classification (client vs server errors)
@@ -756,7 +769,8 @@ mod tests {
                 let repo_extension = Extension(repo_clone);
                 let context_extension = Extension(context_clone);
 
-                get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await
+                get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
+                    .await
             });
             handles.push(handle);
         }
@@ -783,13 +797,11 @@ mod tests {
             });
         }
 
-        let extreme_categories = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: 999999,
-                category_name: "Extreme Boundary Test".repeat(100), // Very long name
-                subcategories: SqlxJson(extreme_subcategories),
-            },
-        ];
+        let extreme_categories = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: 999999,
+            category_name: "Extreme Boundary Test".repeat(100), // Very long name
+            subcategories: SqlxJson(extreme_subcategories),
+        }];
 
         let repo = MockCategoryRepository::with_categories(extreme_categories);
         let context = create_test_context();
@@ -797,8 +809,8 @@ mod tests {
         let context_extension = Extension(context);
 
         // This should handle the extreme case gracefully or return 500 if it fails
-        let result = get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_categories_tree::<MockCategoryRepository>(repo_extension, context_extension).await;
 
         match result {
             Ok(response) => {
@@ -832,8 +844,9 @@ mod tests {
         let context_extension = Extension(context.clone());
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -862,8 +875,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -881,13 +895,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_level_one_categories_single_category() {
         // Arrange
-        let single_category = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: 1,
-                category_name: "单一级别".to_string(),
-                subcategories: SqlxJson(vec![]),
-            },
-        ];
+        let single_category = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: 1,
+            category_name: "单一级别".to_string(),
+            subcategories: SqlxJson(vec![]),
+        }];
 
         let repo = MockCategoryRepository::with_categories(single_category);
         let context = create_test_context();
@@ -895,8 +907,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -934,8 +947,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -948,7 +962,10 @@ mod tests {
         let actual_categories = api_response.data.as_ref().unwrap();
         assert_eq!(actual_categories.len(), 2);
         assert_eq!(actual_categories[0].level_one_category, "中文类别测试");
-        assert_eq!(actual_categories[1].level_one_category, "Category with 'quotes' & symbols!@#$%");
+        assert_eq!(
+            actual_categories[1].level_one_category,
+            "Category with 'quotes' & symbols!@#$%"
+        );
     }
 
     #[tokio::test]
@@ -973,8 +990,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -997,13 +1015,11 @@ mod tests {
         // Arrange - Test boundary condition with very long names
         let long_category_name = "A".repeat(1000);
 
-        let categories_long_names = vec![
-            CategoryWithSubCategoriesResponseDto {
-                category_id: 1,
-                category_name: long_category_name.clone(),
-                subcategories: SqlxJson(vec![]),
-            },
-        ];
+        let categories_long_names = vec![CategoryWithSubCategoriesResponseDto {
+            category_id: 1,
+            category_name: long_category_name.clone(),
+            subcategories: SqlxJson(vec![]),
+        }];
 
         let repo = MockCategoryRepository::with_categories(categories_long_names);
         let context = create_test_context();
@@ -1011,8 +1027,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -1036,8 +1053,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert - Should return 500 Internal Server Error
         assert!(result.is_err());
@@ -1059,8 +1077,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert - Should return 500 Internal Server Error via AppError::Database
         assert!(result.is_err());
@@ -1098,8 +1117,9 @@ mod tests {
         let context_extension = Extension(context);
 
         // Act
-        let result = get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
-            .await;
+        let result =
+            get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension)
+                .await;
 
         // Assert
         assert!(result.is_ok());
@@ -1135,7 +1155,11 @@ mod tests {
                 let repo_extension = Extension(repo_clone);
                 let context_extension = Extension(context_clone);
 
-                get_level_one_categories::<MockCategoryRepository>(repo_extension, context_extension).await
+                get_level_one_categories::<MockCategoryRepository>(
+                    repo_extension,
+                    context_extension,
+                )
+                .await
             });
             handles.push(handle);
         }

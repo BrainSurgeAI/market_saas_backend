@@ -1,3 +1,6 @@
+mod acl_core;
+mod common;
+mod dto;
 mod middleware;
 mod models;
 mod repositories;
@@ -5,21 +8,15 @@ mod routers;
 mod services;
 mod types;
 mod utils;
-mod acl_core;
-mod common;
-mod dto;
 
-use dashmap::DashMap;
-use dotenv::dotenv;
-use hyper::Method;
 use crate::acl_core::{
     acl_snapshot::AclSnapshot,
     permission_trie::{PermissionRule, PermissionTrie},
 };
-use crate::{
-    acl_core::acl_snapshot::ACL_SNAPSHOT,
-    routers::router_config::create_router
-};
+use crate::{acl_core::acl_snapshot::ACL_SNAPSHOT, routers::router_config::create_router};
+use dashmap::DashMap;
+use dotenv::dotenv;
+use hyper::Method;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use std::collections::{HashMap, HashSet};
@@ -105,7 +102,10 @@ pub async fn init_acl_snapshot(pool: &MySqlPool) -> Result<(), anyhow::Error> {
     let mut grouped: HashMap<String, Vec<RuleConfig>> = HashMap::new();
 
     for r in rules {
-        grouped.entry("market_saas".to_string()).or_default().push(r);
+        grouped
+            .entry("market_saas".to_string())
+            .or_default()
+            .push(r);
     }
 
     for (_role, rs) in grouped {

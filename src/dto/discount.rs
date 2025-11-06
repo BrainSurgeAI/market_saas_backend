@@ -131,7 +131,10 @@ mod tests {
         serde_json::from_value(json_data).unwrap()
     }
 
-    fn create_create_request(created_by: &str, discounts: Vec<CustomerDiscountCreateDTO>) -> CustomerDiscountCreateRequestDTO {
+    fn create_create_request(
+        created_by: &str,
+        discounts: Vec<CustomerDiscountCreateDTO>,
+    ) -> CustomerDiscountCreateRequestDTO {
         CustomerDiscountCreateRequestDTO {
             created_by: created_by.to_string(),
             discounts,
@@ -152,24 +155,31 @@ mod tests {
 
             for rate_str in valid_rates {
                 let rate = create_decimal(rate_str);
-                assert!(validate_discount_rate(&rate).is_ok(), 
-                    "Rate {} should be valid", rate_str);
+                assert!(
+                    validate_discount_rate(&rate).is_ok(),
+                    "Rate {} should be valid",
+                    rate_str
+                );
             }
         }
 
         #[test]
         fn test_invalid_discount_rates() {
             let invalid_rates = vec![
-                ("0.09", "Below minimum"),   // 9% - too low
-                ("1.01", "Above maximum"),   // 101% - too high
-                ("0.00", "Zero rate"),       // 0% - too low
-                ("2.00", "Double maximum"),  // 200% - way too high
+                ("0.09", "Below minimum"),  // 9% - too low
+                ("1.01", "Above maximum"),  // 101% - too high
+                ("0.00", "Zero rate"),      // 0% - too low
+                ("2.00", "Double maximum"), // 200% - way too high
             ];
 
             for (rate_str, description) in invalid_rates {
                 let rate = create_decimal(rate_str);
-                assert!(validate_discount_rate(&rate).is_err(), 
-                    "Rate {} should be invalid: {}", rate_str, description);
+                assert!(
+                    validate_discount_rate(&rate).is_err(),
+                    "Rate {} should be invalid: {}",
+                    rate_str,
+                    description
+                );
             }
         }
 
@@ -242,7 +252,7 @@ mod tests {
         fn test_clone_and_debug() {
             let dto = create_test_response_dto();
             let cloned_dto = dto.clone();
-            
+
             assert_eq!(dto.discount_id, cloned_dto.discount_id);
             assert_eq!(dto.category_name, cloned_dto.category_name);
 
@@ -368,7 +378,7 @@ mod tests {
         fn test_multiple_discounts() {
             let discount1 = create_discount_dto(1, VALID_DISCOUNT_RATE_MIN);
             let discount2 = create_discount_dto(2, VALID_DISCOUNT_RATE_MAX);
-            
+
             let create_req = create_create_request(VALID_CREATED_BY, vec![discount1, discount2]);
             assert!(create_req.validate().is_ok());
         }
@@ -385,10 +395,10 @@ mod tests {
             // Create a discount with invalid rate
             let invalid_discount = create_discount_dto(VALID_CATEGORY_ID, "0.05"); // Invalid rate
             let create_req = create_create_request(VALID_CREATED_BY, vec![invalid_discount]);
-            
+
             // The outer validation should pass, but nested validation should fail
             assert!(create_req.validate().is_ok()); // Only validates top-level fields
-            
+
             // To test nested validation, we need to validate each discount separately
             for discount in &create_req.discounts {
                 assert!(discount.validate().is_err());
@@ -403,32 +413,35 @@ mod tests {
         #[test]
         fn test_full_workflow_serialization() {
             // Test the full workflow: create -> update -> response
-            
+
             // 1. Create request
             let discount = create_discount_dto(1, "0.20");
             let create_req = create_create_request("admin", vec![discount]);
-            
+
             let create_json = serde_json::to_string(&create_req).unwrap();
-            let deserialized_create: CustomerDiscountCreateRequestDTO = 
+            let deserialized_create: CustomerDiscountCreateRequestDTO =
                 serde_json::from_str(&create_json).unwrap();
-            
+
             assert_eq!(create_req.created_by, deserialized_create.created_by);
-            assert_eq!(create_req.discounts.len(), deserialized_create.discounts.len());
+            assert_eq!(
+                create_req.discounts.len(),
+                deserialized_create.discounts.len()
+            );
 
             // 2. Update request
             let update_req = create_update_request("0.30", "manager");
             let update_json = serde_json::to_string(&update_req).unwrap();
-            let deserialized_update: CustomerDiscountUpdateRequestDTO = 
+            let deserialized_update: CustomerDiscountUpdateRequestDTO =
                 serde_json::from_str(&update_json).unwrap();
-            
+
             assert_eq!(update_req.changed_by, deserialized_update.changed_by);
 
             // 3. Response DTO
             let response = create_test_response_dto();
             let response_json = serde_json::to_string(&response).unwrap();
-            let deserialized_response: CustomerDiscountResponseDTO = 
+            let deserialized_response: CustomerDiscountResponseDTO =
                 serde_json::from_str(&response_json).unwrap();
-            
+
             assert_eq!(response.category_name, deserialized_response.category_name);
         }
 
@@ -449,11 +462,14 @@ mod tests {
                 };
 
                 let json = serde_json::to_string(&update_req).unwrap();
-                let deserialized: CustomerDiscountUpdateRequestDTO = 
+                let deserialized: CustomerDiscountUpdateRequestDTO =
                     serde_json::from_str(&json).unwrap();
 
-                assert_eq!(update_req.discount_rate, deserialized.discount_rate, 
-                    "Decimal precision should be preserved for: {}", description);
+                assert_eq!(
+                    update_req.discount_rate, deserialized.discount_rate,
+                    "Decimal precision should be preserved for: {}",
+                    description
+                );
             }
         }
     }

@@ -1,15 +1,13 @@
-use std::fmt;
-use crate::common::AppError;
 use super::order_action::OrderAction;
-
+use crate::common::AppError;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum TenantType {
     Customer,
     Provider,
-    Market
+    Market,
 }
-
 
 impl TenantType {
     /// 从字符串解析租户类型，支持多种格式
@@ -28,11 +26,11 @@ impl TenantType {
             TenantType::Customer => matches!(
                 action,
                 OrderAction::CustomerInspect
-                | OrderAction::CustomerReturn 
-                | OrderAction::Complete
-                | OrderAction::CustomerExchange 
-                | OrderAction::Cancel
-                | OrderAction::Create
+                    | OrderAction::CustomerReturn
+                    | OrderAction::Complete
+                    | OrderAction::CustomerExchange
+                    | OrderAction::Cancel
+                    | OrderAction::Create
             ),
             TenantType::Provider => matches!(
                 action,
@@ -76,7 +74,7 @@ impl TryFrom<&str> for TenantType {
 mod test {
     use super::*;
 
-      #[test]
+    #[test]
     fn test_invalid_str_to_tenant_type() {
         assert!(TenantType::try_from("abc").is_err());
         assert!(TenantType::try_from("supplier").is_ok());
@@ -92,11 +90,17 @@ mod test {
 
     #[test]
     fn test_perform_action_success() {
-        assert!(TenantType::can_perform_action(&TenantType::Customer, &OrderAction::Complete));
+        assert!(TenantType::can_perform_action(
+            &TenantType::Customer,
+            &OrderAction::Complete
+        ));
     }
 
     #[test]
     fn test_perform_action_failed() {
-        assert!(!TenantType::can_perform_action(&TenantType::Market, &OrderAction::Complete));
+        assert!(!TenantType::can_perform_action(
+            &TenantType::Market,
+            &OrderAction::Complete
+        ));
     }
 }

@@ -9,7 +9,6 @@ pub(crate) struct CategoryDTO {
     pub(crate) level_one_category: String,
 }
 
-
 /// DTO for category with its subcategories, used in API responses.
 ///
 /// This structure represents a category and its nested subcategories, serialized as JSON for frontend consumption.

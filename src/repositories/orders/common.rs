@@ -1,0 +1,288 @@
+use crate::repositories::my_sql_repository::MySqlRepository;
+use crate::{
+    common::AppError,
+    dto::order::{ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderItem, OrderReceipt, ReceiptOperationType},
+    dto::order::{OrderDetailResponse, OrderQueryParams, OrderResponse},
+    map_db_err,
+    models::tenant_type::TenantType
+};
+use async_trait::async_trait;
+use sqlx::{MySql, QueryBuilder};
+use tracing::{debug, error};
+
+#[async_trait]
+pub(crate) trait CommonOrderRepository: Send + Sync {
+    async fn get_orders_by_tenant(
+        &self,
+        tenant_hash: &str,
+        tenant_type: &str,
+        query_params: &OrderQueryParams,
+    ) -> Result<Vec<OrderResponse>, AppError>;
+
+    async fn order_by_order_code(
+        &self,
+        order_code: &str,
+        tenant_hash: &str,
+    ) -> Result<Option<OrderDetailResponse>, AppError>;
+
+    async fn get_exchange_and_return_order_details_by_order_code(
+        &self,
+        order_code: &str,
+    ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError>;
+}
+
+#[async_trait]
+impl CommonOrderRepository for MySqlRepository {
+    async fn get_orders_by_tenant(
+        &self,
+        tenant_hash: &str,
+        tenant_type: &str,
+        query_params: &OrderQueryParams,
+    ) -> Result<Vec<OrderResponse>, AppError> {
+        let page = query_params.page.unwrap_or(1);
+        let page_size = query_params.page_size.unwrap_or(10);
+        let offset = (page - 1) * page_size;
+
+        let record = sqlx::query!(
+            r#"select id from tenants where name_hash=? and tenant_type=? and status='ACTIVE'"#,
+            tenant_hash,
+            tenant_type
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get tenant by id"))?
+        .ok_or_else(|| {
+            return AppError::NotFound(format!(
+                "Can not find Tenant by type {} name_hash {} ",
+                tenant_type, tenant_hash
+            ));
+        })?;
+
+        let basic_query = r#"SELECT 
+                   o.order_code, 
+                   o.delivery_address, 
+                   o.total_amount,
+                   o.actual_amount, 
+                   o.delivery_date, 
+                   o.order_status,
+                   o.created_at,
+                   o.after_sale_at
+                   FROM orders o {JOIN_CLAUSE} WHERE 1=1 "#;
+
+        let mut builder: QueryBuilder<MySql>;
+        if tenant_type == TenantType::Provider.to_string() {
+            let query = &basic_query.replace(
+                "{JOIN_CLAUSE}",
+                "JOIN provider_orders_assignments po ON po.order_id=o.id",
+            );
+
+            builder = QueryBuilder::new(query);
+            builder.push(" AND po.provider_id= ").push_bind(record.id);
+        } else {
+            let query = &basic_query.replace("{JOIN_CLAUSE}", "");
+
+            builder = QueryBuilder::new(query);
+            builder.push(" AND (o.market_id=").push_bind(record.id);
+            builder.push(" OR o.customer_id=").push_bind(record.id);
+            builder.push(") ");
+        }
+
+        if let Some(order_status) = query_params.order_status.as_ref() {
+            debug!("order_status: {}", order_status);
+            builder.push(" AND o.order_status=").push_bind(order_status);
+        }
+
+        builder.push(" ORDER BY o.created_at DESC ");
+        builder.push(" LIMIT ").push_bind(page_size);
+        builder.push(" OFFSET ").push_bind(offset);
+
+        let orders = builder
+            .build_query_as::<OrderResponse>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get customer orders"))?;
+        Ok(orders)
+    }
+
+    /// Get order by order code and tenant hash
+    ///
+    /// # Arguments
+    /// * `order_code` - Order code
+    /// * `tenant_hash` - Tenant hash
+    ///
+    /// # Returns
+    /// The order detail response
+    async fn order_by_order_code(
+        &self,
+        order_code: &str,
+        _tenant_hash: &str,
+    ) -> Result<Option<OrderDetailResponse>, AppError> {
+        // TODO: use tenant hash to filter order by customer or provider
+        let order = sqlx::query_as!(
+            OrderItem,
+            r#"
+        SELECT 
+            o.id,
+            o.order_code,
+            t.name as customer_name,
+            o.order_status,
+            o.total_amount,
+            o.discount_amount,
+            o.actual_amount,
+            o.delivery_date,
+            o.delivery_address,
+            o.contact_name,
+            o.contact_phone,
+            o.remark,
+            o.created_by,
+            o.created_at,
+            o.confirmed_by,
+            o.confirmed_at,
+            o.processed_by,
+            o.processed_at,
+            o.stocked_by,
+            o.stocked_at,
+            o.after_sale_at,
+            o.rejected_by,
+            o.rejected_at,
+            o.reject_reason,
+            o.completed_by,
+            o.completed_at,
+            ds.name as delivery_staff_name,
+            ds.phone as delivery_staff_phone,
+            p.name as provider_name
+        FROM orders o 
+        JOIN tenants t ON o.customer_id = t.id 
+        LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
+        LEFT JOIN provider_orders_assignments po ON o.id = po.order_id
+        LEFT JOIN tenants p ON po.provider_id = p.id
+        WHERE o.order_code = ?
+        "#,
+            order_code
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order by code"))?;
+
+        let order = match order {
+            Some(o) => o,
+            None => return Ok(None),
+        };
+
+        let items = sqlx::query_as!(
+            OrderDetail,
+            r#"
+        SELECT 
+            id,
+            product_code,
+            product_name,
+            category_id,
+            category_name,
+            unit,
+            quantity,
+            original_price,
+            discount_rate,
+            actual_price,
+            actual_amount,
+            total_amount,
+            actual_quantity,
+            receipt_quantity,
+            processing_requirements,
+            remark,
+            status
+        FROM order_details
+        WHERE order_id = ?
+        "#,
+            order.id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order details"))?;
+
+        let receipt_rows = sqlx::query!(
+            r#"
+        SELECT 
+            re.order_detail_id,
+            o.order_code,
+            od.product_code,
+            od.product_name,
+            re.operation_type,
+            re.quantity,
+            re.reason,
+            od.unit,
+            re.evidence_images
+        FROM return_exchange_records re
+        JOIN order_details od ON re.order_detail_id = od.id
+        JOIN orders o ON od.order_id = o.id
+        WHERE o.order_code = ?
+        ORDER BY re.created_at DESC
+        "#,
+            order_code
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get receipt records"))?;
+
+        let receipts = receipt_rows
+            .into_iter()
+            .map(|r| {
+                let operation_type = ReceiptOperationType::try_from(r.operation_type)
+                    .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
+
+                Ok(OrderReceipt {
+                    order_detail_id: r.order_detail_id,
+                    order_code: r.order_code,
+                    product_code: r.product_code,
+                    product_name: r.product_name,
+                    operation_type,
+                    quantity: r.quantity,
+                    reason: r.reason,
+                    unit: r.unit,
+                    evidence_images: r.evidence_images,
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+
+        Ok(Some(OrderDetailResponse {
+            order,
+            items,
+            receipts,
+        }))
+    }
+
+    async fn get_exchange_and_return_order_details_by_order_code(
+        &self,
+        order_code: &str,
+    ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError> {
+        let order_details = sqlx::query_as!(
+            ExchangeAndReturnOrderDetailResponse,
+            r#"
+                SELECT
+                    rer.order_detail_id      AS "order_detail_id!",
+                    rer.operation_type       AS "operation_type!",
+                    rer.quantity             AS "quantity!",
+                    rer.reason               AS "reason!",
+                    p.unit                   AS "unit!",
+                    rer.status               AS "status!",
+                    p.name                   AS "product_name!",
+                    rer.evidence_images      AS "evidence_images?",
+                    rer.processed_by         AS "processed_by?",
+                    rer.processed_at         AS "processed_at?",
+                    rer.actual_quantity      AS "actual_quantity?"
+                FROM return_exchange_records rer
+                INNER JOIN order_details od ON od.id = rer.order_detail_id
+                INNER JOIN orders o ON o.id = od.order_id
+                INNER JOIN products p ON p.product_code = od.product_code
+                WHERE o.order_code = ?
+                ORDER BY rer.created_at DESC
+                "#,
+            order_code
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!(
+            "Failed to get exchange and return order details"
+        ))?;
+        Ok(order_details)
+    }
+}

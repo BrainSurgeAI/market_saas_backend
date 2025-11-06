@@ -95,8 +95,6 @@ pub struct ReconciliationStatementOrderDTO {
     pub created_at: Option<DateTime<Utc>>,
 }
 
-
-
 // #[derive(Debug, Serialize, Deserialize, FromRow)]
 // pub struct ReconciliationStatementDetailDTO {
 //     pub id: Option<i32>,

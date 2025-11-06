@@ -3,9 +3,9 @@ use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::{
         role_services::{
-            get_permissions, get_permissions_by_role_id, get_role_by_id, get_roles,
-            get_roles_by_tenant_type, update_role_by_id, update_role_permissions,
-            update_permission_by_id, get_menu_by_roles,
+            get_menu_by_roles, get_permissions, get_permissions_by_role_id, get_role_by_id,
+            get_roles, get_roles_by_tenant_type, update_permission_by_id, update_role_by_id,
+            update_role_permissions,
         },
         superadmin_services::reset_password,
     },
@@ -26,12 +26,11 @@ pub(super) fn roles_routes() -> Router {
         .route(
             "/api/v1/roles/{role_id}/permissions",
             get(get_permissions_by_role_id::<MySqlRepository>)
-            .post(update_role_permissions::<MySqlRepository>),
+                .post(update_role_permissions::<MySqlRepository>),
         )
         .route(
             "/api/v1/roles/{role_id}",
-            put(update_role_by_id::<MySqlRepository>)
-            .get(get_role_by_id::<MySqlRepository>),
+            put(update_role_by_id::<MySqlRepository>).get(get_role_by_id::<MySqlRepository>),
         )
         .route(
             "/api/v1/superadmin/password",

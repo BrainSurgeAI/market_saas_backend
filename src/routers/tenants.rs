@@ -1,10 +1,10 @@
 use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::tenant_services::{
-        create_tenant, activate_or_deactivate_tenant_by_market, get_all_providers_by_market, get_tenant_by_user,
-        get_tenant_detail_by_hashed_name, get_tenant_detail_by_self, get_tenant_financials,
-        get_tenant_users, get_users, list_tenants_by_market, update_tenant_by_market,
-        update_tenant_by_self,
+        activate_or_deactivate_tenant_by_market, create_tenant, get_all_providers_by_market,
+        get_tenant_by_user, get_tenant_detail_by_hashed_name, get_tenant_detail_by_self,
+        get_tenant_financials, get_tenant_users, get_users, list_tenants_by_market,
+        update_tenant_by_market, update_tenant_by_self,
     },
 };
 

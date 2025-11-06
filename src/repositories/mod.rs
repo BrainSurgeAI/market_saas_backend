@@ -13,7 +13,7 @@ pub(crate) mod superadmin_traits;
 pub(crate) mod system_log_repo;
 pub(crate) mod tenants_trait;
 pub(crate) mod user_traits;
-
+pub(crate) mod orders;
 
 #[macro_export]
 macro_rules! map_db_err {

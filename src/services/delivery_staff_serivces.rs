@@ -6,15 +6,15 @@ use crate::{
     dto::{delivery_staff::DeliveryStaffDTO, ValidatedJSON},
     middleware::context::RequestContext,
     models::claims::Claims,
-    repositories::{delivery_staff_traits::DeliveryStaffRepository},
     models::tenant_type::TenantType,
+    repositories::delivery_staff_traits::DeliveryStaffRepository,
     utils::validate_json_fmt::Json,
 };
 
 pub(crate) async fn get_delivery_staff_by_provider<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>
+    Extension(claims): Extension<Claims>,
 ) -> Result<Json<ApiResponse<Vec<DeliveryStaffDTO>>>, AppError>
 where
     T: DeliveryStaffRepository + Send + Sync,
@@ -25,9 +25,14 @@ where
         ));
     }
 
-    info!("Getting delivery staff for provider: {}", claims.tenant_hash);
+    info!(
+        "Getting delivery staff for provider: {}",
+        claims.tenant_hash
+    );
 
-    let delivery_staff = repo.get_delivery_staff_by_provider(&claims.tenant_hash).await?;
+    let delivery_staff = repo
+        .get_delivery_staff_by_provider(&claims.tenant_hash)
+        .await?;
     Ok(Json(ApiResponse::new(Some(delivery_staff), &context)))
 }
 
@@ -69,7 +74,7 @@ where
         "Disabling or enabling delivery staff for tenant: {}",
         claims.tenant_hash
     );
-    
+
     repo.disable_or_enable_delivery_staff(&claims.tenant_hash, &id_card)
         .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
@@ -113,7 +118,7 @@ mod tests {
             tenant_hash: tenant_hash.to_string(),
             username: "test_user".to_string(),
             roles: vec!["PROVIDER".to_string()],
-           
+
             exp: 0,
             is_super_admin: false,
         }
@@ -190,7 +195,6 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-        
         )
         .await;
 
@@ -219,7 +223,6 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-           
         )
         .await;
 
@@ -254,7 +257,6 @@ mod tests {
             Extension(mock_repo),
             Extension(context),
             Extension(claims),
-            
         )
         .await;
 

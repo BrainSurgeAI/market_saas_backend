@@ -125,10 +125,7 @@ mod test {
 
     #[test]
     fn test_order_status_description() {
-        assert_eq!(
-            OrderStatus::to_str(&OrderStatus::Assigned),
-            "ASSIGNED"
-        );
+        assert_eq!(OrderStatus::to_str(&OrderStatus::Assigned), "ASSIGNED");
     }
 
     #[test]

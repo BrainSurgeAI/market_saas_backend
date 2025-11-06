@@ -1,15 +1,8 @@
 use crate::{
     common::{ApiResponse, AppError},
-    dto::{
-        products::{
-            PriceStatusResponseDTO, 
-            ProcessingFeeDTO,
-            ProductDetailResponse,
-            ProductListDTO, 
-            ProductListQueryParams, 
-            ProductOverviewResponse,
-            UpdateProductRequestDTO,
-        },
+    dto::products::{
+        PriceStatusResponseDTO, ProcessingFeeDTO, ProductDetailResponse, ProductListDTO,
+        ProductListQueryParams, ProductOverviewResponse, UpdateProductRequestDTO,
     },
     middleware::context::RequestContext,
     models::claims::Claims,
@@ -41,12 +34,11 @@ where
     )))
 }
 
-
 /// 获取当日价格状态统计
 pub(crate) async fn get_product_price_status_stats<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>
+    Extension(claims): Extension<Claims>,
 ) -> Result<Json<ApiResponse<Vec<PriceStatusResponseDTO>>>, AppError>
 where
     T: ProductRepository + Send + Sync,

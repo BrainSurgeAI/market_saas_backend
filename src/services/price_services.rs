@@ -1,9 +1,6 @@
 use axum::{
     response::IntoResponse,
-    {
-        extract::Query,
-        Extension,
-    },
+    {extract::Query, Extension},
 };
 
 use tracing::debug;
@@ -15,7 +12,8 @@ use crate::{
             PriceAnnouncement, PriceApprovalParam, PriceCreateDTO, PriceQueryParams,
             PriceStatusPaginationParams,
         },
-        products::PaginatedProductDailyPriceComparison, ValidatedJSON,
+        products::PaginatedProductDailyPriceComparison,
+        ValidatedJSON,
     },
     middleware::context::RequestContext,
     models::claims::Claims,
@@ -94,8 +92,8 @@ where
     if approve.products.is_empty() {
         return Err(AppError::Validation("Products is empty".to_string()));
     }
-    
-    repo.approve_price(&claims.username,&approve).await?;
+
+    repo.approve_price(&claims.username, &approve).await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 

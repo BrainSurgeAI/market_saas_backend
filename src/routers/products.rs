@@ -1,13 +1,8 @@
 use crate::{
     repositories::my_sql_repository::MySqlRepository,
     services::product_services::{
-        get_processing_fees,
-        get_product_detail, 
-        customer_products, 
-        get_product_price_status_stats,
-        get_products_overview, 
-        update_product, 
-        update_product_status,
+        customer_products, get_processing_fees, get_product_detail, get_product_price_status_stats,
+        get_products_overview, update_product, update_product_status,
     },
 };
 use axum::{
@@ -23,8 +18,7 @@ pub(super) fn products_routes() -> Router {
         )
         .route(
             "/api/v1/products/{product_code}",
-            get(get_product_detail::<MySqlRepository>)
-            .put(update_product::<MySqlRepository>),
+            get(get_product_detail::<MySqlRepository>).put(update_product::<MySqlRepository>),
         )
         .route(
             "/api/v1/tenants/{tenant_hash}/products/{product_code}/archive",

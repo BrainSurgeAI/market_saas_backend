@@ -36,7 +36,6 @@ pub struct PermissionResponseDto {
     pub http_method: Option<String>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, FromRow, Validate, Serialize, Deserialize)]
 pub struct PermissionCreateDto {
     #[validate(length(min = 4, max = 32))]

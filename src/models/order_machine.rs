@@ -94,7 +94,7 @@ impl OrderStateMachine {
                 OrderStatus::ExchangeInspecting
             }
             (OrderStatus::ExchangeInspecting, OrderAction::MarketAccept, TenantType::Market) => {
-                OrderStatus::ExchangeNewDelivering // 只有一次换货，这里直接换货完毕
+                OrderStatus::ExchangeNewDelivering
             }
             (
                 OrderStatus::ExchangeNewDelivering,
@@ -109,11 +109,23 @@ impl OrderStateMachine {
                 OrderAction::CustomerExchange,
                 TenantType::Customer,
             ) => OrderStatus::ExchangeRequested,
-          
+            (
+                OrderStatus::CustomerInspecting,
+                OrderAction::CustomerReturn,
+                TenantType::Customer,
+            ) => OrderStatus::ReturnRequested,
+            (
+                OrderStatus::CustomerInspecting,
+                OrderAction::CustomerInspect,
+                TenantType::Customer,
+            ) => OrderStatus::ExchangeCompleted,
+            (OrderStatus::ReturnRequested, OrderAction::MarketReturn, TenantType::Market) => {
+                OrderStatus::Returned
+            }
             (OrderStatus::ReturnRequested, OrderAction::CustomerReturn, TenantType::Customer) => {
                 OrderStatus::Returned // 退货直接退款，无需后续服务流程
             }
-          
+
             // 取消订单（只有市场和客户可在非终态都可以取消）
             (_, OrderAction::Cancel, TenantType::Customer | TenantType::Market)
                 if !current.is_terminal() =>
@@ -360,13 +372,13 @@ mod test {
             TenantType::Provider,
         );
         assert!(result.success);
-        assert_eq!(result.next, OrderStatus::ExchangeNewDelivering);
+        assert_eq!(result.next, OrderStatus::ExchangeDelivering);
     }
 
     #[test]
     fn test_market_inspect_exchange() {
         let result = try_transition(
-            OrderStatus::ExchangeNewDelivering,
+            OrderStatus::ExchangeDelivering,
             OrderAction::MarketInspect,
             TenantType::Market,
         );
@@ -380,6 +392,28 @@ mod test {
             OrderStatus::ExchangeInspecting,
             OrderAction::MarketAccept,
             TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ExchangeNewDelivering);
+    }
+
+    #[test]
+    fn test_market_deliver_exchange_to_customer() {
+        let result = try_transition(
+            OrderStatus::ExchangeNewDelivering,
+            OrderAction::DeliverToCustomer,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::CustomerInspecting);
+    }
+
+    #[test]
+    fn test_customer_inspect_exchange_completion() {
+        let result = try_transition(
+            OrderStatus::CustomerInspecting,
+            OrderAction::CustomerInspect,
+            TenantType::Customer,
         );
         assert!(result.success);
         assert_eq!(result.next, OrderStatus::ExchangeCompleted);
@@ -418,6 +452,39 @@ mod test {
             OrderStatus::MarketInspecting,
             OrderAction::MarketReturn,
             TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Returned);
+    }
+
+    #[test]
+    fn test_customer_return_request_sets_return_requested() {
+        let result = try_transition(
+            OrderStatus::CustomerInspecting,
+            OrderAction::CustomerReturn,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::ReturnRequested);
+    }
+
+    #[test]
+    fn test_market_return_after_request() {
+        let result = try_transition(
+            OrderStatus::ReturnRequested,
+            OrderAction::MarketReturn,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Returned);
+    }
+
+    #[test]
+    fn test_customer_finalize_return_after_request() {
+        let result = try_transition(
+            OrderStatus::ReturnRequested,
+            OrderAction::CustomerReturn,
+            TenantType::Customer,
         );
         assert!(result.success);
         assert_eq!(result.next, OrderStatus::Returned);
@@ -705,7 +772,7 @@ mod test {
         );
         assert!(result.success);
         current_status = result.next;
-        assert_eq!(current_status, OrderStatus::ExchangeNewDelivering);
+        assert_eq!(current_status, OrderStatus::ExchangeDelivering);
 
         // 市场验收换货商品
         let result = try_transition(
@@ -725,10 +792,29 @@ mod test {
         );
         assert!(result.success);
         current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ExchangeNewDelivering);
+
+        // 市场将换货商品送达客户
+        let result = try_transition(
+            current_status,
+            OrderAction::DeliverToCustomer,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::CustomerInspecting);
+
+        // 客户验收换货商品
+        let result = try_transition(
+            current_status,
+            OrderAction::CustomerInspect,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        current_status = result.next;
         assert_eq!(current_status, OrderStatus::ExchangeCompleted);
 
         // ExchangeCompleted 是终态，流程结束
-        // 换货完成后直接结束，不需要再配送给客户
         assert_eq!(current_status, OrderStatus::ExchangeCompleted);
     }
 
@@ -803,14 +889,20 @@ mod test {
     fn test_available_actions_for_customer_inspecting() {
         let actions = get_available_actions(OrderStatus::CustomerInspecting, TenantType::Customer);
 
-        // 客户可以完成、换货或取消
-        assert_eq!(actions.len(), 3);
+        // 客户可以完成、换货、验收换货或取消
+        assert_eq!(actions.len(), 5);
         assert!(actions
             .iter()
             .any(|(action, _)| *action == OrderAction::Complete));
         assert!(actions
             .iter()
+            .any(|(action, _)| *action == OrderAction::CustomerInspect));
+        assert!(actions
+            .iter()
             .any(|(action, _)| *action == OrderAction::CustomerExchange));
+        assert!(actions
+            .iter()
+            .any(|(action, _)| *action == OrderAction::CustomerReturn));
         assert!(actions
             .iter()
             .any(|(action, _)| *action == OrderAction::Cancel));
@@ -1060,20 +1152,27 @@ mod test {
 
     #[test]
     fn test_complete_customer_return_workflow() {
-        let current_status = OrderStatus::CustomerInspecting;
+        let mut current_status = OrderStatus::CustomerInspecting;
 
-        // 客户申请退货 (先从 CustomerInspecting 到 ReturnRequested)
-        // 注意: 这里假设有这样的转移规则，实际需要根据业务逻辑调整
+        // 客户申请退货，进入退货申请状态
         let result = try_transition(
             current_status,
             OrderAction::CustomerReturn,
             TenantType::Customer,
         );
-        // 如果 CustomerReturn 从 CustomerInspecting 无效，则此测试应该验证失败
-        if !result.success {
-            // 这是预期的行为，CustomerReturn 可能只从特定状态有效
-            assert!(!result.success);
-        }
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::ReturnRequested);
+
+        // 客户确认退货，订单进入退货完成状态
+        let result = try_transition(
+            current_status,
+            OrderAction::CustomerReturn,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        current_status = result.next;
+        assert_eq!(current_status, OrderStatus::Returned);
     }
 
     // ==================== 完整取消工作流测试 ====================

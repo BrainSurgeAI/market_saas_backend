@@ -1,281 +1,292 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use validator::Validate;
 use sqlx::{prelude::FromRow, types::Decimal};
+use validator::{Validate, ValidationError};
+
+use crate::dto::validate_phone;
+
+fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
+    let min = Decimal::new(1, 2); // 0.01
+    let max = Decimal::new(999_999_999_999, 2); // 对应 DECIMAL(12,2) 的最大值 9_999_999_999.99
+    if value < &min || value > &max {
+        return Err(ValidationError::new("range"));
+    }
+    Ok(())
+}
 
 /// Data transfer object for creating a new order
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
-pub struct CreateOrderDTO {
+pub(crate) struct CreateOrderDTO {
+    #[validate(custom(function = "validate_total_amount_range"))]
     #[serde(rename = "totalAmount")]
-    pub total_amount: Decimal,
+    pub(crate) total_amount: Decimal,
 
+    #[validate(nested)]
     #[serde(rename = "deliveryInfo")]
-    pub delivery_info: DeliveryInfo,
+    pub(crate) delivery_info: DeliveryInfo,
 
     #[serde(rename = "items")]
-    pub items: Vec<CreateOrderItem>,
+    pub(crate) items: Vec<CreateOrderItem>,
 }
 
 /// Delivery information for an order
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct DeliveryInfo {
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
+pub(crate) struct DeliveryInfo {
     #[serde(rename = "deliveryDate")]
-    pub delivery_date: String,
+    pub(crate) delivery_date: String,
 
+    #[validate(length(min = 4, max = 255))]
     #[serde(rename = "address")]
-    pub delivery_address: String,
+    pub(crate) delivery_address: String,
 
+    #[validate(length(min = 2, max = 32))]
     #[serde(rename = "contactName")]
-    pub contact_name: String,
+    pub(crate) contact_name: String,
 
+    #[validate(custom(function = validate_phone))]
     #[serde(rename = "contactPhone")]
-    pub contact_phone: String,
+    pub(crate) contact_phone: String,
 }
-
 
 /// Individual item in an order creation request
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct CreateOrderItem {
+pub(crate) struct CreateOrderItem {
     #[serde(rename = "productId")]
-    pub product_code: String,
+    pub(crate) product_code: String,
 
     #[serde(rename = "name")]
-    pub product_name: String,
+    pub(crate) product_name: String,
 
     #[serde(rename = "categoryId")]
-    pub category_id: i32,
+    pub(crate) category_id: i32,
 
     #[serde(rename = "category")]
-    pub category_name: String,
+    pub(crate) category_name: String,
 
     #[serde(rename = "unit")]
-    pub unit: String,
+    pub(crate) unit: String,
 
     #[serde(rename = "quantity")]
-    pub quantity: Decimal,
+    pub(crate) quantity: Decimal,
 
     #[serde(rename = "price")]
-    pub price: Decimal,
+    pub(crate) price: Decimal,
 
     #[serde(rename = "originalPrice")]
-    pub original_price: Decimal,
+    pub(crate) original_price: Decimal,
 
     #[serde(rename = "originalTotal")]
-    pub original_amount: Decimal,
+    pub(crate) original_amount: Decimal,
 
     #[serde(rename = "discountRate")]
-    pub discount_rate: Decimal,
+    pub(crate) discount_rate: Decimal,
 
     #[serde(rename = "total")]
-    pub total: Decimal,
+    pub(crate) total: Decimal,
 
     #[serde(rename = "customNote")]
-    pub remark: Option<String>,
+    pub(crate) remark: Option<String>,
 
     #[serde(rename = "processingServices")]
-    pub processing_services: Vec<ProcessingService>,
+    pub(crate) processing_services: Vec<ProcessingService>,
 }
 
 /// Processing service for an order item
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct ProcessingService {
+pub(crate) struct ProcessingService {
     #[serde(rename = "type")]
-    pub name: String,
+    pub(crate) name: String,
 
-    pub description: Option<String>,
+    pub(crate) description: Option<String>,
 }
 
 /// Response DTO for order operations
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
-pub struct OrderResponse {
+pub(crate) struct OrderResponse {
     #[serde(rename = "orderCode")]
-    pub order_code: String,
+    pub(crate) order_code: String,
 
     #[serde(rename = "totalAmount")]
-    pub total_amount: Decimal,
+    pub(crate) total_amount: Decimal,
 
     #[serde(rename = "actualAmount")]
-    pub actual_amount: Decimal,
+    pub(crate) actual_amount: Decimal,
 
     #[serde(rename = "deliveryDate")]
-    pub delivery_date: NaiveDate,
+    pub(crate) delivery_date: NaiveDate,
 
     #[serde(rename = "deliveryAddress")]
-    pub delivery_address: String,
+    pub(crate) delivery_address: String,
 
     #[serde(rename = "orderStatus")]
-    pub order_status: String,
+    pub(crate) order_status: String,
 
     #[serde(rename = "createdAt")]
-    pub created_at: Option<DateTime<Utc>>,
+    pub(crate) created_at: Option<DateTime<Utc>>,
 
     #[serde(rename = "afterSaleAt")]
-    pub after_sale_at: Option<DateTime<Utc>>,
+    pub(crate) after_sale_at: Option<DateTime<Utc>>,
 }
 
 /// Query parameters for order listing
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
-pub struct OrderQueryParams {
+pub(crate) struct OrderQueryParams {
     #[serde(rename = "page")]
-    pub page: Option<i32>,
+    pub(crate) page: Option<i32>,
 
     #[serde(rename = "pageSize")]
-    pub page_size: Option<i32>,
+    pub(crate) page_size: Option<i32>,
 
     #[serde(rename = "orderStatus")]
-    pub order_status: Option<String>,
+    pub(crate) order_status: Option<String>,
 }
-
 
 /// Order details - comprehensive order information
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct OrderItem {
-    pub id: i32,
+pub(crate) struct OrderItem {
+    pub(crate) id: i32,
 
     #[serde(rename = "orderCode")]
-    pub order_code: String,
+    pub(crate) order_code: String,
 
     #[serde(rename = "customerName")]
-    pub customer_name: String,
+    pub(crate) customer_name: String,
 
     #[serde(rename = "orderStatus")]
-    pub order_status: String,
+    pub(crate) order_status: String,
 
     #[serde(rename = "totalAmount")]
-    pub total_amount: Decimal,
+    pub(crate) total_amount: Decimal,
 
     #[serde(rename = "discountAmount")]
-    pub discount_amount: Decimal,
+    pub(crate) discount_amount: Decimal,
 
     #[serde(rename = "actualAmount")]
-    pub actual_amount: Decimal,
+    pub(crate) actual_amount: Decimal,
 
     #[serde(rename = "deliveryDate")]
-    pub delivery_date: NaiveDate,
+    pub(crate) delivery_date: NaiveDate,
 
     #[serde(rename = "deliveryAddress")]
-    pub delivery_address: String,
+    pub(crate) delivery_address: String,
 
     #[serde(rename = "contactName")]
-    pub contact_name: String,
+    pub(crate) contact_name: String,
 
     #[serde(rename = "contactPhone")]
-    pub contact_phone: String,
+    pub(crate) contact_phone: String,
 
-    pub remark: Option<String>,
+    pub(crate) remark: Option<String>,
 
     #[serde(rename = "createdBy")]
-    pub created_by: String,
+    pub(crate) created_by: String,
 
     #[serde(rename = "createdAt")]
-    pub created_at: DateTime<Utc>,
+    pub(crate) created_at: DateTime<Utc>,
 
     #[serde(rename = "confirmBy")]
-    pub confirmed_by: Option<String>,
+    pub(crate) confirmed_by: Option<String>,
 
     #[serde(rename = "confirmedAt")]
-    pub confirmed_at: Option<DateTime<Utc>>,
+    pub(crate) confirmed_at: Option<DateTime<Utc>>,
 
     #[serde(rename = "processedBy")]
-    pub processed_by: Option<String>,
+    pub(crate) processed_by: Option<String>,
 
     #[serde(rename = "processedAt")]
-    pub processed_at: Option<DateTime<Utc>>,
+    pub(crate) processed_at: Option<DateTime<Utc>>,
 
     #[serde(rename = "stockedBy")]
-    pub stocked_by: Option<String>,
+    pub(crate) stocked_by: Option<String>,
 
     #[serde(rename = "stockedAt")]
-    pub stocked_at: Option<DateTime<Utc>>,
+    pub(crate) stocked_at: Option<DateTime<Utc>>,
 
     #[serde(rename = "afterSaleAt")]
-    pub after_sale_at: Option<DateTime<Utc>>,
+    pub(crate) after_sale_at: Option<DateTime<Utc>>,
 
     #[serde(rename = "rejectBy")]
-    pub rejected_by: Option<String>,
+    pub(crate) rejected_by: Option<String>,
 
     #[serde(rename = "rejectedAt")]
-    pub rejected_at: Option<DateTime<Utc>>,
+    pub(crate) rejected_at: Option<DateTime<Utc>>,
 
     #[serde(rename = "rejectReason")]
-    pub reject_reason: Option<String>,
+    pub(crate) reject_reason: Option<String>,
 
     #[serde(rename = "completedBy")]
-    pub completed_by: Option<String>,
+    pub(crate) completed_by: Option<String>,
 
     #[serde(rename = "deliveryStaffName")]
-    pub delivery_staff_name: Option<String>,
+    pub(crate) delivery_staff_name: Option<String>,
 
     #[serde(rename = "deliveryStaffPhone")]
-    pub delivery_staff_phone: Option<String>,
+    pub(crate) delivery_staff_phone: Option<String>,
 
     #[serde(rename = "providerName")]
-    pub provider_name: Option<String>,
+    pub(crate) provider_name: Option<String>,
 
     #[serde(rename = "completedAt")]
-    pub completed_at: Option<DateTime<Utc>>,
+    pub(crate) completed_at: Option<DateTime<Utc>>,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct OrderDetailResponse {
-    pub order: OrderItem,
+pub(crate) struct OrderDetailResponse {
+    pub(crate) order: OrderItem,
 
-    pub items: Vec<OrderDetail>,
+    pub(crate) items: Vec<OrderDetail>,
 
-    pub receipts: Vec<OrderReceipt>,
+    pub(crate) receipts: Vec<OrderReceipt>,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct OrderDetail {
-    pub id: i32,
+pub(crate) struct OrderDetail {
+    pub(crate) id: i32,
 
     #[serde(rename = "receiptQuantity")]
-    pub receipt_quantity: Option<Decimal>,
+    pub(crate) receipt_quantity: Option<Decimal>,
 
     #[serde(rename = "productId")]
-    pub product_code: String,
+    pub(crate) product_code: String,
 
     #[serde(rename = "name")]
-    pub product_name: String,
+    pub(crate) product_name: String,
 
     #[serde(rename = "categoryId")]
-    pub category_id: i32,
+    pub(crate) category_id: i32,
 
     #[serde(rename = "category")]
-    pub category_name: String,
+    pub(crate) category_name: String,
 
-    pub unit: String,
-    pub quantity: Decimal,
+    pub(crate) unit: String,
+    pub(crate) quantity: Decimal,
 
     #[serde(rename = "price")]
-    pub original_price: Decimal,
+    pub(crate) original_price: Decimal,
 
     #[serde(rename = "discountRate")]
-    pub discount_rate: Decimal,
+    pub(crate) discount_rate: Decimal,
 
     #[serde(rename = "actualPrice")]
-    pub actual_price: Decimal,
+    pub(crate) actual_price: Decimal,
 
     #[serde(rename = "actualQuantity")]
-    pub actual_quantity: Option<Decimal>,
+    pub(crate) actual_quantity: Option<Decimal>,
 
     #[serde(rename = "actualAmount")]
-    pub actual_amount: Option<Decimal>,
+    pub(crate) actual_amount: Option<Decimal>,
 
     #[serde(rename = "total")]
-    pub total_amount: Decimal,
+    pub(crate) total_amount: Decimal,
 
     #[serde(rename = "processingRequirements")]
-    pub processing_requirements: Option<String>,
+    pub(crate) processing_requirements: Option<String>,
 
-    pub remark: Option<String>,
+    pub(crate) remark: Option<String>,
 
     #[serde(rename = "status")]
-    pub status: Option<String>,
+    pub(crate) status: Option<String>,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
 pub(crate) struct ExchangeAndReturnOrderDetailResponse {
@@ -322,7 +333,6 @@ pub(crate) struct DeliverToMarketDTO {
     pub(crate) items: Vec<ActualQuantity>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
 pub(crate) struct ExchangeDTO {
     #[serde(rename = "operateBy")]
@@ -339,7 +349,6 @@ pub(crate) struct ExchangeItem {
     #[serde(rename = "productId")]
     pub(crate) product_code: String,
 
-
     #[serde(rename = "actualQuantity")]
     pub(crate) actual_quantity: Decimal,
 
@@ -349,79 +358,74 @@ pub(crate) struct ExchangeItem {
     pub(crate) remark: Option<String>,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct AcceptedOrderResponseDTO {
+pub(crate) struct AcceptedOrderResponseDTO {
     #[serde(rename = "orderCode")]
-    pub order_code: String,
+    pub(crate) order_code: String,
 
     #[serde(rename = "orderStatus")]
-    pub order_status: String,
+    pub(crate) order_status: String,
 
     #[serde(rename = "acceptedAt")]
-    pub accepted_at: DateTime<Utc>,
+    pub(crate) accepted_at: DateTime<Utc>,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
-pub struct OrderReceiptDTO {
+pub(crate) struct OrderReceiptDTO {
     #[serde(rename = "operateBy")]
-    pub operate_by: String,
-    pub receipt: OrderReceipt,
+    pub(crate) operate_by: String,
+    pub(crate) receipt: OrderReceipt,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub struct ProductsSummaryWithOrdersDTO {
+pub(crate) struct ProductsSummaryWithOrdersDTO {
     #[serde(rename = "productId")]
-    pub product_code: String,
+    pub(crate) product_code: String,
 
     #[serde(rename = "productName")]
-    pub product_name: String,
+    pub(crate) product_name: String,
 
     #[serde(rename = "totalQuantity")]
-    pub total_quantity: Option<Decimal>,
+    pub(crate) total_quantity: Option<Decimal>,
 
     #[serde(rename = "unit")]
-    pub unit: String,
+    pub(crate) unit: String,
 
     #[serde(rename = "processingRequirements")]
-    pub processing_requirements: Option<String>,
+    pub(crate) processing_requirements: Option<String>,
 
     #[serde(rename = "customerName")]
-    pub customer_name: Option<String>,
+    pub(crate) customer_name: Option<String>,
 
-    pub remark: Option<String>,
+    pub(crate) remark: Option<String>,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct OrderReceipt {
+pub(crate) struct OrderReceipt {
     #[serde(rename = "id")]
-    pub order_detail_id: i32,
+    pub(crate) order_detail_id: i32,
 
     #[serde(rename = "orderId")]
-    pub order_code: String,
+    pub(crate) order_code: String,
 
     #[serde(rename = "productId")]
-    pub product_code: String,
+    pub(crate) product_code: String,
 
     #[serde(rename = "productName")]
-    pub product_name: String,
+    pub(crate) product_name: String,
 
     #[serde(rename = "operationType")]
-    pub operation_type: ReceiptOperationType,
+    pub(crate) operation_type: ReceiptOperationType,
 
-    pub quantity: Decimal,
+    pub(crate) quantity: Decimal,
 
-    pub reason: String,
+    pub(crate) reason: String,
 
-    pub unit: String,
+    pub(crate) unit: String,
 
     #[serde(skip_serializing_if = "Option::is_none", rename = "evidenceImages")]
-    pub evidence_images: Option<String>,
+    pub(crate) evidence_images: Option<String>,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow, Validate)]
 pub(crate) struct DispatchOrderDTO {
@@ -433,8 +437,17 @@ pub(crate) struct DispatchOrderDTO {
 }
 
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
+pub(crate) struct ExchangeItemUpdateDTO {
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i32,
+
+    #[serde(rename = "actualQuantity")]
+    pub(crate) actual_quantity: Decimal,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub enum ReceiptOperationType {
+pub(crate) enum ReceiptOperationType {
     #[serde(rename = "SIGN")]
     Sign, // Receipt confirmation
 

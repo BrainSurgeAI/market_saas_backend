@@ -600,7 +600,7 @@ CREATE TABLE exchange_items (
     quantity DECIMAL(10,2) NOT NULL COMMENT '换货数量',
     price DECIMAL(10,2) NOT NULL COMMENT '换货产品单价',
     total_amount DECIMAL(12,2) NOT NULL COMMENT '换货总金额',
-    status VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING-待发货, SHIPPED-已发货, RECEIVED-已收货',
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
     shipped_at TIMESTAMP NULL COMMENT '发货时间',
     received_at TIMESTAMP NULL COMMENT '收货时间',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

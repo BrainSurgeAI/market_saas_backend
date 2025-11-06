@@ -32,7 +32,6 @@ pub struct RegisterRequest {
     pub tenant_name: String,
 }
 
-
 /// User resets password by self
 #[derive(Deserialize, Serialize, Debug, Validate, PartialEq, Eq, Clone, ToSchema)]
 pub(crate) struct ResetPasswordDto {
@@ -42,7 +41,7 @@ pub(crate) struct ResetPasswordDto {
 
     #[validate(custom(function = validate_password))]
     #[serde(rename = "newPassword")]
-    pub(crate) new_password: String
+    pub(crate) new_password: String,
 }
 
 /// # Super Admin Login Request
@@ -95,10 +94,10 @@ mod tests {
     use validator::Validate;
 
     // Test constants for better maintainability
-    const VALID_USERNAME_MIN: &str = "test";  // 4 chars
-    const VALID_USERNAME_MAX: &str = "1234567890123456";  // 16 chars
-    const VALID_PASSWORD_MIN: &str = "Pass123!";  // 8 chars
-    const VALID_PASSWORD_MAX: &str = "1234567890Abc!@#";  // 16 chars
+    const VALID_USERNAME_MIN: &str = "test"; // 4 chars
+    const VALID_USERNAME_MAX: &str = "1234567890123456"; // 16 chars
+    const VALID_PASSWORD_MIN: &str = "Pass123!"; // 8 chars
+    const VALID_PASSWORD_MAX: &str = "1234567890Abc!@#"; // 16 chars
     const VALID_PHONE: &str = "13800138000";
     const VALID_CODE: &str = "123456";
     const INVALID_PHONE: &str = "1234567890";
@@ -112,7 +111,13 @@ mod tests {
         serde_json::from_value(json_data).unwrap()
     }
 
-    fn create_register_request(name: &str, username: &str, password: &str, tenant_type: &str, tenant_name: &str) -> RegisterRequest {
+    fn create_register_request(
+        name: &str,
+        username: &str,
+        password: &str,
+        tenant_type: &str,
+        tenant_name: &str,
+    ) -> RegisterRequest {
         let json_data = json!({
             "name": name,
             "username": username,
@@ -123,7 +128,10 @@ mod tests {
         serde_json::from_value(json_data).unwrap()
     }
 
-    fn create_reset_password_request(current_password: &str, new_password: &str) -> ResetPasswordDto {
+    fn create_reset_password_request(
+        current_password: &str,
+        new_password: &str,
+    ) -> ResetPasswordDto {
         let json_data = json!({
             "currentPassword": current_password,
             "newPassword": new_password
@@ -131,7 +139,12 @@ mod tests {
         serde_json::from_value(json_data).unwrap()
     }
 
-    fn create_super_admin_login_request(username: &str, password: &str, phone: &str, code: &str) -> SuperAdminLoginRequest {
+    fn create_super_admin_login_request(
+        username: &str,
+        password: &str,
+        phone: &str,
+        code: &str,
+    ) -> SuperAdminLoginRequest {
         let json_data = json!({
             "username": username,
             "password": password,
@@ -208,22 +221,36 @@ mod tests {
 
         #[test]
         fn test_valid_registration() {
-            let register_req = create_register_request("John Doe", "testuser", "password123", "business", "Test Company");
+            let register_req = create_register_request(
+                "John Doe",
+                "testuser",
+                "password123",
+                "business",
+                "Test Company",
+            );
             assert!(register_req.validate().is_ok());
         }
 
         #[test]
         fn test_field_validation_failures() {
             // Name too short
-            let register_req = create_register_request("a", "testuser", "password123", "business", "Test Company");
+            let register_req =
+                create_register_request("a", "testuser", "password123", "business", "Test Company");
             assert!(register_req.validate().is_err());
 
             // Tenant type too short
-            let register_req = create_register_request("John Doe", "testuser", "password123", "bu", "Test Company");
+            let register_req = create_register_request(
+                "John Doe",
+                "testuser",
+                "password123",
+                "bu",
+                "Test Company",
+            );
             assert!(register_req.validate().is_err());
 
             // Tenant name too short
-            let register_req = create_register_request("John Doe", "testuser", "password123", "business", "a");
+            let register_req =
+                create_register_request("John Doe", "testuser", "password123", "business", "a");
             assert!(register_req.validate().is_err());
         }
 
@@ -235,11 +262,11 @@ mod tests {
 
             // Test maximum values
             let register_req = create_register_request(
-                "1234567890123456",  // 16 chars for name
-                "1234567890123456",  // 16 chars for username
-                "1234567890123456",  // 16 chars for password
-                "1234567890123456",  // 16 chars for tenant_type
-                &"a".repeat(255)     // 255 chars for tenant_name
+                "1234567890123456", // 16 chars for name
+                "1234567890123456", // 16 chars for username
+                "1234567890123456", // 16 chars for password
+                "1234567890123456", // 16 chars for tenant_type
+                &"a".repeat(255),   // 255 chars for tenant_name
             );
             assert!(register_req.validate().is_ok());
         }
@@ -258,9 +285,21 @@ mod tests {
         #[test]
         fn test_invalid_password_formats() {
             let test_cases = vec![
-                ("oldpassword123", "NewPass456@", "Missing uppercase and special chars"),
-                ("OLDPASSWORD123", "NewPass456@", "Missing lowercase and special chars"),
-                ("OldPassword", "NewPass456@", "Missing digits and special chars"),
+                (
+                    "oldpassword123",
+                    "NewPass456@",
+                    "Missing uppercase and special chars",
+                ),
+                (
+                    "OLDPASSWORD123",
+                    "NewPass456@",
+                    "Missing lowercase and special chars",
+                ),
+                (
+                    "OldPassword",
+                    "NewPass456@",
+                    "Missing digits and special chars",
+                ),
                 ("OldPass123", "NewPass456@", "Missing special chars"),
                 ("OldPass!", "NewPass456@", "Missing digits"),
                 ("Old Pass123!", "NewPass456@", "Contains space"),
@@ -269,7 +308,11 @@ mod tests {
 
             for (current_pass, new_pass, description) in test_cases {
                 let reset_req = create_reset_password_request(current_pass, new_pass);
-                assert!(reset_req.validate().is_err(), "Should fail for: {}", description);
+                assert!(
+                    reset_req.validate().is_err(),
+                    "Should fail for: {}",
+                    description
+                );
             }
         }
 
@@ -283,7 +326,6 @@ mod tests {
             let reset_req = create_reset_password_request("OldPass123!", VALID_PASSWORD_MAX);
             assert!(reset_req.validate().is_ok());
         }
-
     }
 
     // Tests for SuperAdminLoginRequest
@@ -292,37 +334,48 @@ mod tests {
 
         #[test]
         fn test_valid_super_admin_login() {
-            let super_admin_req = create_super_admin_login_request("admin", "AdminPass123!", VALID_PHONE, VALID_CODE);
+            let super_admin_req =
+                create_super_admin_login_request("admin", "AdminPass123!", VALID_PHONE, VALID_CODE);
             assert!(super_admin_req.validate().is_ok());
         }
 
         #[test]
         fn test_invalid_phone_numbers() {
             let invalid_phones = vec![
-                "1234567890",    // Too short
-                "123456789012",  // Too long
-                "23456789012",   // Doesn't start with 1
-                "1abcdefghij",   // Contains letters
-                "",              // Empty
+                "1234567890",   // Too short
+                "123456789012", // Too long
+                "23456789012",  // Doesn't start with 1
+                "1abcdefghij",  // Contains letters
+                "",             // Empty
             ];
 
             for phone in invalid_phones {
-                let super_admin_req = create_super_admin_login_request("admin", "AdminPass123!", phone, VALID_CODE);
-                assert!(super_admin_req.validate().is_err(), "Should fail for phone: {}", phone);
+                let super_admin_req =
+                    create_super_admin_login_request("admin", "AdminPass123!", phone, VALID_CODE);
+                assert!(
+                    super_admin_req.validate().is_err(),
+                    "Should fail for phone: {}",
+                    phone
+                );
             }
         }
 
         #[test]
         fn test_invalid_verification_codes() {
             let invalid_codes = vec![
-                "12345",    // Too short
-                "1234567",  // Too long
-                "",         // Empty
+                "12345",   // Too short
+                "1234567", // Too long
+                "",        // Empty
             ];
 
             for code in invalid_codes {
-                let super_admin_req = create_super_admin_login_request("admin", "AdminPass123!", VALID_PHONE, code);
-                assert!(super_admin_req.validate().is_err(), "Should fail for code: {}", code);
+                let super_admin_req =
+                    create_super_admin_login_request("admin", "AdminPass123!", VALID_PHONE, code);
+                assert!(
+                    super_admin_req.validate().is_err(),
+                    "Should fail for code: {}",
+                    code
+                );
             }
         }
     }
@@ -353,7 +406,7 @@ mod tests {
             let json_data = json!({
                 "code": "123456"
             });
-            
+
             let verify_resp: VerifyCodeResponseDTO = serde_json::from_value(json_data).unwrap();
             assert_eq!(verify_resp.code, "123456");
         }
@@ -369,17 +422,17 @@ mod tests {
                 username: "test".to_string(),
                 password: "password123".to_string(),
             };
-            
+
             let login2 = LoginRequest {
                 username: "test".to_string(),
                 password: "password123".to_string(),
             };
-            
+
             let login3 = LoginRequest {
                 username: "different".to_string(),
                 password: "password123".to_string(),
             };
-            
+
             assert_eq!(login1, login2);
             assert_ne!(login1, login3);
         }
@@ -390,7 +443,7 @@ mod tests {
                 username: "test".to_string(),
                 password: "password123".to_string(),
             };
-            
+
             let debug_output = format!("{:?}", login_req);
             assert!(debug_output.contains("LoginRequest"));
             assert!(debug_output.contains("test"));
@@ -403,48 +456,60 @@ mod tests {
 mod performance_tests {
     use super::*;
     use std::time::Instant;
-    
+
     #[test]
     fn test_memory_allocation_comparison() {
         println!("\n=== Memory Allocation Analysis ===");
-        
+
         // Test without clone (reference)
         let login_req = LoginRequest {
             username: "testuser".to_string(),
             password: "password123".to_string(),
         };
-        
+
         // Simulate passing by reference (no allocation)
         fn process_by_ref(req: &LoginRequest) -> bool {
             req.username.len() > 0 && req.password.len() > 0
         }
-        
+
         // Simulate passing by clone (allocation)
         fn process_by_clone(req: LoginRequest) -> bool {
             req.username.len() > 0 && req.password.len() > 0
         }
-        
+
         let iterations = 10_000;
-        
+
         // Test by reference
         let start = Instant::now();
         for _ in 0..iterations {
             let _result = process_by_ref(&login_req);
         }
         let ref_duration = start.elapsed();
-        
+
         // Test by clone
         let start = Instant::now();
         for _ in 0..iterations {
             let _result = process_by_clone(login_req.clone());
         }
         let clone_duration = start.elapsed();
-        
-        println!("Processing by reference: {:?} for {} iterations", ref_duration, iterations);
-        println!("Processing by clone: {:?} for {} iterations", clone_duration, iterations);
-        println!("Clone overhead: {}x slower", clone_duration.as_nanos() as f64 / ref_duration.as_nanos() as f64);
-        
+
+        println!(
+            "Processing by reference: {:?} for {} iterations",
+            ref_duration, iterations
+        );
+        println!(
+            "Processing by clone: {:?} for {} iterations",
+            clone_duration, iterations
+        );
+        println!(
+            "Clone overhead: {}x slower",
+            clone_duration.as_nanos() as f64 / ref_duration.as_nanos() as f64
+        );
+
         // In most cases, reference should be much faster
-        assert!(ref_duration < clone_duration, "Reference should be faster than clone");
+        assert!(
+            ref_duration < clone_duration,
+            "Reference should be faster than clone"
+        );
     }
 }

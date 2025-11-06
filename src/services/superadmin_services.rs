@@ -51,15 +51,13 @@ where
             AppError::Auth("Invalid username or password".to_string())
         })?;
 
-    
-
     let claims = Claims {
         tenant_type: "SUPER_ADMIN".to_string(),
         tenant_name: "SUPER_ADMIN".to_string(),
         tenant_hash: "SUPER_ADMIN".to_string(),
         username: payload.username,
         roles: vec![user_auth.roles.to_string()],
-       
+
         is_super_admin: user_auth.is_super_admin,
         exp: chrono::Utc::now()
             .checked_add_signed(chrono::Duration::days(1))
@@ -86,7 +84,10 @@ where
     T: SuperAdminRepository + Send + Sync,
 {
     if !claims.is_super_admin {
-        warn!("User {} has no permissions to reset Super Admin's password", claims.username);
+        warn!(
+            "User {} has no permissions to reset Super Admin's password",
+            claims.username
+        );
         return Err(AppError::Forbidden("No permission".to_string()));
     }
 

@@ -69,7 +69,12 @@ impl<T> ApiResponse<T> {
     ///     &context
     /// );
     /// ```
-    pub(crate) fn with_code_and_message(code: i32, message: impl Into<String>, data: Option<T>, context: &RequestContext) -> Self {
+    pub(crate) fn with_code_and_message(
+        code: i32,
+        message: impl Into<String>,
+        data: Option<T>,
+        context: &RequestContext,
+    ) -> Self {
         Self {
             code,
             message: message.into(),

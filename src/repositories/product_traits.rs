@@ -2,8 +2,8 @@ use super::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     dto::products::{
-        PriceStatusResponseDTO, ProcessingFeeDTO, ProductDetailDTO, ProductDetailResponse, ProductListDTO,
-        ProductListQueryParams, ProductOverviewDTO, UpdateProductRequestDTO,
+        PriceStatusResponseDTO, ProcessingFeeDTO, ProductDetailDTO, ProductDetailResponse,
+        ProductListDTO, ProductListQueryParams, ProductOverviewDTO, UpdateProductRequestDTO,
     },
     map_db_err,
 };
@@ -145,8 +145,6 @@ impl ProductRepository for MySqlRepository {
         Ok((products, total_count))
     }
 
-    
-
     // 获取当日价格状态统计
     async fn fetch_product_price_status_stats(
         &self,
@@ -240,7 +238,8 @@ impl ProductRepository for MySqlRepository {
         let final_sql = if role_name == "AUDITOR" {
             sql.to_string()
         } else {
-            format!(r#"
+            format!(
+                r#"
 {}
 
 JOIN (
@@ -278,14 +277,18 @@ WHERE
 GROUP BY
     u.username, c.id, c.name, c.level
 ORDER BY
-    c.level, c.name"#, sql)
+    c.level, c.name"#,
+                sql
+            )
         };
 
         let stats = if role_name == "AUDITOR" {
             sqlx::query_as::<_, PriceStatusResponseDTO>(&final_sql)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(map_db_err!("Failed to fetch product price status stats for AUDITOR"))?
+                .map_err(map_db_err!(
+                    "Failed to fetch product price status stats for AUDITOR"
+                ))?
         } else {
             sqlx::query_as::<_, PriceStatusResponseDTO>(&final_sql)
                 .bind(role_name)
@@ -457,7 +460,7 @@ ORDER BY
                     tips: product_detail.tips,
                     tax_rate: product_detail.tax_rate,
                     image: product_detail.image,
-                    is_disabled: product_detail.is_disabled
+                    is_disabled: product_detail.is_disabled,
                 },
                 processing_fees: Some(processing_fees),
             };

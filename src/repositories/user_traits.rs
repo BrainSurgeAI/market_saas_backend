@@ -6,7 +6,7 @@ use crate::{
 };
 
 use async_trait::async_trait;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 use super::my_sql_repository::MySqlRepository;
 
@@ -133,7 +133,10 @@ impl UserRepository for MySqlRepository {
         .map_err(map_db_err!("Error creating user"))?
         .last_insert_id();
 
-        debug!("new user id: {} role {} tenant type {}", user_id, user.role, tenant.tenant_type);
+        debug!(
+            "new user id: {} role {} tenant type {}",
+            user_id, user.role, tenant.tenant_type
+        );
 
         let res = sqlx::query(
             "INSERT INTO user_roles (user_id, role_id) 

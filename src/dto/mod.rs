@@ -12,6 +12,7 @@ pub(crate) mod auth;
 pub(crate) mod category;
 pub(crate) mod delivery_staff;
 pub(crate) mod discount;
+pub(crate) mod financial;
 pub(crate) mod order;
 pub(crate) mod price;
 pub(crate) mod products;
@@ -19,7 +20,6 @@ pub(crate) mod reconciliation_statement;
 pub(crate) mod system_log;
 pub(crate) mod tenants;
 pub(crate) mod users;
-pub(crate) mod financial;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ValidatedJSON<T>(pub T);

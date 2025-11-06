@@ -2,8 +2,7 @@ use std::sync::Arc;
 // use std::time::Instant;
 
 use crate::{
-    common::AppError,
-    dto::system_log::SystemLogDTO,
+    common::AppError, dto::system_log::SystemLogDTO,
     repositories::system_log_repo::SystemLogRepository,
 };
 
@@ -167,8 +166,6 @@ where
 //         _ => "UNKNOWN_ERROR".to_string(),
 //     }
 // }
-
-
 
 // #[cfg(test)]
 // mod tests {

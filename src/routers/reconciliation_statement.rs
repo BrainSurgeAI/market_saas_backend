@@ -16,7 +16,7 @@ pub(super) fn reconciliation_statement_routes() -> Router {
         .route(
             "/api/v1/reconciliation_statements",
             post(create_reconciliation_statement::<MySqlRepository>)
-            .get(get_statements_by_tenant_and_date::<MySqlRepository>),
+                .get(get_statements_by_tenant_and_date::<MySqlRepository>),
         )
         .route(
             "/api/v1/reconciliation_statements/{id}",

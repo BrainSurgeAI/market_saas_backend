@@ -308,7 +308,6 @@ pub struct ProductOverviewResponse {
     pub total: i32,
 }
 
-
 // #[cfg(test)]
 // #[derive(Debug, Deserialize, Default)]
 // pub struct PriceQueryParams {

@@ -1,16 +1,8 @@
-use axum::{
-    extract::Path,
-    Extension,
-};
+use axum::{extract::Path, Extension};
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::{
-        order::{
-            AcceptedOrderResponseDTO,
-            ProductsSummaryWithOrdersDTO,
-        },
-    },
+    dto::order::{AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO},
     middleware::context::RequestContext,
     models::{claims::Claims, tenant_type::TenantType},
     repositories::order_traits::OrderRepository,
@@ -239,7 +231,6 @@ where
 //         OrderAction::CustomerInspect
 //     };
 
-
 //     let next_status = repo
 //         .update_order_status(
 //             tenant_type,
@@ -298,7 +289,6 @@ where
 //         &context,
 //     )))
 // }
-
 
 // /// 市场和客户通过订单验收, 针对主订单
 // pub(crate) async fn accept_order<T>(

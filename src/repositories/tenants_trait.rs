@@ -86,7 +86,11 @@ pub trait TenantRepository: Send + Sync {
         query: &QueryTenantByType,
     ) -> Result<Vec<BaseTenantDTO>, AppError>;
 
-    async fn activate_or_deactivate_tenant(&self, market_hash: &str, tenant_hash: &str) -> Result<u64, AppError>;
+    async fn activate_or_deactivate_tenant(
+        &self,
+        market_hash: &str,
+        tenant_hash: &str,
+    ) -> Result<u64, AppError>;
 
     async fn update_tenant_by_market(
         &self,
@@ -116,7 +120,6 @@ pub trait TenantRepository: Send + Sync {
 
 #[async_trait]
 impl TenantRepository for MySqlRepository {
-
     async fn tenant_exists(&self, hashed_name: &str) -> Result<bool, AppError> {
         // 是否还要检查 name 是否存在？
         let tenant_exists = sqlx::query_scalar::<_, bool>(
@@ -154,7 +157,6 @@ impl TenantRepository for MySqlRepository {
         market_hash: &str,
         tenant: &TenantCreateDTO,
     ) -> Result<(), AppError> {
-
         let name_hash = generate_tenant_name_hash();
 
         let is_exist = self.tenant_exists(&name_hash).await?;
@@ -258,8 +260,8 @@ impl TenantRepository for MySqlRepository {
         // let users = sqlx::query_as::<_, UserResponseDto>(
         //     r#"SELECT u.id, u.name, u.username, u.email, u.phone, r.name as role,
         //     t.name as tenant_name, u.created_at, u.updated_at, u.deleted_at
-        //     FROM users u 
-        //     INNER JOIN tenants t ON u.tenant_id = t.id 
+        //     FROM users u
+        //     INNER JOIN tenants t ON u.tenant_id = t.id
         //     INNER JOIN user_roles ur ON u.id = ur.user_id
         //     INNER JOIN roles r ON ur.role_id = r.id
         //     WHERE t.name_hash = ?
@@ -269,7 +271,6 @@ impl TenantRepository for MySqlRepository {
         // .fetch_all(&self.pool)
         // .await
         // .map_err(map_db_err!("Failed to get tenant users"))?;
-
 
         self.tenant_users(hashed_name).await
     }
@@ -412,7 +413,11 @@ impl TenantRepository for MySqlRepository {
         Ok(tenants)
     }
 
-    async fn activate_or_deactivate_tenant(&self, market_hash: &str, tenant_hash: &str) -> Result<u64, AppError> {
+    async fn activate_or_deactivate_tenant(
+        &self,
+        market_hash: &str,
+        tenant_hash: &str,
+    ) -> Result<u64, AppError> {
         self.has_relationship(market_hash, tenant_hash).await?;
 
         let result = sqlx::query("UPDATE tenants SET deleted_at = CASE 

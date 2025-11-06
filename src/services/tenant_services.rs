@@ -16,7 +16,6 @@ use crate::dto::tenants::{
 };
 use crate::utils::validate_json_fmt::Json;
 
-
 /// Retrieves a tenant by username.
 ///
 /// # Arguments
@@ -145,7 +144,7 @@ where
 pub(crate) async fn get_users<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>
+    Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
@@ -153,7 +152,6 @@ where
     let users = repo.get_tenant_users(&claims.tenant_hash).await?;
     Ok(Json(ApiResponse::new(Some(users), &context)))
 }
-
 
 /// Add a user to a tenant
 ///
@@ -267,7 +265,9 @@ where
         ));
     }
 
-    let rows_affected = repo.activate_or_deactivate_tenant(&claims.tenant_hash, &tenant_hash).await?;
+    let rows_affected = repo
+        .activate_or_deactivate_tenant(&claims.tenant_hash, &tenant_hash)
+        .await?;
     Ok(Json(ApiResponse::new(Some(rows_affected), &context)))
 }
 
@@ -312,18 +312,14 @@ where
     Ok(Json(ApiResponse::new(tenant, &context)))
 }
 
-
 pub async fn get_tenant_detail_by_hashed_name<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Path(hashed_name): Path<String>
+    Path(hashed_name): Path<String>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: TenantRepository + Send + Sync,
 {
-    let tenant = repo
-        .find_tenant_detail_by_hashed_name(&hashed_name)
-        .await?;
+    let tenant = repo.find_tenant_detail_by_hashed_name(&hashed_name).await?;
     Ok(Json(ApiResponse::new(tenant, &context)))
 }
-

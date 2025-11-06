@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{error, debug};
+use tracing::{debug, error};
 
 #[async_trait]
 pub trait RoleRepository: Send + Sync {
@@ -225,8 +225,10 @@ impl RoleRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get menus by role name"))?;
 
         // 构建菜单层次结构
-        let mut menu_map: std::collections::HashMap<i32, MenuConfig> = std::collections::HashMap::new();
-        let mut children_map: std::collections::HashMap<i32, Vec<MenuConfig>> = std::collections::HashMap::new();
+        let mut menu_map: std::collections::HashMap<i32, MenuConfig> =
+            std::collections::HashMap::new();
+        let mut children_map: std::collections::HashMap<i32, Vec<MenuConfig>> =
+            std::collections::HashMap::new();
 
         // 首先处理所有菜单项，创建所有菜单的基础配置
         for item in menu_items {

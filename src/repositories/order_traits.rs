@@ -25,62 +25,61 @@ use tracing::{debug, error, info};
 
 #[async_trait]
 pub(crate) trait OrderRepository: Send + Sync {
-    async fn create_order(
-        &self,
-        customer_hash: &str,
-        order: &CreateOrderDTO,
-    ) -> Result<OrderResponse, AppError>;
+    // async fn create_order(
+    //     &self,
+    //     customer_hash: &str,
+    //     order: &CreateOrderDTO,
+    // ) -> Result<OrderResponse, AppError>;
 
-    async fn get_orders_by_tenant(
-        &self,
-        tenant_hash: &str,
-        tenant_type: &str,
-        query_params: &OrderQueryParams,
-    ) -> Result<Vec<OrderResponse>, AppError>;
+    // async fn get_orders_by_tenant(
+    //     &self,
+    //     tenant_hash: &str,
+    //     tenant_type: &str,
+    //     query_params: &OrderQueryParams,
+    // ) -> Result<Vec<OrderResponse>, AppError>;
 
-    async fn order_by_order_code(
-        &self,
-        order_code: &str,
-        tenant_hash: &str,
-    ) -> Result<Option<OrderDetailResponse>, AppError>;
+    // async fn order_by_order_code(
+    //     &self,
+    //     order_code: &str,
+    //     tenant_hash: &str,
+    // ) -> Result<Option<OrderDetailResponse>, AppError>;
 
-    async fn assign_order(
-        &self,
-        order_code: &str,
-        provider_id: i32,
-        confirmed_by: &str,
-    ) -> Result<(), AppError>;
+    // async fn assign_order(
+    //     &self,
+    //     order_code: &str,
+    //     provider_id: i32,
+    //     confirmed_by: &str,
+    // ) -> Result<(), AppError>;
 
-    async fn order_start_progress(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-        delivery_staff_id: &str,
-    ) -> Result<OrderStatus, AppError>;
+    // async fn order_start_progress(
+    //     &self,
+    //     order_code: &str,
+    //     operator: &str,
+    //     provider_hash: &str,
+    //     delivery_staff_id: Option<&str>,
+    // ) -> Result<OrderStatus, AppError>;
 
-    async fn order_start_exchange_progress(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-    ) -> Result<OrderStatus, AppError>;
+    // async fn order_start_exchange_progress(
+    //     &self,
+    //     order_code: &str,
+    //     operator: &str,
+    //     provider_hash: &str,
+    // ) -> Result<OrderStatus, AppError>;
 
-    async fn deliver_to_market(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-        deliver_to_market_dto: &DeliverToMarketDTO,
-    ) -> Result<(), AppError>;
+    // async fn deliver_to_market(
+    //     &self,
+    //     order_code: &str,
+    //     provider_hash: &str,
+    //     deliver_to_market_dto: &DeliverToMarketDTO,
+    // ) -> Result<(), AppError>;
 
-    async fn exchange_deliver_to_market(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-        exchange_dto: &ExchangeDTO,
-    ) -> Result<(), AppError>;
+    // async fn exchange_deliver_to_market(
+    //     &self,
+    //     order_code: &str,
+    //     operator: &str,
+    //     provider_hash: &str,
+    //     exchange_dto: &ExchangeDTO,
+    // ) -> Result<(), AppError>;
 
     async fn get_after_sale_orders_by_tenant(
         &self,
@@ -88,1063 +87,1113 @@ pub(crate) trait OrderRepository: Send + Sync {
         tenant_type: &TenantType,
     ) -> Result<Vec<AcceptedOrderResponseDTO>, AppError>;
 
-    async fn process_order_receipt(
-        &self,
-        receipt: &OrderReceipt,
-        // tenant_type: TenantType,
-        // tenant_hash: &str,
-        // action: OrderAction,
-        operator: &str,
-        transaction_id: &str,
-    ) -> Result<(), AppError>;
+    // async fn process_order_receipt(
+    //     &self,
+    //     receipt: &OrderReceipt,
+    //     // tenant_type: TenantType,
+    //     // tenant_hash: &str,
+    //     // action: OrderAction,
+    //     operator: &str,
+    //     transaction_id: &str,
+    // ) -> Result<(), AppError>;
 
     async fn fetch_today_product_order_summary_by_provider_hash(
         &self,
         provider_hash: &str,
     ) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError>;
 
-    async fn update_order_status(
-        &self,
-        tenant_type: TenantType,
-        tenant_hash: &str,
-        order_code: &str,
-        action: OrderAction,
-        //  target_status: OrderStatus,
-        operator: &str,
-    ) -> Result<OrderStatus, AppError>;
+    // async fn update_order_status(
+    //     &self,
+    //     tenant_type: TenantType,
+    //     tenant_hash: &str,
+    //     order_code: &str,
+    //     action: OrderAction,
+    //     operator: &str,
+    // ) -> Result<OrderStatus, AppError>;
 
-    /// Get order details which status is not SIGN
-    ///
-    async fn get_exchange_and_return_order_details_by_order_code(
-        &self,
-        order_code: &str,
-    ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError>;
+  
+    // async fn get_exchange_and_return_order_details_by_order_code(
+    //     &self,
+    //     order_code: &str,
+    // ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError>;
 }
 
-impl MySqlRepository {
-    /// Helper method to insert order details in batch
-    /// This improves performance by preparing processing requirements once
-    /// and using a single method for the detail insertion logic    
-    async fn insert_order_details(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        order_id: u64,
-        items: &[crate::dto::order::CreateOrderItem],
-    ) -> Result<(), AppError> {
-        for item in items {
-            // Prepare processing requirements efficiently
-            let processing_requirements = if item.processing_services.is_empty() {
-                None
-            } else {
-                Some(
-                    item.processing_services
-                        .iter()
-                        .map(|service| {
-                            format!(
-                                "{}:{}",
-                                service.name,
-                                service.description.as_deref().unwrap_or_default()
-                            )
-                        })
-                        .collect::<Vec<String>>()
-                        .join(","),
-                )
-            };
+// impl MySqlRepository {
+//     /// Helper method to insert order details in batch
+//     /// This improves performance by preparing processing requirements once
+//     /// and using a single method for the detail insertion logic    
+//     async fn insert_order_details(
+//         &self,
+//         tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+//         order_id: u64,
+//         items: &[crate::dto::order::CreateOrderItem],
+//     ) -> Result<(), AppError> {
+//         for item in items {
+//             // Prepare processing requirements efficiently
+//             let processing_requirements = if item.processing_services.is_empty() {
+//                 None
+//             } else {
+//                 Some(
+//                     item.processing_services
+//                         .iter()
+//                         .map(|service| {
+//                             format!(
+//                                 "{}:{}",
+//                                 service.name,
+//                                 service.description.as_deref().unwrap_or_default()
+//                             )
+//                         })
+//                         .collect::<Vec<String>>()
+//                         .join(","),
+//                 )
+//             };
 
-            sqlx::query!(
-                r#"INSERT INTO order_details (
-                    order_id, product_code, product_name, category_id, category_name,
-                    unit, quantity, original_price, discount_rate, actual_price,
-                    actual_amount, total_amount, processing_requirements, remark
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-                order_id,
-                &item.product_code,
-                &item.product_name,
-                &item.category_id,
-                &item.category_name,
-                &item.unit,
-                &item.quantity,
-                &item.original_price,
-                &item.discount_rate,
-                &item.price,
-                &item.total,
-                &item.total,
-                &processing_requirements,
-                &item.remark
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| {
-                error!("Failed to create order detail: {:#?}", e);
-                AppError::Database(e)
-            })?;
-        }
-        Ok(())
-    }
+//             sqlx::query!(
+//                 r#"INSERT INTO order_details (
+//                     order_id, product_code, product_name, category_id, category_name,
+//                     unit, quantity, original_price, discount_rate, actual_price,
+//                     actual_amount, total_amount, processing_requirements, remark
+//                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+//                 order_id,
+//                 &item.product_code,
+//                 &item.product_name,
+//                 &item.category_id,
+//                 &item.category_name,
+//                 &item.unit,
+//                 &item.quantity,
+//                 &item.original_price,
+//                 &item.discount_rate,
+//                 &item.price,
+//                 &item.total,
+//                 &item.total,
+//                 &processing_requirements,
+//                 &item.remark
+//             )
+//             .execute(&mut **tx)
+//             .await
+//             .map_err(|e| {
+//                 error!("Failed to create order detail: {:#?}", e);
+//                 AppError::Database(e)
+//             })?;
+//         }
+//         Ok(())
+//     }
 
-    /// Helper method to validate and transition order state using OrderStateMachine
-    /// This method encapsulates the logic for:
-    /// 1. Converting current status string to OrderStatus enum
-    /// 2. Getting the next valid state based on action and tenant type
-    /// 3. Handling state transition errors with custom error messages
-    ///
-    /// # Arguments
-    /// * `current_status_str` - Current order status as string
-    /// * `action` - The action to transition from current state
-    /// * `tenant_type` - The tenant type performing the action
-    /// * `error_msg` - Custom error message if transition fails
-    ///
-    /// # Returns
-    /// The next OrderStatus if transition is valid, or AppError if invalid
-    fn validate_and_transition_order_state(
-        current_status_str: &str,
-        action: OrderAction,
-        tenant_type: TenantType,
-        error_msg: &str,
-    ) -> Result<OrderStatus, AppError> {
-        let current_status = OrderStatus::try_from(current_status_str)?;
+//     /// Helper method to validate and transition order state using OrderStateMachine
+//     /// This method encapsulates the logic for:
+//     /// 1. Converting current status string to OrderStatus enum
+//     /// 2. Getting the next valid state based on action and tenant type
+//     /// 3. Handling state transition errors with custom error messages
+//     ///
+//     /// # Arguments
+//     /// * `current_status_str` - Current order status as string
+//     /// * `action` - The action to transition from current state
+//     /// * `tenant_type` - The tenant type performing the action
+//     /// * `error_msg` - Custom error message if transition fails
+//     ///
+//     /// # Returns
+//     /// The next OrderStatus if transition is valid, or AppError if invalid
+//     fn validate_and_transition_order_state(
+//         current_status_str: &str,
+//         action: OrderAction,
+//         tenant_type: TenantType,
+//         error_msg: &str,
+//     ) -> Result<OrderStatus, AppError> {
+//         let current_status = OrderStatus::try_from(current_status_str)?;
 
-        OrderStateMachine::next_state(current_status, action, tenant_type).map_err(|e| {
-            error!("Order state transition error: {}", e);
-            AppError::Validation(error_msg.to_string())
-        })
-    }
+//         OrderStateMachine::next_state(current_status, action, tenant_type).map_err(|e| {
+//             error!("Order state transition error: {}", e);
+//             AppError::Validation(error_msg.to_string())
+//         })
+//     }
 
-    /// Helper method to fetch provider's order information
-    /// This method retrieves order details for a provider
-    ///
-    /// # Arguments
-    /// * `provider_hash` - Hash of the provider tenant
-    /// * `order_code` - Unique order code
-    /// * `error_msg` - Custom error message if order not found
-    ///
-    /// # Returns
-    /// A tuple containing (order_id, order_status)
-    async fn fetch_provider_order(
-        &self,
-        provider_hash: &str,
-        order_code: &str,
-        error_msg: &str,
-    ) -> Result<(i32, String), AppError> {
-        let order = sqlx::query!(
-            r#"SELECT o.id, o.order_status FROM tenants t
-                   INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
-                   INNER JOIN orders o ON poa.order_id = o.id
-                   WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ?"#,
-            provider_hash,
-            order_code
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get order"))?
-        .ok_or_else(|| {
-            error!("Order {} was not found: {}", order_code, error_msg);
-            AppError::NotFound(error_msg.to_string())
-        })?;
+//     /// Helper method to fetch provider's order information
+//     /// This method retrieves order details for a provider
+//     ///
+//     /// # Arguments
+//     /// * `provider_hash` - Hash of the provider tenant
+//     /// * `order_code` - Unique order code
+//     /// * `error_msg` - Custom error message if order not found
+//     ///
+//     /// # Returns
+//     /// A tuple containing (order_id, order_status)
+//     async fn fetch_provider_order(
+//         &self,
+//         provider_hash: &str,
+//         order_code: &str,
+//         error_msg: &str,
+//     ) -> Result<(i32, String), AppError> {
+//         let order = sqlx::query!(
+//             r#"SELECT o.id, o.order_status FROM tenants t
+//                    INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
+//                    INNER JOIN orders o ON poa.order_id = o.id
+//                    WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ?"#,
+//             provider_hash,
+//             order_code
+//         )
+//         .fetch_optional(&self.pool)
+//         .await
+//         .map_err(map_db_err!("Failed to get order"))?
+//         .ok_or_else(|| {
+//             error!("Order {} was not found: {}", order_code, error_msg);
+//             AppError::NotFound(error_msg.to_string())
+//         })?;
 
-        Ok((order.id, order.order_status))
-    }
-}
+//         Ok((order.id, order.order_status))
+//     }
+// }
 
 #[async_trait]
 impl OrderRepository for MySqlRepository {
-    async fn create_order(
-        &self,
-        customer_hash: &str,
-        order: &CreateOrderDTO,
-    ) -> Result<OrderResponse, AppError> {
-        // Fetch customer information with early return for better error handling
-        let record = sqlx::query!(
-            r#"SELECT t.id as customer_id, t.name as customer_name, tr.market_id from tenants t 
-               INNER JOIN tenant_relationships tr ON tr.provider_id = t.id 
-               WHERE t.name_hash = ? AND tr.status = 'ACTIVE'"#,
-            customer_hash
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get customer information"))?
-        .ok_or_else(|| AppError::NotFound("Customer not found".to_string()))?;
+    // async fn create_order(
+    //     &self,
+    //     customer_hash: &str,
+    //     order: &CreateOrderDTO,
+    // ) -> Result<OrderResponse, AppError> {
+    //     // Fetch customer information with early return for better error handling
+    //     let record = sqlx::query!(
+    //         r#"SELECT t.id as customer_id, t.name as customer_name, tr.market_id from tenants t 
+    //            INNER JOIN tenant_relationships tr ON tr.provider_id = t.id 
+    //            WHERE t.name_hash = ? AND tr.status = 'ACTIVE'"#,
+    //         customer_hash
+    //     )
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get customer information"))?
+    //     .ok_or_else(|| AppError::NotFound("Customer not found".to_string()))?;
 
-        // Pre-calculate order amounts for efficiency
-        let total_amount: Decimal = order.items.iter().map(|item| item.original_amount).sum();
+    //     // Pre-calculate order amounts for efficiency
+    //     let total_amount: Decimal = order.items.iter().map(|item| item.original_amount).sum();
 
-        let discount_amount: Decimal = order
-            .items
-            .iter()
-            .map(|item| item.original_amount - item.total)
-            .sum();
+    //     let discount_amount: Decimal = order
+    //         .items
+    //         .iter()
+    //         .map(|item| item.original_amount - item.total)
+    //         .sum();
 
-        // Parse delivery date once, with proper error handling
-        let delivery_date =
-            NaiveDate::parse_from_str(&order.delivery_info.delivery_date, "%Y-%m-%d")
-                .unwrap_or_else(|_| NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
+    //     // Parse delivery date once, with proper error handling
+    //     let delivery_date =
+    //         NaiveDate::parse_from_str(&order.delivery_info.delivery_date, "%Y-%m-%d")
+    //             .unwrap_or_else(|_| NaiveDate::from_ymd_opt(2023, 1, 1).unwrap());
 
-        // Generate order code before transaction to ensure consistency
-        let order_code = generate_code(CodeType::Order);
+    //     // Generate order code before transaction to ensure consistency
+    //     let order_code = generate_code(CodeType::Order);
 
-        // Use transaction for atomicity
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    //     // Use transaction for atomicity
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        // Insert order and get ID
-        let order_id = sqlx::query!(
-            r#"INSERT INTO orders (
-                order_code, market_id, customer_id, total_amount, discount_amount,
-                actual_amount, delivery_date, delivery_address, contact_name,
-                contact_phone, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-            order_code,
-            record.market_id,
-            record.customer_id,
-            total_amount,
-            discount_amount,
-            order.total_amount, // Frontend total_amount is actual quantity x discounted price
-            order.delivery_info.delivery_date,
-            order.delivery_info.delivery_address,
-            order.delivery_info.contact_name,
-            order.delivery_info.contact_phone,
-            record.customer_name
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to create order"))?
-        .last_insert_id();
+    //     // Insert order and get ID
+    //     let order_id = sqlx::query!(
+    //         r#"INSERT INTO orders (
+    //             order_code, market_id, customer_id, total_amount, discount_amount,
+    //             actual_amount, delivery_date, delivery_address, contact_name,
+    //             contact_phone, created_by
+    //         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+    //         order_code,
+    //         record.market_id,
+    //         record.customer_id,
+    //         total_amount,
+    //         discount_amount,
+    //         order.total_amount, // Frontend total_amount is actual quantity x discounted price
+    //         order.delivery_info.delivery_date,
+    //         order.delivery_info.delivery_address,
+    //         order.delivery_info.contact_name,
+    //         order.delivery_info.contact_phone,
+    //         record.customer_name
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to create order"))?
+    //     .last_insert_id();
 
-        // Batch insert order details for better performance
-        self.insert_order_details(&mut tx, order_id, &order.items)
-            .await
-            .map_err(|e| {
-                error!("Failed to create order details: {:#?}", e);
-                AppError::Internal(e.to_string())
-            })?;
+    //     // Batch insert order details for better performance
+    //     self.insert_order_details(&mut tx, order_id, &order.items)
+    //         .await
+    //         .map_err(|e| {
+    //             error!("Failed to create order details: {:#?}", e);
+    //             AppError::Internal(e.to_string())
+    //         })?;
 
-        // Commit transaction
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     // Commit transaction
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
 
-        info!("Order {} created successfully", order_code);
+    //     info!("Order {} created successfully", order_code);
 
-        Ok(OrderResponse {
-            order_code,
-            total_amount,
-            actual_amount: order.total_amount,
-            delivery_address: order.delivery_info.delivery_address.clone(),
-            delivery_date,
-            order_status: OrderStatus::Pending.to_string(),
-            created_at: None,
-            after_sale_at: None,
-        })
-    }
+    //     Ok(OrderResponse {
+    //         order_code,
+    //         total_amount,
+    //         actual_amount: order.total_amount,
+    //         delivery_address: order.delivery_info.delivery_address.clone(),
+    //         delivery_date,
+    //         order_status: OrderStatus::Pending.to_string(),
+    //         created_at: None,
+    //         after_sale_at: None,
+    //     })
+    // }
 
-    async fn get_orders_by_tenant(
-        &self,
-        tenant_hash: &str,
-        tenant_type: &str,
-        query_params: &OrderQueryParams,
-    ) -> Result<Vec<OrderResponse>, AppError> {
-        let page = query_params.page.unwrap_or(1);
-        let page_size = query_params.page_size.unwrap_or(10);
-        let offset = (page - 1) * page_size;
+    // async fn get_orders_by_tenant(
+    //     &self,
+    //     tenant_hash: &str,
+    //     tenant_type: &str,
+    //     query_params: &OrderQueryParams,
+    // ) -> Result<Vec<OrderResponse>, AppError> {
+    //     let page = query_params.page.unwrap_or(1);
+    //     let page_size = query_params.page_size.unwrap_or(10);
+    //     let offset = (page - 1) * page_size;
 
-        let record = sqlx::query!(r#"select id from tenants where name_hash=?"#, tenant_hash)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get tenant by id"))?
-            .ok_or_else(|| {
-                return AppError::NotFound(format!(
-                    "Can not find Tenant by type {} name_hash {} ",
-                    tenant_type, tenant_hash
-                ));
-            })?;
+    //     let record = sqlx::query!(
+    //         r#"select id from tenants where name_hash=? and tenant_type=? and status='ACTIVE'"#,
+    //         tenant_hash,
+    //         tenant_type
+    //     )
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get tenant by id"))?
+    //     .ok_or_else(|| {
+    //         return AppError::NotFound(format!(
+    //             "Can not find Tenant by type {} name_hash {} ",
+    //             tenant_type, tenant_hash
+    //         ));
+    //     })?;
 
-        let basic_query = r#"SELECT 
-                   o.order_code, 
-                   o.delivery_address, 
-                   o.total_amount,
-                   o.actual_amount, 
-                   o.delivery_date, 
-                   o.order_status,
-                   o.created_at,
-                   o.after_sale_at
-                   FROM orders o {JOIN_CLAUSE} WHERE 1=1 "#;
+    //     let basic_query = r#"SELECT 
+    //                o.order_code, 
+    //                o.delivery_address, 
+    //                o.total_amount,
+    //                o.actual_amount, 
+    //                o.delivery_date, 
+    //                o.order_status,
+    //                o.created_at,
+    //                o.after_sale_at
+    //                FROM orders o {JOIN_CLAUSE} WHERE 1=1 "#;
 
-        let mut builder: QueryBuilder<MySql>;
-        if tenant_type == TenantType::Provider.to_string() {
-            let query = &basic_query.replace(
-                "{JOIN_CLAUSE}",
-                "JOIN provider_orders_assignments po ON po.order_id=o.id",
-            );
+    //     let mut builder: QueryBuilder<MySql>;
+    //     if tenant_type == TenantType::Provider.to_string() {
+    //         let query = &basic_query.replace(
+    //             "{JOIN_CLAUSE}",
+    //             "JOIN provider_orders_assignments po ON po.order_id=o.id",
+    //         );
 
-            builder = QueryBuilder::new(query);
-            builder.push(" AND po.provider_id= ").push_bind(record.id);
-        } else {
-            let query = &basic_query.replace("{JOIN_CLAUSE}", "");
+    //         builder = QueryBuilder::new(query);
+    //         builder.push(" AND po.provider_id= ").push_bind(record.id);
+    //     } else {
+    //         let query = &basic_query.replace("{JOIN_CLAUSE}", "");
 
-            builder = QueryBuilder::new(query);
-            builder.push(" AND (o.market_id=").push_bind(record.id);
-            builder.push(" OR o.customer_id=").push_bind(record.id);
-            builder.push(") ");
-        }
+    //         builder = QueryBuilder::new(query);
+    //         builder.push(" AND (o.market_id=").push_bind(record.id);
+    //         builder.push(" OR o.customer_id=").push_bind(record.id);
+    //         builder.push(") ");
+    //     }
 
-        if let Some(order_status) = query_params.order_status.as_ref() {
-            debug!("order_status: {}", order_status);
-            builder.push(" AND o.order_status=").push_bind(order_status);
-        }
+    //     if let Some(order_status) = query_params.order_status.as_ref() {
+    //         debug!("order_status: {}", order_status);
+    //         builder.push(" AND o.order_status=").push_bind(order_status);
+    //     }
 
-        builder.push(" ORDER BY o.created_at DESC ");
-        builder.push(" LIMIT ").push_bind(page_size);
-        builder.push(" OFFSET ").push_bind(offset);
+    //     builder.push(" ORDER BY o.created_at DESC ");
+    //     builder.push(" LIMIT ").push_bind(page_size);
+    //     builder.push(" OFFSET ").push_bind(offset);
 
-        let orders = builder
-            .build_query_as::<OrderResponse>()
-            .fetch_all(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get customer orders"))?;
-        Ok(orders)
-    }
+    //     let orders = builder
+    //         .build_query_as::<OrderResponse>()
+    //         .fetch_all(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get customer orders"))?;
+    //     Ok(orders)
+    // }
 
-    /// Get order by order code and tenant hash
-    ///
-    /// # Arguments
-    /// * `order_code` - Order code
-    /// * `tenant_hash` - Tenant hash
-    ///
-    /// # Returns
-    /// The order detail response
-    async fn order_by_order_code(
-        &self,
-        order_code: &str,
-        _tenant_hash: &str,
-    ) -> Result<Option<OrderDetailResponse>, AppError> {
-        // TODO: use tenant hash to filter order by customer or provider
-        let order = sqlx::query_as!(
-            OrderItem,
-            r#"
-        SELECT 
-            o.id,
-            o.order_code,
-            t.name as customer_name,
-            o.order_status,
-            o.total_amount,
-            o.discount_amount,
-            o.actual_amount,
-            o.delivery_date,
-            o.delivery_address,
-            o.contact_name,
-            o.contact_phone,
-            o.remark,
-            o.created_by,
-            o.created_at,
-            o.confirmed_by,
-            o.confirmed_at,
-            o.processed_by,
-            o.processed_at,
-            o.stocked_by,
-            o.stocked_at,
-            o.after_sale_at,
-            o.rejected_by,
-            o.rejected_at,
-            o.reject_reason,
-            o.completed_by,
-            o.completed_at,
-            ds.name as delivery_staff_name,
-            ds.phone as delivery_staff_phone,
-            p.name as provider_name
-        FROM orders o 
-        JOIN tenants t ON o.customer_id = t.id 
-        LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
-        LEFT JOIN provider_orders_assignments po ON o.id = po.order_id
-        LEFT JOIN tenants p ON po.provider_id = p.id
-        WHERE o.order_code = ?
-        "#,
-            order_code
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get order by code"))?;
+    // /// Get order by order code and tenant hash
+    // ///
+    // /// # Arguments
+    // /// * `order_code` - Order code
+    // /// * `tenant_hash` - Tenant hash
+    // ///
+    // /// # Returns
+    // /// The order detail response
+    // async fn order_by_order_code(
+    //     &self,
+    //     order_code: &str,
+    //     _tenant_hash: &str,
+    // ) -> Result<Option<OrderDetailResponse>, AppError> {
+    //     // TODO: use tenant hash to filter order by customer or provider
+    //     let order = sqlx::query_as!(
+    //         OrderItem,
+    //         r#"
+    //     SELECT 
+    //         o.id,
+    //         o.order_code,
+    //         t.name as customer_name,
+    //         o.order_status,
+    //         o.total_amount,
+    //         o.discount_amount,
+    //         o.actual_amount,
+    //         o.delivery_date,
+    //         o.delivery_address,
+    //         o.contact_name,
+    //         o.contact_phone,
+    //         o.remark,
+    //         o.created_by,
+    //         o.created_at,
+    //         o.confirmed_by,
+    //         o.confirmed_at,
+    //         o.processed_by,
+    //         o.processed_at,
+    //         o.stocked_by,
+    //         o.stocked_at,
+    //         o.after_sale_at,
+    //         o.rejected_by,
+    //         o.rejected_at,
+    //         o.reject_reason,
+    //         o.completed_by,
+    //         o.completed_at,
+    //         ds.name as delivery_staff_name,
+    //         ds.phone as delivery_staff_phone,
+    //         p.name as provider_name
+    //     FROM orders o 
+    //     JOIN tenants t ON o.customer_id = t.id 
+    //     LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
+    //     LEFT JOIN provider_orders_assignments po ON o.id = po.order_id
+    //     LEFT JOIN tenants p ON po.provider_id = p.id
+    //     WHERE o.order_code = ?
+    //     "#,
+    //         order_code
+    //     )
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order by code"))?;
 
-        let order = match order {
-            Some(o) => o,
-            None => return Ok(None),
-        };
+    //     let order = match order {
+    //         Some(o) => o,
+    //         None => return Ok(None),
+    //     };
 
-        let items = sqlx::query_as!(
-            OrderDetail,
-            r#"
-        SELECT 
-            id,
-            product_code,
-            product_name,
-            category_id,
-            category_name,
-            unit,
-            quantity,
-            original_price,
-            discount_rate,
-            actual_price,
-            actual_amount,
-            total_amount,
-            actual_quantity,
-            receipt_quantity,
-            processing_requirements,
-            remark,
-            status
-        FROM order_details
-        WHERE order_id = ?
-        "#,
-            order.id
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get order details"))?;
+    //     let items = sqlx::query_as!(
+    //         OrderDetail,
+    //         r#"
+    //     SELECT 
+    //         id,
+    //         product_code,
+    //         product_name,
+    //         category_id,
+    //         category_name,
+    //         unit,
+    //         quantity,
+    //         original_price,
+    //         discount_rate,
+    //         actual_price,
+    //         actual_amount,
+    //         total_amount,
+    //         actual_quantity,
+    //         receipt_quantity,
+    //         processing_requirements,
+    //         remark,
+    //         status
+    //     FROM order_details
+    //     WHERE order_id = ?
+    //     "#,
+    //         order.id
+    //     )
+    //     .fetch_all(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order details"))?;
 
-        let receipt_rows = sqlx::query!(
-            r#"
-        SELECT 
-            re.order_detail_id,
-            o.order_code,
-            od.product_code,
-            od.product_name,
-            re.operation_type,
-            re.quantity,
-            re.reason,
-            od.unit,
-            re.evidence_images
-        FROM return_exchange_records re
-        JOIN order_details od ON re.order_detail_id = od.id
-        JOIN orders o ON od.order_id = o.id
-        WHERE o.order_code = ?
-        ORDER BY re.created_at DESC
-        "#,
-            order_code
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get receipt records"))?;
+    //     let receipt_rows = sqlx::query!(
+    //         r#"
+    //     SELECT 
+    //         re.order_detail_id,
+    //         o.order_code,
+    //         od.product_code,
+    //         od.product_name,
+    //         re.operation_type,
+    //         re.quantity,
+    //         re.reason,
+    //         od.unit,
+    //         re.evidence_images
+    //     FROM return_exchange_records re
+    //     JOIN order_details od ON re.order_detail_id = od.id
+    //     JOIN orders o ON od.order_id = o.id
+    //     WHERE o.order_code = ?
+    //     ORDER BY re.created_at DESC
+    //     "#,
+    //         order_code
+    //     )
+    //     .fetch_all(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get receipt records"))?;
 
-        let receipts = receipt_rows
-            .into_iter()
-            .map(|r| {
-                let operation_type = ReceiptOperationType::try_from(r.operation_type)
-                    .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
+    //     let receipts = receipt_rows
+    //         .into_iter()
+    //         .map(|r| {
+    //             let operation_type = ReceiptOperationType::try_from(r.operation_type)
+    //                 .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
 
-                Ok(OrderReceipt {
-                    order_detail_id: r.order_detail_id,
-                    order_code: r.order_code,
-                    product_code: r.product_code,
-                    product_name: r.product_name,
-                    operation_type,
-                    quantity: r.quantity,
-                    reason: r.reason,
-                    unit: r.unit,
-                    evidence_images: r.evidence_images,
-                })
-            })
-            .collect::<Result<Vec<_>, AppError>>()?;
+    //             Ok(OrderReceipt {
+    //                 order_detail_id: r.order_detail_id,
+    //                 order_code: r.order_code,
+    //                 product_code: r.product_code,
+    //                 product_name: r.product_name,
+    //                 operation_type,
+    //                 quantity: r.quantity,
+    //                 reason: r.reason,
+    //                 unit: r.unit,
+    //                 evidence_images: r.evidence_images,
+    //             })
+    //         })
+    //         .collect::<Result<Vec<_>, AppError>>()?;
 
-        Ok(Some(OrderDetailResponse {
-            order,
-            items,
-            receipts,
-        }))
-    }
+    //     Ok(Some(OrderDetailResponse {
+    //         order,
+    //         items,
+    //         receipts,
+    //     }))
+    // }
 
-    async fn assign_order(
-        &self,
-        order_code: &str,
-        provider_id: i32,
-        confirmed_by: &str,
-    ) -> Result<(), AppError> {
-        // Only `PENDING` status of the order can be assigned
-        let current = OrderStatus::Pending;
-        let order_opt = sqlx::query!(
-            r#"SELECT id, delivery_date FROM orders WHERE order_code = ? AND order_status = ?"#,
-            order_code,
-            current.to_str()
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get order by id"))?;
+    // async fn assign_order(
+    //     &self,
+    //     order_code: &str,
+    //     provider_id: i32,
+    //     confirmed_by: &str,
+    // ) -> Result<(), AppError> {
+    //     // Only `PENDING` status of the order can be assigned
+    //     let current = OrderStatus::Pending;
+    //     let order_opt = sqlx::query!(
+    //         r#"SELECT id, delivery_date FROM orders WHERE order_code = ? AND order_status = ?"#,
+    //         order_code,
+    //         current.to_str()
+    //     )
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order by id"))?;
 
-        let order =
-            order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
+    //     let order =
+    //         order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
 
-        if order.delivery_date < chrono::Local::now().date_naive() {
-            return Err(AppError::Validation(format!(
-                "不能指派已过期订单 {}",
-                order_code
-            )));
-        }
+    //     if order.delivery_date < chrono::Local::now().date_naive() {
+    //         return Err(AppError::Validation(format!(
+    //             "不能指派已过期订单 {}",
+    //             order_code
+    //         )));
+    //     }
 
-        let order_id = order.id;
+    //     let order_id = order.id;
 
-        let next = OrderStateMachine::next_state(
-            OrderStatus::Pending,
-            OrderAction::AssignSupplier,
-            TenantType::Market,
-        )
-        .map_err(|e| {
-            error!("{}", e);
-            return AppError::Validation("Invalid transition".to_string());
-        })?;
+    //     let next = OrderStateMachine::next_state(
+    //         OrderStatus::Pending,
+    //         OrderAction::AssignSupplier,
+    //         TenantType::Market,
+    //     )
+    //     .map_err(|e| {
+    //         error!("{}", e);
+    //         return AppError::Validation("Invalid transition".to_string());
+    //     })?;
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        // update order status to confirmed
-        sqlx::query!(
-            r#"UPDATE orders SET order_status = ?, confirmed_at = NOW(), confirmed_by = ? WHERE id = ? AND order_status = 'PENDING'"#,
-            next.to_str(),
-            confirmed_by,
-            order_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to update order status from PENDING to ASSIGNED"))?;
+    //     // update order status to confirmed
+    //     sqlx::query!(
+    //         r#"UPDATE orders SET order_status = ?, confirmed_at = NOW(), confirmed_by = ? WHERE id = ? AND order_status = ?"#,
+    //         &next.to_str(),
+    //         confirmed_by,
+    //         order_id,
+    //         &current.to_str()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to update order status from PENDING to ASSIGNED"))?;
 
-        // dispatch order to provider
-        sqlx::query!(
-            r#"INSERT INTO provider_orders_assignments (order_id, provider_id) VALUES (?, ?)"#,
-            order_id,
-            provider_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert provider orders assignments"))?;
+    //     // dispatch order to provider
+    //     sqlx::query!(
+    //         r#"INSERT INTO provider_orders_assignments (order_id, provider_id) VALUES (?, ?)"#,
+    //         order_id,
+    //         provider_id
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to insert provider orders assignments"))?;
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, "PENDING", next.to_str(), confirmed_by, OrderAction::AssignSupplier.description()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history from Pending to Assigned"))?;
+    //     sqlx::query!(
+    //         r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+    //         order_id, &current.to_str(), next.to_str(), confirmed_by, OrderAction::AssignSupplier.description()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to insert order status history from Pending to Assigned"))?;
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(())
-    }
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     Ok(())
+    // }
 
-    async fn order_start_progress(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-        delivery_staff_id: &str,
-    ) -> Result<OrderStatus, AppError> {
-        // Use the shared helper method to fetch provider's order
-        let (order_id, order_status_str) = self
-            .fetch_provider_order(
-                provider_hash,
-                order_code,
-                &format!("订单 {} 没有找到，不能备货", order_code),
-            )
-            .await?;
+    // async fn order_start_progress(
+    //     &self,
+    //     order_code: &str,
+    //     operator: &str,
+    //     provider_hash: &str,
+    //     delivery_staff_id: Option<&str>,
+    // ) -> Result<OrderStatus, AppError> {
+    //     let (order_id, order_status_str) = self
+    //         .fetch_provider_order(
+    //             provider_hash,
+    //             order_code,
+    //             &format!("订单 {} 没有找到，不能备货", order_code),
+    //         )
+    //         .await?;
 
-        let current_status = OrderStatus::try_from(order_status_str.as_str())?;
-        let action = if current_status == OrderStatus::Assigned
-            || current_status == OrderStatus::ExchangeRequested
-        {
-            OrderAction::StartPreparing
-        } else {
-            return Err(AppError::Validation(format!(
-                "订单 {} 状态错误，不能进行备货",
-                order_code
-            )));
-        };
+    //     let current_status = OrderStatus::try_from(order_status_str.as_str())?;
+    //     let invalid_state_msg = format!("订单 {} 状态错误，不能进行备货", order_code);
 
-        // Use the shared helper method for state transition validation
-        let next = OrderStateMachine::next_state(current_status, action, TenantType::Provider)
-            .map_err(|e| {
-                error!("{}", e);
-                AppError::Validation(format!("订单 {} 状态错误，不能进行备货", order_code))
-            })?;
+    //     let action = match current_status {
+    //         OrderStatus::Assigned => OrderAction::StartPreparing,
+    //         OrderStatus::ExchangeRequested => OrderAction::StartPreparing,
+    //         _ => return Err(AppError::Validation(invalid_state_msg)),
+    //     };
 
-        debug!("Order status updated to {}", next);
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    //     let next = OrderStateMachine::next_state(current_status, action, TenantType::Provider)
+    //         .map_err(|err| {
+    //             error!("{err}");
+    //             AppError::Validation(format!("订单 {} 状态错误，不能进行备货", order_code))
+    //         })?;
 
-        let delivery_staff = sqlx::query!(
-            r#"SELECT id FROM delivery_staff WHERE id_card = ?"#,
-            delivery_staff_id
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get delivery staff by id"))?;
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        if delivery_staff.id == 0 {
-            return Err(AppError::NotFound(format!(
-                "配送员 {} 没有找到",
-                delivery_staff.id
-            )));
-        }
+    //     if current_status == OrderStatus::Assigned {
+    //         let id_card = delivery_staff_id
+    //             .ok_or_else(|| AppError::Validation("配送员 ID 不能为空".to_string()))?;
 
-        sqlx::query!(
-            r#"UPDATE orders SET order_status = ?, delivery_staff_id = ? WHERE id = ? AND order_status = ?"#,
-            next.to_str(),
-            delivery_staff.id,
-            order_id,
-            &order_status_str
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to update order status from Assigned to SupplierPreparing"))?;
+    //         let delivery_staff = sqlx::query!(
+    //             r#"SELECT id FROM delivery_staff WHERE id_card = ? AND status = true"#,
+    //             id_card
+    //         )
+    //         .fetch_optional(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get delivery staff by id"))?
+    //         .ok_or_else(|| AppError::NotFound(format!("配送员 {} 没有找到", id_card)))?;
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, &order_status_str, next.to_str(), operator, action.description()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history from Assigned to SupplierPreparing"))?;
+    //         let update_result = sqlx::query!(
+    //             r#"UPDATE orders
+    //                SET order_status = ?, delivery_staff_id = ?
+    //                WHERE id = ? AND order_status = ?"#,
+    //             next.to_str(),
+    //             delivery_staff.id,
+    //             order_id,
+    //             &order_status_str
+    //         )
+    //         .execute(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!(
+    //             "Failed to update order status from Assigned to SupplierPreparing"
+    //         ))?;
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(next)
-    }
+    //         if update_result.rows_affected() == 0 {
+    //             let _ = tx.rollback().await;
+    //             return Err(AppError::Conflict(format!(
+    //                 "订单 {} 状态已变更，请刷新后重试",
+    //                 order_code
+    //             )));
+    //         }
+    //     } else {
+    //         let update_result = sqlx::query!(
+    //             r#"UPDATE orders SET order_status = ? WHERE id = ? AND order_status = ?"#,
+    //             next.to_str(),
+    //             order_id,
+    //             &order_status_str
+    //         )
+    //         .execute(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!(
+    //             "Failed to update order status from ExchangeRequested to ExchangeInProgress"
+    //         ))?;
 
-    async fn order_start_exchange_progress(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-    ) -> Result<OrderStatus, AppError> {
-        let (order_id, order_status_str) = self
-            .fetch_provider_order(
-                provider_hash,
-                order_code,
-                &format!("订单 {} 没有找到，不能进行换货", order_code),
-            )
-            .await?;
+    //         if update_result.rows_affected() == 0 {
+    //             let _ = tx.rollback().await;
+    //             return Err(AppError::Conflict(format!(
+    //                 "订单 {} 状态已变更，请刷新后重试",
+    //                 order_code
+    //             )));
+    //         }
+    //     }
 
-        let next = Self::validate_and_transition_order_state(
-            &order_status_str,
-            OrderAction::StartPreparing,
-            TenantType::Provider,
-            &format!("订单 {} 状态错误，不能进行换货", order_code),
-        )?;
+    //     sqlx::query!(
+    //         r#"INSERT INTO order_status_history
+    //             (order_id, from_status, to_status, changed_by, change_reason)
+    //           VALUES (?, ?, ?, ?, ?)"#,
+    //         order_id,
+    //         order_status_str,
+    //         next.to_str(),
+    //         operator,
+    //         action.description()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!(
+    //         "Failed to insert order status history from Assigned to SupplierPreparing"
+    //     ))?;
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
 
-        sqlx::query!(
-            r#"UPDATE orders SET order_status = ? WHERE id = ? AND order_status = ?"#,
-            next.to_str(),
-            order_id,
-            &order_status_str
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!(
-            "Failed to update order status from ExchangeRequested to ExchangeInProgress"
-        ))?;
+    //     Ok(next)
+    // }
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, &order_status_str, next.to_str(), operator, OrderAction::StartPreparing.description()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history from ExchangeRequested to ExchangeInProgress"))?;
+    // async fn order_start_exchange_progress(
+    //     &self,
+    //     order_code: &str,
+    //     operator: &str,
+    //     provider_hash: &str,
+    // ) -> Result<OrderStatus, AppError> {
+    //     let (order_id, order_status_str) = self
+    //         .fetch_provider_order(
+    //             provider_hash,
+    //             order_code,
+    //             &format!("订单 {} 没有找到，不能进行换货", order_code),
+    //         )
+    //         .await?;
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(next)
-    }
+    //     let next = Self::validate_and_transition_order_state(
+    //         &order_status_str,
+    //         OrderAction::StartPreparing,
+    //         TenantType::Provider,
+    //         &format!("订单 {} 状态错误，不能进行换货", order_code),
+    //     )?;
 
-    async fn deliver_to_market(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-        deliver_to_market_dto: &DeliverToMarketDTO,
-    ) -> Result<(), AppError> {
-        // Use the shared helper method to fetch provider's order
-        let (order_id, order_status_str) = self
-            .fetch_provider_order(
-                provider_hash,
-                order_code,
-                &format!("订单 {} 没有找到", order_code),
-            )
-            .await?;
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        // Use the shared helper method for state transition validation
-        let next = Self::validate_and_transition_order_state(
-            &order_status_str,
-            OrderAction::DeliverToMarket,
-            TenantType::Provider,
-            &format!("订单 {} 状态错误，不能配送到市场", order_code),
-        )?;
+    //     sqlx::query!(
+    //         r#"UPDATE orders SET order_status = ? WHERE id = ? AND order_status = ?"#,
+    //         next.to_str(),
+    //         order_id,
+    //         &order_status_str
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!(
+    //         "Failed to update order status from ExchangeRequested to ExchangeInProgress"
+    //     ))?;
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction to update order status from SupplierPreparing to SupplierDelivering"))?;
+    //     sqlx::query!(
+    //         r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+    //         order_id, &order_status_str, next.to_str(), operator, OrderAction::StartPreparing.description()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to insert order status history from ExchangeRequested to ExchangeInProgress"))?;
 
-        // update actual quantity and actual amount in order_details table
-        for item in deliver_to_market_dto.items.iter() {
-            let id = item.id;
-            let actual_quantity = item.actual_quantity;
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     Ok(next)
+    // }
 
-            sqlx::query!(
-                r#"UPDATE order_details SET actual_quantity = ?, actual_amount = actual_price * ?,
-                   total_amount = original_price * ? WHERE order_id = ? AND id = ?"#,
-                actual_quantity,
-                actual_quantity,
-                actual_quantity,
-                order_id,
-                id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update actual quantity"))?;
-        }
+    /// 正常配送订单到市场，非换货订单
+    // async fn deliver_to_market(
+    //     &self,
+    //     order_code: &str,
+    //     provider_hash: &str,
+    //     deliver_to_market_dto: &DeliverToMarketDTO,
+    // ) -> Result<(), AppError> {
+    //     // Use the shared helper method to fetch provider's order
+    //     let (order_id, order_status_str) = self
+    //         .fetch_provider_order(
+    //             provider_hash,
+    //             order_code,
+    //             &format!("订单 {} 没有找到", order_code),
+    //         )
+    //         .await?;
 
-        // update order status to DeliveryToMarket
-        sqlx::query!(
-            r#"UPDATE orders o
-               SET o.actual_amount = (
-                   SELECT SUM(od.actual_amount)
-                   FROM order_details od
-                   WHERE od.order_id = o.id
-               ),
-               o.total_amount = (
-                   SELECT SUM(od.total_amount)
-                   FROM order_details od
-                   WHERE od.order_id = o.id
-               ),
-               o.discount_amount = (
-                   SELECT SUM(od.total_amount - od.actual_amount)
-                   FROM order_details od
-                   WHERE od.order_id = o.id
-               ),
-               o.order_status = ?,
-               o.stocked_by = ? 
-               WHERE o.id = ?"#,
-            next.to_str(),
-            operator,
-            order_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!(
-            "Failed to update order amount and status from SupplierPreparing to SupplierDelivering"
-        ))?;
-        debug!("Update order amount and status to SupplierDelivering");
+    //     let current_status = OrderStatus::try_from(order_status_str.as_str())?;
+    //     let invalid_state_msg = format!("订单 {} 状态错误，不能配送到市场", order_code);
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order_id, &order_status_str, next.to_str(), operator, OrderAction::DeliverToMarket.description()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history from SupplierPreparing to SupplierDelivering"))?;
-        debug!("Insert order status history from SupplierPreparing to SupplierDelivering");
+    //     let action = match current_status {
+    //         OrderStatus::SupplierPreparing => OrderAction::DeliverToMarket,
+    //         _ => return Err(AppError::Validation(invalid_state_msg)),
+    //     };
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        debug!("Order updated to SupplierDelivering");
-        Ok(())
-    }
+    //     let next = OrderStateMachine::next_state(current_status, action, TenantType::Provider)
+    //         .map_err(|err| {
+    //             error!("{err}");
+    //             AppError::Validation(format!("订单 {} 状态错误，不能配送到市场", order_code))
+    //         })?;
+
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction to update order status from SupplierPreparing to SupplierDelivering"))?;
+
+    //     // update actual quantity and actual amount in order_details table
+    //     for item in deliver_to_market_dto.items.iter() {
+    //         let id = item.id;
+    //         let actual_quantity = item.actual_quantity;
+
+    //         sqlx::query!(
+    //             r#"UPDATE order_details SET actual_quantity = ?, actual_amount = actual_price * ?,
+    //                total_amount = original_price * ? WHERE order_id = ? AND id = ?"#,
+    //             actual_quantity,
+    //             actual_quantity,
+    //             actual_quantity,
+    //             order_id,
+    //             id
+    //         )
+    //         .execute(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!("Failed to update actual quantity"))?;
+    //     }
+
+    //     // update order status and amount
+    //     sqlx::query!(
+    //         r#"UPDATE orders o
+    //            SET o.actual_amount = (
+    //                SELECT SUM(od.actual_amount)
+    //                FROM order_details od
+    //                WHERE od.order_id = o.id
+    //            ),
+    //            o.total_amount = (
+    //                SELECT SUM(od.total_amount)
+    //                FROM order_details od
+    //                WHERE od.order_id = o.id
+    //            ),
+    //            o.discount_amount = (
+    //                SELECT SUM(od.total_amount - od.actual_amount)
+    //                FROM order_details od
+    //                WHERE od.order_id = o.id
+    //            ),
+    //            o.stocked_at = NOW(),
+    //            o.order_status = ?,
+    //            o.stocked_by = ? 
+    //            WHERE o.id = ?"#,
+    //         next.to_str(),
+    //         deliver_to_market_dto.stocked_by,
+    //         order_id
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!(
+    //         "Failed to update order amount and status from SupplierPreparing to SupplierDelivering"
+    //     ))?;
+
+    //     sqlx::query!(
+    //         r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+    //         order_id, &order_status_str, next.to_str(), deliver_to_market_dto.stocked_by, action.description()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to insert order status history from SupplierPreparing to SupplierDelivering"))?;
+
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     Ok(())
+    // }
 
     /// 订单内商品签收，退货，换货操作
     /// 该操作只对订单内单个商品进行操作，不涉及订单状态的变更
-    async fn process_order_receipt(
-        &self,
-        receipt: &OrderReceipt,
-        operator: &str,
-        transaction_id: &str,
-    ) -> Result<(), AppError> {
-        // 验证订单存在且状态正确
-        let record = sqlx::query!(
-            r#"SELECT o.id, od.id as detail_id, o.order_status
-               FROM orders o 
-               JOIN order_details od ON o.id = od.order_id 
-               WHERE o.order_code = ? AND od.id = ?"#,
-            receipt.order_code,
-            receipt.order_detail_id
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to find order"))?
-        .ok_or_else(|| {
-            AppError::NotFound(format!(
-                "Order {} with order detail id {} not found",
-                receipt.order_code, receipt.order_detail_id
-            ))
-        })?;
+    // async fn process_order_receipt(
+    //     &self,
+    //     receipt: &OrderReceipt,
+    //     operator: &str,
+    //     transaction_id: &str,
+    // ) -> Result<(), AppError> {
+    //     // 验证订单存在且状态正确
+    //     let record = sqlx::query!(
+    //         r#"SELECT o.id, od.id as detail_id, o.order_status, od.actual_quantity, od.actual_price
+    //            FROM orders o 
+    //            JOIN order_details od ON o.id = od.order_id 
+    //            WHERE o.order_code = ? AND od.id = ?"#,
+    //         receipt.order_code,
+    //         receipt.order_detail_id
+    //     )
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to find order"))?
+    //     .ok_or_else(|| {
+    //         AppError::NotFound(format!(
+    //             "Order {} with order detail id {} not found",
+    //             receipt.order_code, receipt.order_detail_id
+    //         ))
+    //     })?;
 
-        // 处理凭证证据（如果有的话）
-        let evidence_json = match &receipt.evidence_images {
-            Some(evidence_images) if !evidence_images.is_empty() => {
-                Some(serde_json::to_string(evidence_images).map_err(|e| {
-                    AppError::Internal(format!("Failed to serialize evidence: {}", e))
-                })?)
-            }
-            _ => None,
-        };
+    //     // 处理凭证证据（如果有的话）
+    //     let evidence_json = match &receipt.evidence_images {
+    //         Some(evidence_images) if !evidence_images.is_empty() => {
+    //             Some(serde_json::to_string(evidence_images).map_err(|e| {
+    //                 AppError::Internal(format!("Failed to serialize evidence: {}", e))
+    //             })?)
+    //         }
+    //         _ => None,
+    //     };
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        let detail_id = record.detail_id;
+    //     let order_id = record.id;
+    //     let detail_id = record.detail_id;
+    //     let actual_quantity = record.actual_quantity.unwrap_or(Decimal::from(0));
+    //     let actual_price = record.actual_price;
 
-        match receipt.operation_type {
-            ReceiptOperationType::Sign => {
-                // 处理正常签收
-                debug!("Process normal sign receipt: {:?}", receipt);
-                sqlx::query!(
-                    r#"UPDATE order_details 
-                      SET status = 'SIGN', 
-                        receipt_quantity = ?, 
-                        receipt_date = NOW(), 
-                        receipt_notes = ?,
-                        receipt_evidence = ?,
-                        actual_quantity = ?,
-                        actual_amount = actual_price * ?
-                      WHERE id = ?"#,
-                    receipt.quantity,
-                    receipt.reason,
-                    evidence_json,
-                    receipt.quantity,
-                    receipt.quantity,
-                    detail_id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update receipt status"))?;
-            }
-            ReceiptOperationType::Return => {
-                // 处理退货
-                sqlx::query!(
-                    r#"UPDATE order_details 
-                      SET status = 'RETURNED', 
-                        receipt_quantity = actual_quantity - ?, 
-                        receipt_date = NOW(), 
-                        receipt_notes = ?,
-                        receipt_evidence = ?
-                      WHERE id = ?"#,
-                    receipt.quantity,
-                    receipt.reason,
-                    evidence_json,
-                    detail_id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update return status"))?;
+    //     let actual_quantity_diff = actual_quantity - receipt.quantity;
+    //     let actual_amount_diff = actual_price * actual_quantity_diff;
 
-                // 创建退货记录
-                let operation_type_str = String::from(ReceiptOperationType::Return);
-                let return_exchange_id = sqlx::query!(
-                    r#"INSERT INTO return_exchange_records 
-                      (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)"#,
-                    detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to create return record"))?
-                .last_insert_id();
+    //     match receipt.operation_type {
+    //         ReceiptOperationType::Sign => {
+    //             // 处理正常签收
+    //             debug!("Process normal sign receipt: {:?}", receipt);
+    //             sqlx::query!(
+    //                 r#"UPDATE order_details 
+    //                   SET status = 'SIGN', 
+    //                     receipt_quantity = ?, 
+    //                     receipt_date = NOW(), 
+    //                     receipt_notes = ?,
+    //                     receipt_evidence = ?,
+    //                     actual_quantity = ?,
+    //                     actual_amount = actual_amount - ?
+    //                   WHERE id = ?"#,
+    //                 receipt.quantity, // 签收数量
+    //                 receipt.reason,
+    //                 evidence_json,
+    //                 receipt.quantity,
+    //                 actual_amount_diff,
+    //                 detail_id
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to update receipt status"))?;
 
-                let order_id_and_actual_price = sqlx::query!(
-                    r#"SELECT order_id, actual_price FROM order_details WHERE id = ?"#,
-                    detail_id
-                )
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to get price"))?;
+    //             // 处理签收数量与实际数量不一致的情况，更新订单实际总金额
+    //             sqlx::query!(
+    //                 r#"UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?"#,
+    //                 actual_amount_diff,
+    //                 order_id
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to update order total amount"))?;
+    //         }
+    //         ReceiptOperationType::Return => {
+    //             // 处理退货
+    //             sqlx::query!(
+    //                 r#"UPDATE order_details 
+    //                   SET status = 'RETURNED', 
+    //                     receipt_quantity = actual_quantity - ?, 
+    //                     receipt_date = NOW(), 
+    //                     receipt_notes = ?,
+    //                     receipt_evidence = ?,
+    //                     actual_quantity = actual_quantity - ?,
+    //                     actual_amount = ?    
+    //                   WHERE id = ?"#,
+    //                 receipt.quantity,
+    //                 receipt.reason,
+    //                 evidence_json,
+    //                 receipt.quantity, // 退货数量
+    //                 actual_amount_diff,
+    //                 detail_id
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to update return status"))?;
 
-                // 退货要将订单总金额减去退货金额
-                sqlx::query!(
-                    r#"UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?"#,
-                    order_id_and_actual_price.actual_price * receipt.quantity,
-                    order_id_and_actual_price.order_id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update order total amount"))?;
+    //             // 处理签收数量与实际数量不一致的情况，更新订单实际总金额
+    //             sqlx::query!(
+    //                 r#"UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?"#,
+    //                 receipt.quantity * actual_price,
+    //                 order_id
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to update order total amount"))?;
 
-                sqlx::query!(
-                    r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id, status, created_by)
-                      VALUES (?, ?, ?, ?, ?, ?)"#,
-                    return_exchange_id, order_id_and_actual_price.actual_price * receipt.quantity, "ORIGINAL", transaction_id, "PENDING", operator
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to create refund record"))?;
-            }
-            ReceiptOperationType::Exchange => {
-                // 处理换货, 换货不涉及退款，订单总金额不变
-                sqlx::query!(
-                    r#"UPDATE order_details 
-                      SET status = 'EXCHANGED', 
-                        receipt_quantity = actual_quantity - ?, 
-                        receipt_date = NOW(), 
-                        receipt_notes = ?,
-                        receipt_evidence = ?
-                      WHERE id = ?"#,
-                    receipt.quantity,
-                    receipt.reason,
-                    evidence_json,
-                    detail_id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update exchange status"))?;
+    //             // 创建退货记录
+    //             let operation_type_str = String::from(ReceiptOperationType::Return);
+    //             let return_exchange_id = sqlx::query!(
+    //                 r#"INSERT INTO return_exchange_records 
+    //                   (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
+    //                   VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+    //                 detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to create return record"))?
+    //             .last_insert_id();
 
-                // 创建换货记录
-                let operation_type_str = String::from(ReceiptOperationType::Exchange);
-                let return_exchange_id = sqlx::query!(
-                    r#"INSERT INTO return_exchange_records 
-                      (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)"#,
-                    detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to create exchange record"))?
-                .last_insert_id();
+    //             sqlx::query!(
+    //                 r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id, status, created_by)
+    //                   VALUES (?, ?, ?, ?, ?, ?)"#,
+    //                 return_exchange_id, actual_amount_diff, "ORIGINAL", transaction_id, "PENDING", operator
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to create refund record"))?;
+    //         }
+    //         ReceiptOperationType::Exchange => {
+    //             sqlx::query!(
+    //                 r#"UPDATE order_details 
+    //                   SET status = 'EXCHANGED', 
+    //                     receipt_quantity = quantity - ?, 
+    //                     receipt_date = NOW(), 
+    //                     receipt_notes = ?,
+    //                     receipt_evidence = ?,
+    //                     actual_quantity = quantity - ?,
+    //                     actual_amount = actual_amount + ?
+    //                   WHERE id = ?"#,
+    //                 receipt.quantity,
+    //                 receipt.reason,
+    //                 evidence_json,
+    //                 receipt.quantity,
+    //                 actual_amount_diff,
+    //                 detail_id
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to update exchange status"))?;
 
-                let price = sqlx::query!(
-                    r#"SELECT actual_price FROM order_details WHERE id = ?"#,
-                    detail_id
-                )
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to get price"))?;
-                sqlx::query!(
-                            r#"INSERT INTO exchange_items
-                              (return_exchange_id, product_code, product_name, quantity, price, total_amount)
-                              VALUES (?, ?, ?, ?, ?, ?)"#,
-                    return_exchange_id, receipt.product_code, receipt.product_name, receipt.quantity, price.actual_price, price.actual_price * receipt.quantity
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to create exchange item"))?;
-            }
-        }
+    //             // 创建换货记录
+    //             let operation_type_str = String::from(ReceiptOperationType::Exchange);
+    //             let return_exchange_id = sqlx::query!(
+    //                 r#"INSERT INTO return_exchange_records 
+    //                   (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
+    //                   VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+    //                 detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to create exchange record"))?
+    //             .last_insert_id();
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(())
-    }
+    //             sqlx::query!(
+    //                         r#"INSERT INTO exchange_items
+    //                           (return_exchange_id, product_code, product_name, quantity, price, total_amount)
+    //                           VALUES (?, ?, ?, ?, ?, ?)"#,
+    //                 return_exchange_id, receipt.product_code, receipt.product_name, receipt.quantity, actual_price, actual_price * receipt.quantity
+    //             )
+    //             .execute(&mut *tx)
+    //             .await
+    //             .map_err(map_db_err!("Failed to create exchange item"))?;
+    //         }
+    //     }
 
-    async fn update_order_status(
-        &self,
-        tenant_type: TenantType,
-        _tenant_hash: &str,
-        order_code: &str,
-        action: OrderAction,
-        // target_status: OrderStatus,
-        operator: &str,
-    ) -> Result<OrderStatus, AppError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     Ok(())
+    // }
 
-        // Use SELECT FOR UPDATE to lock the record, prevent concurrent modification
-        let order = sqlx::query!(
-            r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
-            order_code
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to get order"))?
-        .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+    // async fn update_order_status(
+    //     &self,
+    //     tenant_type: TenantType,
+    //     _tenant_hash: &str,
+    //     order_code: &str,
+    //     action: OrderAction,
+    //     operator: &str,
+    // ) -> Result<OrderStatus, AppError> {
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        let current_status = OrderStatus::try_from(order.order_status.as_str())?;
+    //     // Use SELECT FOR UPDATE to lock the record, prevent concurrent modification
+    //     let order = sqlx::query!(
+    //         r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
+    //         order_code
+    //     )
+    //     .fetch_optional(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order"))?
+    //     .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
 
-        let next_status = OrderStateMachine::next_state(current_status, action, tenant_type)
-            .map_err(|e| {
-                error!("Order state transition error: {}", e);
-                AppError::Validation(format!(
-                    "Order status is not correct: {} -> {}",
-                    order.order_status,
-                    action.description()
-                ))
-            })?;
+    //     let current_status = OrderStatus::try_from(order.order_status.as_str())?;
 
-        debug!("Next status: {}", next_status);
-        if next_status == OrderStatus::MarketDelivering {
-            sqlx::query!(
-                r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
-                order.id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update sub order status"))?;
-        }
+    //     let next_status = OrderStateMachine::next_state(current_status, action, tenant_type)
+    //         .map_err(|e| {
+    //             error!("Order state transition error: {}", e);
+    //             AppError::Validation(format!(
+    //                 "Order status is not correct: {} -> {}",
+    //                 order.order_status,
+    //                 action.description()
+    //             ))
+    //         })?;
 
-        sqlx::query!(
-            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
-            next_status.to_str(),
-            order.id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to update order status"))?;
+    //     debug!("Next status: {}", next_status);
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, order.order_status, next_status.to_str(), operator, action.description()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+    //     // 因市场前面验收过，对 order_details 表中的 status 进行重置到待验收
+    //     if next_status == OrderStatus::MarketDelivering {
+    //         sqlx::query!(
+    //             r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
+    //             order.id
+    //         )
+    //         .execute(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!("Failed to update sub order status"))?;
+    //     }
 
-        debug!("Order status updated to {}", next_status);
+    //     sqlx::query!(
+    //         r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+    //         next_status.to_str(),
+    //         order.id
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to update order status"))?;
 
-        // 如果是客户开始验收，则需要重置子订单状态到待验收
-        if tenant_type == TenantType::Customer && action == OrderAction::CustomerInspect {
-            sqlx::query!(
-                r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
-                order.id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to reset sub order status"))?;
-        }
+    //     sqlx::query!(
+    //         r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+    //         order.id, order.order_status, next_status.to_str(), operator, action.description()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to insert order status history"))?;
 
-        // 如果客户直接确认收货，则将子订单更新到
-        if tenant_type == TenantType::Customer && action == OrderAction::Complete {
-            sqlx::query!(
-                r#"UPDATE order_details SET status = 'SIGN' WHERE order_id = ?"#,
-                order.id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update sub order status"))?;
-        }
+    //     debug!("Order status updated to {}", next_status);
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(next_status)
-    }
+    //     // 如果是客户开始验收，则需要重置子订单状态到待验收
+    //     // if tenant_type == TenantType::Customer && action == OrderAction::CustomerInspect {
+    //     //     sqlx::query!(
+    //     //         r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
+    //     //         order.id
+    //     //     )
+    //     //     .execute(&mut *tx)
+    //     //     .await
+    //     //     .map_err(map_db_err!("Failed to reset sub order status"))?;
+    //     // }
+
+    //     // 如果客户直接确认收货，则将子订单更新到
+    //     if tenant_type == TenantType::Customer && action == OrderAction::Complete {
+    //         sqlx::query!(
+    //             r#"UPDATE order_details SET status = 'SIGN' WHERE order_id = ?"#,
+    //             order.id
+    //         )
+    //         .execute(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!("Failed to update sub order status"))?;
+    //     }
+
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     Ok(next_status)
+    // }
 
     async fn get_after_sale_orders_by_tenant(
         &self,
@@ -1281,111 +1330,126 @@ impl OrderRepository for MySqlRepository {
         Ok(orders)
     }
 
-    async fn exchange_deliver_to_market(
-        &self,
-        order_code: &str,
-        operator: &str,
-        provider_hash: &str,
-        exchange_dto: &ExchangeDTO,
-    ) -> Result<(), AppError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+    // async fn exchange_deliver_to_market(
+    //     &self,
+    //     order_code: &str,
+    //     operator: &str,
+    //     _provider_hash: &str,
+    //     exchange_dto: &ExchangeDTO,
+    // ) -> Result<(), AppError> {
+    //     let provider_hash = _provider_hash;
+    //     debug!(
+    //         "Provider {} delivers exchange items for order {}",
+    //         provider_hash, order_code
+    //     );
+    //     let (_order_id, _) = self
+    //         .fetch_provider_order(
+    //             provider_hash,
+    //             order_code,
+    //             "Provider does not own this order",
+    //         )
+    //         .await?;
 
-        let order = sqlx::query!(
-            r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
-            order_code
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to get order"))?
-        .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+    //     let mut tx = self
+    //         .pool
+    //         .begin()
+    //         .await
+    //         .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        let next = Self::validate_and_transition_order_state(
-            order.order_status.as_str(),
-            OrderAction::DeliverToMarket,
-            TenantType::Provider,
-            &format!(
-                "Order status is not correct: {} -> {}",
-                order.order_status,
-                OrderStatus::ExchangeDelivering.to_str()
-            )
-            .as_str(),
-        )?;
+    //     let order = sqlx::query!(
+    //         r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
+    //         order_code
+    //     )
+    //     .fetch_optional(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order"))?
+    //     .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
 
-        for item in exchange_dto.items.iter() {
-            let id = item.id;
-            let actual_quantity = item.actual_quantity;
-            //let requested_quantity = item.requested_quantity;
+    //     let next = Self::validate_and_transition_order_state(
+    //         order.order_status.as_str(),
+    //         OrderAction::DeliverToMarket,
+    //         TenantType::Provider,
+    //         &format!(
+    //             "Order status is not correct: {} -> {}",
+    //             order.order_status,
+    //             OrderStatus::ExchangeDelivering.to_str()
+    //         )
+    //         .as_str(),
+    //     )?;
 
-            sqlx::query!(
-                r#"UPDATE order_details SET actual_quantity = receipt_quantity + ?, actual_amount = actual_price * ( receipt_quantity + ? ),
-                   total_amount = original_price * ( receipt_quantity + ? ) WHERE order_id = ? AND id = ?"#,
-                actual_quantity, actual_quantity, actual_quantity, order.id, id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update actual quantity"))?;
-        }
+    //     for item in exchange_dto.items.iter() {
+    //         let id = item.id;
+    //         let actual_quantity = item.actual_quantity;
+    //         //let requested_quantity = item.requested_quantity;
 
-        sqlx::query!(
-            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
-            next.to_str(),
-            order.id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to update order status"))?;
+    //         sqlx::query!(
+    //             r#"UPDATE order_details SET actual_quantity = receipt_quantity + ?, actual_amount = actual_price * ( receipt_quantity + ? ),
+    //                total_amount = original_price * ( receipt_quantity + ? ) WHERE order_id = ? AND id = ?"#,
+    //             actual_quantity, actual_quantity, actual_quantity, order.id, id
+    //         )
+    //         .execute(&mut *tx)
+    //         .await
+    //         .map_err(map_db_err!("Failed to update actual quantity"))?;
+    //     }
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, order.order_status, next.to_str(), operator, OrderAction::DeliverToMarket.description()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+    //     sqlx::query!(
+    //         r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+    //         next.to_str(),
+    //         order.id
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to update order status"))?;
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
-        Ok(())
-    }
+    //     sqlx::query!(
+    //         r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+    //         order.id, order.order_status, next.to_str(), operator, OrderAction::DeliverToMarket.description()
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to insert order status history"))?;
 
-    async fn get_exchange_and_return_order_details_by_order_code(
-        &self,
-        order_code: &str,
-    ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError> {
-        let order_details = sqlx::query_as!(
-            ExchangeAndReturnOrderDetailResponse,
-            r#"
-                SELECT
-                    rer.order_detail_id      AS "order_detail_id!",
-                    rer.operation_type       AS "operation_type!",
-                    rer.quantity             AS "quantity!",
-                    rer.reason               AS "reason!",
-                    p.unit                   AS "unit!",
-                    rer.status               AS "status!",
-                    p.name                   AS "product_name!",
-                    rer.evidence_images      AS "evidence_images?",
-                    rer.processed_by         AS "processed_by?",
-                    rer.processed_at         AS "processed_at?",
-                    rer.actual_quantity      AS "actual_quantity?"
-                FROM return_exchange_records rer
-                INNER JOIN order_details od ON od.id = rer.order_detail_id
-                INNER JOIN orders o ON o.id = od.order_id
-                INNER JOIN products p ON p.product_code = od.product_code
-                WHERE o.order_code = ?
-                ORDER BY rer.created_at DESC
-                "#,
-            order_code
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get exchange and return order details"))?;
-        Ok(order_details)
-    }
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     Ok(())
+    // }
+
+    // async fn get_exchange_and_return_order_details_by_order_code(
+    //     &self,
+    //     order_code: &str,
+    // ) -> Result<Vec<ExchangeAndReturnOrderDetailResponse>, AppError> {
+    //     let order_details = sqlx::query_as!(
+    //         ExchangeAndReturnOrderDetailResponse,
+    //         r#"
+    //             SELECT
+    //                 rer.order_detail_id      AS "order_detail_id!",
+    //                 rer.operation_type       AS "operation_type!",
+    //                 rer.quantity             AS "quantity!",
+    //                 rer.reason               AS "reason!",
+    //                 p.unit                   AS "unit!",
+    //                 rer.status               AS "status!",
+    //                 p.name                   AS "product_name!",
+    //                 rer.evidence_images      AS "evidence_images?",
+    //                 rer.processed_by         AS "processed_by?",
+    //                 rer.processed_at         AS "processed_at?",
+    //                 rer.actual_quantity      AS "actual_quantity?"
+    //             FROM return_exchange_records rer
+    //             INNER JOIN order_details od ON od.id = rer.order_detail_id
+    //             INNER JOIN orders o ON o.id = od.order_id
+    //             INNER JOIN products p ON p.product_code = od.product_code
+    //             WHERE o.order_code = ?
+    //             ORDER BY rer.created_at DESC
+    //             "#,
+    //         order_code
+    //     )
+    //     .fetch_all(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!(
+    //         "Failed to get exchange and return order details"
+    //     ))?;
+    //     Ok(order_details)
+    // }
 }
 
 // #[cfg(test)]

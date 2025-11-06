@@ -82,7 +82,6 @@ pub(crate) fn validate_apprive_status(status: &str) -> Result<(), ValidationErro
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

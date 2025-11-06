@@ -1,8 +1,8 @@
+use crate::{common::AppError, map_db_err};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tracing::error;
-use crate::{common::AppError, map_db_err};
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub(crate) struct MessageDto {
@@ -32,13 +32,12 @@ impl MessageDto {
         .map_err(map_db_err!("Failed to fetch unread messages"))?;
 
         Ok(messages)
-       
     }
 
     pub(crate) async fn update_message_to_read(
         pool: &sqlx::MySqlPool,
         message_id: i32,
-        username: &str
+        username: &str,
     ) -> Result<bool, sqlx::Error> {
         let affected = sqlx::query(
             r#"UPDATE messages m SET m.is_read = true 

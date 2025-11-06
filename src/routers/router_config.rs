@@ -7,9 +7,9 @@ use axum::{
     Extension, Json, Router,
 };
 use hyper::{header, Method};
-use tower_http::cors::CorsLayer;
 use sqlx::MySqlPool;
 use tower::ServiceBuilder;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
@@ -18,35 +18,25 @@ use crate::{
     common::AppError,
     dto,
     middleware::{
-        auth::{AppState, auth_middleware}, context::inject_request_context, logging_layer::LoggingLayer, 
+        auth::{auth_middleware, AppState},
+        context::inject_request_context,
+        logging_layer::LoggingLayer,
     },
-    repositories::{
-        my_sql_repository::MySqlRepository, 
-        system_log_repo::MySqlSystemLogRepository,
-        
-    },
+    repositories::{my_sql_repository::MySqlRepository, system_log_repo::MySqlSystemLogRepository},
     services::{
         auth_service::{login, register},
-        price_services::get_price_announcements,
         category_services::get_level_one_categories,
+        price_services::get_price_announcements,
         superadmin_services::super_admin_login,
         system_log_service::SystemLogService,
     },
 };
 
 use super::{
-    workspace::workspace_routes,
-    users::user_routes,
-    categories::categories_routes,
-    orders::order_routes,
-    
-    delivery_staff::delivery_staff_routes,
-    discounts::discount_routes,
-    prices::prices_routes,
-    products::products_routes,
-    tenants::tenant_routes,
-    roles::roles_routes,
-    reconciliation_statement::reconciliation_statement_routes
+    categories::categories_routes, delivery_staff::delivery_staff_routes,
+    discounts::discount_routes, orders::order_routes, prices::prices_routes,
+    products::products_routes, reconciliation_statement::reconciliation_statement_routes,
+    roles::roles_routes, tenants::tenant_routes, users::user_routes, workspace::workspace_routes,
 };
 
 #[derive(OpenApi)]
@@ -122,7 +112,6 @@ fn configure_routes(pool: &MySqlPool) -> Router {
     let log_service = Arc::new(SystemLogService::new(log_repo));
     let logging_layer = LoggingLayer::new(Arc::clone(&log_service));
 
-
     let mysql = Arc::new(MySqlRepository::new(pool.clone()));
 
     let shared_state = AppState {
@@ -142,15 +131,20 @@ fn configure_routes(pool: &MySqlPool) -> Router {
         .merge(reconciliation_statement_routes())
         .merge(discount_routes())
         .layer(logging_layer)
-        .layer(axum::middleware::from_fn_with_state(shared_state.clone(), auth_middleware));
+        .layer(axum::middleware::from_fn_with_state(
+            shared_state.clone(),
+            auth_middleware,
+        ));
 
-        public_routes.with_state(shared_state).merge(protected_routes)
+    public_routes
+        .with_state(shared_state)
+        .merge(protected_routes)
 }
 
 pub(crate) fn create_router(pool: &MySqlPool) -> Router {
     let cors = configure_cors();
     let routes = configure_routes(pool);
-    
+
     let my_sql_repository = MySqlRepository::new(pool.clone());
     Router::new()
         .merge(routes)
