@@ -1,5 +1,4 @@
 use axum::{extract::Path, Extension};
-use tracing::info;
 
 use crate::{
     common::{ApiResponse, AppError},
@@ -22,11 +21,7 @@ pub(crate) async fn create_order<T>(
 where
     T: CustomerOrderRepository + Send + Sync,
 {
-    let order_code = repo.create_order(&claims.tenant_hash, &order).await?;
-    info!(
-        "User {} create order {} success",
-        claims.username, order_code
-    );
+    let order_code = repo.create_order(&claims, &order).await?;
     Ok(Json(ApiResponse::created(Some(order_code), &context)))
 }
 

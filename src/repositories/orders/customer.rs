@@ -5,6 +5,7 @@ use crate::{
     // dto::category::CategoryLevel1Row,
     map_db_err,
     repositories::{my_sql_repository::MySqlRepository, generate_code, CodeType},
+    models::{claims::Claims, order_action::OrderAction},
 };
 
 use async_trait::async_trait;
@@ -25,7 +26,7 @@ pub(crate) trait CustomerOrderRepository: Send + Sync {
     /// # Returns
     /// A result containing the order response if the order is created successfully
     /// or the error if the order is not created
-    async fn create_order(&self, customer_hash: &str, order_payload: &CreateOrderDTO) -> Result<String, AppError>;
+    async fn create_order(&self, claims: &Claims, order_payload: &CreateOrderDTO) -> Result<String, AppError>;
 }
 
 impl MySqlRepository {
@@ -263,14 +264,15 @@ impl MySqlRepository {
 
 #[async_trait]
 impl CustomerOrderRepository for MySqlRepository {
-    async fn create_order(&self, customer_hash: &str, order_payload: &CreateOrderDTO) -> Result<String, AppError> {
+    async fn create_order(&self, claims: &Claims, order_payload: &CreateOrderDTO) -> Result<String, AppError> {
          // Fetch customer information with early return for better error handling
          let record = sqlx::query!(
             r#"SELECT t.id AS customer_id, t.name AS customer_name, tr.market_id 
                FROM tenants t 
                INNER JOIN tenant_relationships tr ON tr.provider_id = t.id 
-               WHERE t.name_hash = ? AND tr.status = 'ACTIVE' AND t.tenant_type = 'CUSTOMER'"#,
-            customer_hash
+               WHERE t.name_hash = ? AND tr.status = 'ACTIVE' AND t.tenant_type = ?"#,
+            claims.tenant_hash,
+            claims.tenant_type
         )
         .fetch_optional(&self.pool)
         .await
@@ -330,6 +332,18 @@ impl CustomerOrderRepository for MySqlRepository {
                 AppError::Internal(e.to_string())
             })?;
 
+        // create a record in order_status_history table
+        sqlx::query!(
+            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason) VALUES (?, ?, ?, ?, ?)"#,
+            order_id,
+            "NONE".to_string(),
+            "PENDING".to_string(),
+            claims.real_name,
+            OrderAction::Create.description()
+            
+        )
+        .execute(&mut *tx)
+        .await.map_err(map_db_err!("Failed to create order status history"))?;
         // Commit transaction
         tx.commit()
             .await
