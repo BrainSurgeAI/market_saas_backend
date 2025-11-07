@@ -72,6 +72,7 @@ pub struct SuperAdminLoginRequest {
 /// ## Fields
 /// * `phone_number` - Phone number of the user
 #[derive(Deserialize, Debug, Validate, PartialEq, Eq, Clone, ToSchema)]
+#[allow(dead_code)]
 pub struct VerifyCodeRequestDTO {
     #[validate(custom(function = validate_phone))]
     #[serde(rename = "phone")]
@@ -83,6 +84,7 @@ pub struct VerifyCodeRequestDTO {
 /// ## Fields
 /// * `code` - Code of the user
 #[derive(Deserialize, Debug, PartialEq, Clone)]
+#[allow(dead_code)]
 pub struct VerifyCodeResponseDTO {
     pub code: String,
 }

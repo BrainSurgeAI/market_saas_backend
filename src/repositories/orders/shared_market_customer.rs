@@ -10,8 +10,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 #[async_trait]
 pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {

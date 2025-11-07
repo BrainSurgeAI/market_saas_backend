@@ -37,6 +37,7 @@ pub(crate) struct ApiResponse<T> {
     pub(crate) timestamp: DateTime<Utc>,
 }
 
+#[allow(dead_code)]
 impl<T> ApiResponse<T> {
     /// Creates a success response with default 200 status code
     ///
@@ -141,6 +142,7 @@ impl<T> ApiResponse<T> {
     }
 }
 
+#[allow(dead_code)]
 // Convenience methods for common success responses
 impl<T> ApiResponse<T> {
     /// Creates a 200 OK response with data

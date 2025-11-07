@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use sqlx::{MySql, Pool};
 use std::sync::Arc;
 
+#[allow(dead_code)]
 #[async_trait]
 pub trait SystemLogRepository: Send + Sync {
     async fn log_info(&self, log: SystemLogDTO) -> Result<(), AppError>;

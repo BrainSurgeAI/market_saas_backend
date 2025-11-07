@@ -6,8 +6,8 @@ use axum::{
 
 use thiserror::Error;
 use validator::ValidationErrors;
-
 use super::response::ApiResponse;
+
 
 /// Application-specific error types with better performance and structure
 #[derive(Error, Debug)]
@@ -45,6 +45,7 @@ pub struct ErrorContext {
     pub message: String,
 }
 
+#[allow(dead_code)]
 impl AppError {
     /// Create an authentication error
     pub fn auth<T: Into<String>>(msg: T) -> Self {

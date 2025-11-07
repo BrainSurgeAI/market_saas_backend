@@ -4,7 +4,7 @@ use tracing::info;
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        order::{CreateOrderDTO, OrderResponse},
+        order::CreateOrderDTO,
         ValidatedJSON,
     },
     middleware::context::RequestContext,
@@ -30,11 +30,12 @@ where
     Ok(Json(ApiResponse::created(Some(order_code), &context)))
 }
 
+#[allow(dead_code)]
 pub(crate) async fn exchange_deliver_to_market<T>(
-    Extension(repo): Extension<T>,
+    Extension(_repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(order_code): Path<String>,
+    Path(_order_code): Path<String>,
   //  ValidatedJSON(exchange_dto): ValidatedJSON<ExchangeDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where

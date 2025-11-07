@@ -1,14 +1,14 @@
 use crate::{
     common::AppError,
-    dto::order::{CreateOrderDTO, OrderResponse},
+    dto::order::CreateOrderDTO,
     // 以下导入已注释，如果将来需要查询分类层级映射时，可以取消注释
     // dto::category::CategoryLevel1Row,
-    models::order_status::OrderStatus,
     map_db_err,
     repositories::{my_sql_repository::MySqlRepository, generate_code, CodeType},
 };
 
 use async_trait::async_trait;
+
 use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 use tracing::{debug, error, info};
@@ -316,8 +316,7 @@ impl CustomerOrderRepository for MySqlRepository {
             order_payload.delivery_info.delivery_address,
             order_payload.delivery_info.contact_name,
             order_payload.delivery_info.contact_phone,
-            record.customer_name
-        )
+            record.customer_name)
         .execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to create order"))?
