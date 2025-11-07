@@ -50,3 +50,10 @@ pub(crate) struct SubCategoryResponseDto {
 
     pub(crate) name: String,
 }
+
+#[allow(dead_code)]
+#[derive(sqlx::FromRow)]
+pub(crate) struct CategoryLevel1Row {
+    pub(crate) category_id: i32,
+    pub(crate) level1_category_id: Option<i32>,
+}
