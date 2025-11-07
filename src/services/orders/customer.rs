@@ -4,7 +4,7 @@ use tracing::info;
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        order::{CreateOrderDTO, ExchangeDTO, OrderResponse},
+        order::{CreateOrderDTO, OrderResponse},
         ValidatedJSON,
     },
     middleware::context::RequestContext,
@@ -18,16 +18,16 @@ pub(crate) async fn create_order<T>(
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     ValidatedJSON(order): ValidatedJSON<CreateOrderDTO>,
-) -> Result<Json<ApiResponse<OrderResponse>>, AppError>
+) -> Result<Json<ApiResponse<String>>, AppError>
 where
     T: CustomerOrderRepository + Send + Sync,
 {
-    let order_response = repo.create_order(&claims.tenant_hash, &order).await?;
+    let order_code = repo.create_order(&claims.tenant_hash, &order).await?;
     info!(
         "User {} create order {} success",
-        claims.username, order_response.order_code
+        claims.username, order_code
     );
-    Ok(Json(ApiResponse::new(Some(order_response), &context)))
+    Ok(Json(ApiResponse::created(Some(order_code), &context)))
 }
 
 pub(crate) async fn exchange_deliver_to_market<T>(
