@@ -177,6 +177,7 @@ where
             tenant_name: payload.tenant_name,
             tenant_hash: tenant_hash_name,
             username: payload.username,
+            real_name: payload.name,
             roles: vec![roles],
             is_super_admin: false,
             exp: chrono::Utc::now()
@@ -349,6 +350,7 @@ where
         tenant_type: tenant.tenant_type,
         tenant_name: tenant.name,
         tenant_hash: tenant.name_hash,
+        real_name: user_auth.real_name,
         username: payload.username,
         roles: vec![user_auth.roles.to_string()],
         is_super_admin: user_auth.is_super_admin,

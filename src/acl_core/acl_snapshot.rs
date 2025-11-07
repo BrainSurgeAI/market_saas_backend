@@ -169,6 +169,7 @@ mod tests {
             tenant_name: tenant_name.to_string(),
             tenant_hash: "kkkk".to_string(),
             username: username.to_string(),
+            real_name: "test".to_string(),
             roles,
             exp: 9999999999,
             is_super_admin,

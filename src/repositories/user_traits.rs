@@ -180,7 +180,7 @@ impl UserRepository for MySqlRepository {
         username: &str,
     ) -> Result<Option<UserPermission>, AppError> {
         sqlx::query_as::<_, UserPermission>(
-            "SELECT u.id, u.username, u.password_hash, u.is_super_admin,
+            "SELECT u.id, u.name as real_name, u.username, u.password_hash, u.is_super_admin,
             GROUP_CONCAT(DISTINCT r.name) as roles, 
             GROUP_CONCAT(DISTINCT p.name) as permissions
             FROM users u INNER JOIN user_roles ur ON u.id = ur.user_id

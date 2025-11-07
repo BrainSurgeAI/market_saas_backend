@@ -2,13 +2,10 @@ use axum::{Extension, Json};
 use tracing::{error, info, warn};
 
 use crate::common::{ApiResponse, AppError};
-use crate::dto::auth::{ResetPasswordDto, SuperAdminLoginRequest};
-use crate::dto::ValidatedJSON;
-use crate::middleware::auth::create_jwt;
-use crate::middleware::context::RequestContext;
+use crate::dto::{auth::{ResetPasswordDto, SuperAdminLoginRequest}, ValidatedJSON};
+use crate::middleware::{auth::create_jwt, context::RequestContext};
 use crate::models::claims::Claims;
-use crate::repositories::superadmin_traits::SuperAdminRepository;
-use crate::repositories::user_traits::UserRepository;
+use crate::repositories::{superadmin_traits::SuperAdminRepository, user_traits::UserRepository};
 
 /// # Request Verify Code
 ///
@@ -24,7 +21,7 @@ use crate::repositories::user_traits::UserRepository;
 //     Ok(())
 // }
 
-pub async fn super_admin_login<T, U>(
+pub(crate) async fn super_admin_login<T, U>(
     Extension(super_admin_repo): Extension<T>,
     Extension(user_repo): Extension<U>,
     Extension(context): Extension<RequestContext>,
@@ -56,6 +53,7 @@ where
         tenant_name: "SUPER_ADMIN".to_string(),
         tenant_hash: "SUPER_ADMIN".to_string(),
         username: payload.username,
+        real_name: user_auth.real_name,
         roles: vec![user_auth.roles.to_string()],
 
         is_super_admin: user_auth.is_super_admin,
@@ -74,7 +72,7 @@ where
     Ok(Json(ApiResponse::new(Some(token), &context)))
 }
 
-pub async fn reset_password<T>(
+pub(crate) async fn reset_password<T>(
     Extension(super_admin_repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
