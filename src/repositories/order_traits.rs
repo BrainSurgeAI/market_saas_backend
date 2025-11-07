@@ -1,27 +1,18 @@
 use crate::{
     common::AppError,
     dto::order::{
-        AcceptedOrderResponseDTO, CreateOrderDTO, DeliverToMarketDTO,
-        ExchangeAndReturnOrderDetailResponse, ExchangeDTO, OrderDetail, OrderDetailResponse,
-        OrderItem, OrderQueryParams, OrderReceipt, OrderResponse, ProductsSummaryWithOrdersDTO,
-        ReceiptOperationType,
+        AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO,
     },
     map_db_err,
     models::{
-        order_action::OrderAction, order_machine::OrderStateMachine, order_status::OrderStatus,
         tenant_type::TenantType,
     },
-    repositories::{generate_code, CodeType},
 };
 
 use super::my_sql_repository::MySqlRepository;
 use async_trait::async_trait;
-use chrono::NaiveDate;
 
-use rust_decimal::Decimal;
-
-use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 #[async_trait]
 pub(crate) trait OrderRepository: Send + Sync {
