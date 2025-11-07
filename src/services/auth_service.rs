@@ -308,43 +308,39 @@ where
 pub async fn login<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    ValidatedJSON(payload): ValidatedJSON<LoginRequest>,
+    ValidatedJSON(payload): ValidatedJSON<LoginRequest>
 ) -> Result<impl IntoResponse, AppError>
 where
     T: UserRepository + TenantRepository + Send + Sync,
 {
 
     let user_auth = repo
-        .get_user_permissions(&payload.username)
+        .list_user_roles(&payload.username)
         .await?
         .ok_or_else(|| {
             warn!(
-                "Cannot find user by username: {} or has no permission",
+                "Cannot find user by username: {} or has no roles",
                 payload.username
             );
-            AppError::Auth("Invalid username or password".to_string())
+            AppError::not_found("Invalid username or password")
         })?;
-
-    debug!(
-        "User {} roles: {:?} permissions: {:?}",
-        payload.username, user_auth.roles, user_auth.permissions
-    );
 
     if !bcrypt::verify(&payload.password, &user_auth.password_hash).map_err(|e| {
         error!("bcrypt verify error: {}", e);
-        AppError::Internal("Password verification failed".to_string())
-    })? {
+        AppError::internal("Password verification failed")
+    })? 
+    {
         warn!(
             "Invalid username {} or password {}",
             payload.username, payload.password
         );
-        return Err(AppError::Auth("Invalid username or password".to_string()));
+        return Err(AppError::auth("Invalid username or password"));
     }
 
     let tenant = repo
         .find_tenant_by_username(&payload.username)
         .await?
-        .ok_or(AppError::Auth("Invalid username or password".to_string()))?;
+        .ok_or(AppError::not_found("Invalid username or password"))?;
 
     let claims = Claims {
         tenant_type: tenant.tenant_type,
@@ -352,7 +348,7 @@ where
         tenant_hash: tenant.name_hash,
         real_name: user_auth.real_name,
         username: payload.username,
-        roles: vec![user_auth.roles.to_string()],
+        roles: user_auth.roles.map(|roles| roles.split(',').map(|role| role.to_string()).collect()).unwrap_or_default(),
         is_super_admin: user_auth.is_super_admin,
         exp: chrono::Utc::now()
             .checked_add_signed(chrono::Duration::days(1))
@@ -362,7 +358,7 @@ where
 
     let token = create_jwt(&claims).map_err(|e| {
         error!("Error creating JWT: {:?}", e);
-        AppError::Internal("Error creating JWT".to_string())
+        AppError::internal("Error creating JWT")
     })?;
 
     info!("User {} login success", claims.username);
@@ -394,7 +390,7 @@ where
 /// * `500 Internal Server Error` - If server error occurs during password reset
 ///
 /// # Returns
-/// - 200 OK: Password successfully reset
+/// - 201 Created: Password successfully reset
 /// - Error response with appropriate status code and message
 ///
 /// # Example Request
@@ -408,7 +404,7 @@ where
 /// # Example Success Response
 /// ```json
 /// {
-///   "code": 200,
+///   "code": 201,
 ///   "message": "success",
 ///   "data": null,
 ///   "requestId": "123e4567-e89b-12d3-a456-426614174000",
@@ -440,10 +436,10 @@ where
 
 #[utoipa::path(
     post,
-    path = "/api/v1/users/{username}/reset-password",
+    path = "/api/v1/password/reset",
     request_body = ResetPasswordDto,
     responses(
-        (status = 200, description = "Password reset successful", body = ApiResponse<String>),
+        (status = 201, description = "Password reset successful", body = ApiResponse<String>),
         (status = 400, description = "Invalid payload", body = ApiResponse<String>),
         (status = 401, description = "Current password is incorrect", body = ApiResponse<String>),
         (status = 404, description = "User not found", body = ApiResponse<String>),
@@ -467,7 +463,7 @@ where
     )
     .await?;
 
-    Ok(Json(ApiResponse::new(Some(()), &context)))
+    Ok(Json(ApiResponse::created(Some(()), &context)))
 }
 
 /// private functions

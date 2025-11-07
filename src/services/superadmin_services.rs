@@ -38,7 +38,7 @@ where
         .await?;
 
     let user_auth = user_repo
-        .get_user_permissions(&payload.username)
+        .list_user_roles(&payload.username)
         .await?
         .ok_or_else(|| {
             warn!(
@@ -54,7 +54,7 @@ where
         tenant_hash: "SUPER_ADMIN".to_string(),
         username: payload.username,
         real_name: user_auth.real_name,
-        roles: vec![user_auth.roles.to_string()],
+        roles: user_auth.roles.map(|roles| roles.split(',').map(|role| role.to_string()).collect()).unwrap_or_default(),
 
         is_super_admin: user_auth.is_super_admin,
         exp: chrono::Utc::now()
