@@ -10,6 +10,7 @@ use tracing::{debug, error, info};
 
 use super::my_sql_repository::MySqlRepository;
 
+#[allow(dead_code)]
 #[async_trait]
 pub trait UserRepository: Send + Sync {
     /// Get user permissions by username
@@ -27,7 +28,7 @@ pub trait UserRepository: Send + Sync {
     /// Joins users, roles and permissions tables to get all permissions for the user.
     /// Only returns active users (deleted_at is null).
     /// Groups results by user ID to handle multiple roles/permissions.
-    async fn get_user_permissions(
+    async fn list_user_roles(
         &self,
         username: &str,
     ) -> Result<Option<UserPermission>, AppError>;
@@ -175,24 +176,21 @@ impl UserRepository for MySqlRepository {
         }
     }
 
-    async fn get_user_permissions(
+    async fn list_user_roles(
         &self,
         username: &str,
     ) -> Result<Option<UserPermission>, AppError> {
-        sqlx::query_as::<_, UserPermission>(
-            "SELECT u.id, u.name as real_name, u.username, u.password_hash, u.is_super_admin,
-            GROUP_CONCAT(DISTINCT r.name) as roles, 
-            GROUP_CONCAT(DISTINCT p.name) as permissions
+        sqlx::query_as!(UserPermission,
+            r#"SELECT u.name as real_name, u.password_hash, u.is_super_admin as `is_super_admin!: bool` ,
+            GROUP_CONCAT(DISTINCT r.name) as roles
             FROM users u INNER JOIN user_roles ur ON u.id = ur.user_id
             INNER JOIN roles r ON ur.role_id = r.id 
-            INNER JOIN role_permissions rp ON r.id = rp.role_id 
-            INNER JOIN permissions p ON rp.permission_id = p.id 
-            WHERE u.username = ? and u.deleted_at is null GROUP BY u.id",
+            WHERE u.username = ? and u.deleted_at is null GROUP BY u.id"#,
+            username
         )
-        .bind(username)
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Error fetching user permissions"))
+        .map_err(map_db_err!("Error fetching user roles"))
     }
 
     async fn create_user(
