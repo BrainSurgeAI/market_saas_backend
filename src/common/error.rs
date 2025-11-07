@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Authentication failed: {0}")]
     Auth(String),
 
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+
     #[error("Forbidden: {0}")]
     Forbidden(String),
 
@@ -73,6 +76,10 @@ impl AppError {
         Self::Internal(msg.into())
     }
 
+    pub fn bad_request<T: Into<String>>(msg: T) -> Self {
+        Self::BadRequest(msg.into())
+    }
+
     /// Check if error is client-side (4xx)
     pub fn is_client_error(&self) -> bool {
         matches!(
@@ -93,6 +100,7 @@ impl AppError {
     /// Get HTTP status code
     pub fn status_code(&self) -> StatusCode {
         match self {
+            AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Auth(_) => StatusCode::UNAUTHORIZED,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
@@ -105,6 +113,7 @@ impl AppError {
     /// Get error code
     pub fn error_code(&self) -> i32 {
         match self {
+            AppError::BadRequest(_) => 400,
             AppError::Auth(_) => 401,
             AppError::Forbidden(_) => 403,
             AppError::Validation(_) => 400,
@@ -117,7 +126,8 @@ impl AppError {
     /// Get error context for more efficient processing
     fn error_context(&self) -> ErrorContext {
         let message = match self {
-            AppError::Auth(msg)
+            AppError::BadRequest(msg)
+            | AppError::Auth(msg)
             | AppError::Forbidden(msg)
             | AppError::Validation(msg)
             | AppError::NotFound(msg)
