@@ -266,19 +266,14 @@ impl ProviderOrderRepository for MySqlRepository {
         &self,
         order_code: &str,
         operator: &str,
-        _provider_hash: &str,
+        provider_hash: &str,
         exchange_dto: &ExchangeDTO,
     ) -> Result<(), AppError> {
-        let provider_hash = _provider_hash;
-        debug!(
-            "Provider {} delivers exchange items for order {}",
-            provider_hash, order_code
-        );
-        let (_order_id, _) = self
+        let (order_id, order_status_str) = self
             .fetch_provider_order(
                 provider_hash,
                 order_code,
-                "Provider does not own this order",
+                &format!("订单 {} 没有找到", order_code),
             )
             .await?;
 
@@ -288,22 +283,14 @@ impl ProviderOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        let order = sqlx::query!(
-            r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
-            order_code
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to get order"))?
-        .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
 
         let next = Self::validate_and_transition_order_state(
-            order.order_status.as_str(),
+            order_status_str.as_str(),
             OrderAction::DeliverToMarket,
             TenantType::Provider,
             &format!(
                 "Order status is not correct: {} -> {}",
-                order.order_status,
+                order_status_str,
                 OrderStatus::ExchangeDelivering.to_str()
             )
             .as_str(),
@@ -317,7 +304,7 @@ impl ProviderOrderRepository for MySqlRepository {
             sqlx::query!(
                     r#"UPDATE order_details SET actual_quantity = receipt_quantity + ?, actual_amount = actual_price * ( receipt_quantity + ? ),
                        total_amount = original_price * ( receipt_quantity + ? ) WHERE order_id = ? AND id = ?"#,
-                    actual_quantity, actual_quantity, actual_quantity, order.id, id
+                    actual_quantity, actual_quantity, actual_quantity, order_id, id
                 )
                 .execute(&mut *tx)
                 .await
@@ -327,7 +314,7 @@ impl ProviderOrderRepository for MySqlRepository {
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
             next.to_str(),
-            order.id
+            order_id
         )
         .execute(&mut *tx)
         .await
@@ -335,7 +322,7 @@ impl ProviderOrderRepository for MySqlRepository {
 
         sqlx::query!(
                 r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-                order.id, order.order_status, next.to_str(), operator, OrderAction::DeliverToMarket.description()
+                order_id, &order_status_str, next.to_str(), operator, OrderAction::DeliverToMarket.description()
             )
             .execute(&mut *tx)
             .await

@@ -307,15 +307,11 @@ where
 pub async fn login<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Json(payload): Json<LoginRequest>,
+    ValidatedJSON(payload): ValidatedJSON<LoginRequest>,
 ) -> Result<impl IntoResponse, AppError>
 where
     T: UserRepository + TenantRepository + Send + Sync,
 {
-    if let Err(validation_errors) = payload.validate() {
-        warn!("Validation errors: {:?}", validation_errors);
-        return Err(AppError::Validation(validation_errors.to_string()));
-    }
 
     let user_auth = repo
         .get_user_permissions(&payload.username)

@@ -30,6 +30,7 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         action: OrderAction,
         operator: &str,
     ) -> Result<OrderStatus, AppError>;
+
 }
 
 #[async_trait]

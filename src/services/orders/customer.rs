@@ -35,7 +35,7 @@ pub(crate) async fn exchange_deliver_to_market<T>(
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     Path(order_code): Path<String>,
-    ValidatedJSON(exchange_dto): ValidatedJSON<ExchangeDTO>,
+  //  ValidatedJSON(exchange_dto): ValidatedJSON<ExchangeDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: CustomerOrderRepository + Send + Sync,
@@ -48,12 +48,6 @@ where
         )));
     }
 
-    // repo.exchange_deliver_to_market(
-    //     &order_code,
-    //     &claims.username,
-    //     &claims.tenant_hash,
-    //     &exchange_dto,
-    // )
-    // .await?;
+    
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }

@@ -497,7 +497,7 @@ CREATE TABLE `orders` (
     `order_code` VARCHAR(32) NOT NULL COMMENT '订单编号：DD-时间戳-4位随机数',
     `customer_id` INT NOT NULL COMMENT '客户租户ID',
     `market_id` INT NOT NULL COMMENT '市场租户ID',
-    `order_status` VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT '订单状态：PENDING-待确认, CONFIRMED-已确认, PROCESSING-处理中, STOCKED-备货完毕, COMPLETED-已完成, CANCELLED-已取消, REJECTED-已拒绝',
+    `order_status` VARCHAR(16) NOT NULL DEFAULT 'PENDING',
     `total_amount` DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '订单总金额',
     `discount_amount` DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '折扣总金额',
     `actual_amount` DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '实际支付金额',
