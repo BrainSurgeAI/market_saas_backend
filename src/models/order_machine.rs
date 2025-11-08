@@ -128,7 +128,7 @@ impl OrderStateMachine {
 
             // 取消订单（只有市场和客户可在非终态都可以取消）
             (_, OrderAction::Cancel, TenantType::Customer | TenantType::Market)
-                if !current.is_terminal() =>
+                if current == OrderStatus::Pending || current == OrderStatus::Assigned =>
             {
                 OrderStatus::Cancelled
             }
@@ -515,12 +515,24 @@ mod test {
     }
 
     #[test]
-    fn test_market_cannot_cancel_order() {
-        // Market 可以在非终态状态下取消订单
+    fn test_market_can_cancel_assigned_order() {
+        // Market 可以在 Assigned 状态下取消订单
         let result = try_transition(
             OrderStatus::Assigned,
             OrderAction::Cancel,
             TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_customer_can_cancel_assigned_order() {
+        // Customer 可以在 Assigned 状态下取消订单
+        let result = try_transition(
+            OrderStatus::Assigned,
+            OrderAction::Cancel,
+            TenantType::Customer,
         );
         assert!(result.success);
         assert_eq!(result.next, OrderStatus::Cancelled);
@@ -869,8 +881,8 @@ mod test {
     fn test_available_actions_for_market_inspecting() {
         let actions = get_available_actions(OrderStatus::MarketInspecting, TenantType::Market);
 
-        // 市场可以接受、退货、换货、取消订单
-        assert_eq!(actions.len(), 4);
+        // 市场可以接受、退货、换货（不能取消订单，因为不在 Pending 或 Assigned 状态）
+        assert_eq!(actions.len(), 3);
         assert!(actions
             .iter()
             .any(|(action, _)| *action == OrderAction::MarketAccept));
@@ -880,7 +892,7 @@ mod test {
         assert!(actions
             .iter()
             .any(|(action, _)| *action == OrderAction::MarketExchange));
-        assert!(actions
+        assert!(!actions
             .iter()
             .any(|(action, _)| *action == OrderAction::Cancel));
     }
@@ -889,8 +901,8 @@ mod test {
     fn test_available_actions_for_customer_inspecting() {
         let actions = get_available_actions(OrderStatus::CustomerInspecting, TenantType::Customer);
 
-        // 客户可以完成、换货、验收换货或取消
-        assert_eq!(actions.len(), 5);
+        // 客户可以完成、换货、验收换货、退货（不能取消订单，因为不在 Pending 或 Assigned 状态）
+        assert_eq!(actions.len(), 4);
         assert!(actions
             .iter()
             .any(|(action, _)| *action == OrderAction::Complete));
@@ -903,7 +915,7 @@ mod test {
         assert!(actions
             .iter()
             .any(|(action, _)| *action == OrderAction::CustomerReturn));
-        assert!(actions
+        assert!(!actions
             .iter()
             .any(|(action, _)| *action == OrderAction::Cancel));
     }
@@ -955,50 +967,122 @@ mod test {
         assert_eq!(actions[0].1, OrderStatus::ExchangeInProgress);
     }
 
-    // ==================== 补充的 Market 取消订单测试 ====================
-
     #[test]
-    fn test_market_can_cancel_from_assigned() {
-        let result = try_transition(
-            OrderStatus::Assigned,
-            OrderAction::Cancel,
-            TenantType::Market,
-        );
-        assert!(result.success);
-        assert_eq!(result.next, OrderStatus::Cancelled);
+    fn test_cannot_cancel_from_non_allowed_states() {
+        // 测试所有不能取消订单的状态
+        let non_cancellable_states = [
+            OrderStatus::SupplierPreparing,
+            OrderStatus::SupplierDelivering,
+            OrderStatus::MarketInspecting,
+            OrderStatus::MarketAccepted,
+            OrderStatus::MarketDelivering,
+            OrderStatus::CustomerInspecting,
+            OrderStatus::ExchangeRequested,
+            OrderStatus::ExchangeInProgress,
+            OrderStatus::ExchangeDelivering,
+            OrderStatus::ExchangeInspecting,
+            OrderStatus::ExchangeNewDelivering,
+            OrderStatus::ReturnRequested,
+        ];
+
+        for status in &non_cancellable_states {
+            // Market 不能取消
+            let result = try_transition(*status, OrderAction::Cancel, TenantType::Market);
+            assert!(
+                !result.success,
+                "Market should not be able to cancel order in {:?} state",
+                status
+            );
+
+            // Customer 不能取消
+            let result = try_transition(*status, OrderAction::Cancel, TenantType::Customer);
+            assert!(
+                !result.success,
+                "Customer should not be able to cancel order in {:?} state",
+                status
+            );
+        }
     }
 
     #[test]
-    fn test_market_can_cancel_from_supplier_preparing() {
+    fn test_can_cancel_from_allowed_states() {
+        // 测试所有可以取消订单的状态
+        let cancellable_states = [OrderStatus::Pending, OrderStatus::Assigned];
+
+        for status in &cancellable_states {
+            // Market 可以取消
+            let result = try_transition(*status, OrderAction::Cancel, TenantType::Market);
+            assert!(
+                result.success,
+                "Market should be able to cancel order in {:?} state",
+                status
+            );
+            assert_eq!(result.next, OrderStatus::Cancelled);
+
+            // Customer 可以取消
+            let result = try_transition(*status, OrderAction::Cancel, TenantType::Customer);
+            assert!(
+                result.success,
+                "Customer should be able to cancel order in {:?} state",
+                status
+            );
+            assert_eq!(result.next, OrderStatus::Cancelled);
+        }
+    }
+
+    #[test]
+    fn test_market_cannot_cancel_from_supplier_preparing() {
+        // Market 不能在 SupplierPreparing 状态下取消订单
         let result = try_transition(
             OrderStatus::SupplierPreparing,
             OrderAction::Cancel,
             TenantType::Market,
         );
-        assert!(result.success);
-        assert_eq!(result.next, OrderStatus::Cancelled);
+        assert!(!result.success);
     }
 
     #[test]
-    fn test_market_can_cancel_from_supplier_delivering() {
+    fn test_market_cannot_cancel_from_supplier_delivering() {
+        // Market 不能在 SupplierDelivering 状态下取消订单
         let result = try_transition(
             OrderStatus::SupplierDelivering,
             OrderAction::Cancel,
             TenantType::Market,
         );
-        assert!(result.success);
-        assert_eq!(result.next, OrderStatus::Cancelled);
+        assert!(!result.success);
     }
 
     #[test]
-    fn test_customer_can_cancel_from_market_delivering() {
+    fn test_customer_cannot_cancel_from_market_delivering() {
+        // Customer 不能在 MarketDelivering 状态下取消订单
         let result = try_transition(
             OrderStatus::MarketDelivering,
             OrderAction::Cancel,
             TenantType::Customer,
         );
-        assert!(result.success);
-        assert_eq!(result.next, OrderStatus::Cancelled);
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn test_market_cannot_cancel_from_market_inspecting() {
+        // Market 不能在 MarketInspecting 状态下取消订单
+        let result = try_transition(
+            OrderStatus::MarketInspecting,
+            OrderAction::Cancel,
+            TenantType::Market,
+        );
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn test_customer_cannot_cancel_from_customer_inspecting() {
+        // Customer 不能在 CustomerInspecting 状态下取消订单
+        let result = try_transition(
+            OrderStatus::CustomerInspecting,
+            OrderAction::Cancel,
+            TenantType::Customer,
+        );
+        assert!(!result.success);
     }
 
     // ==================== 权限验证测试 ====================
@@ -1179,37 +1263,57 @@ mod test {
 
     #[test]
     fn test_cancel_at_various_stages() {
-        // Pending 阶段取消
+        // Pending 阶段取消（Customer）
         let result = try_transition(
             OrderStatus::Pending,
             OrderAction::Cancel,
             TenantType::Customer,
         );
         assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Cancelled);
 
-        // Assigned 阶段取消
+        // Pending 阶段取消（Market）
+        let result = try_transition(
+            OrderStatus::Pending,
+            OrderAction::Cancel,
+            TenantType::Market,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Cancelled);
+
+        // Assigned 阶段取消（Market）
         let result = try_transition(
             OrderStatus::Assigned,
             OrderAction::Cancel,
             TenantType::Market,
         );
         assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Cancelled);
 
-        // SupplierPreparing 阶段取消
+        // Assigned 阶段取消（Customer）
+        let result = try_transition(
+            OrderStatus::Assigned,
+            OrderAction::Cancel,
+            TenantType::Customer,
+        );
+        assert!(result.success);
+        assert_eq!(result.next, OrderStatus::Cancelled);
+
+        // SupplierPreparing 阶段不能取消
         let result = try_transition(
             OrderStatus::SupplierPreparing,
             OrderAction::Cancel,
             TenantType::Market,
         );
-        assert!(result.success);
+        assert!(!result.success);
 
-        // MarketInspecting 阶段取消
+        // MarketInspecting 阶段不能取消
         let result = try_transition(
             OrderStatus::MarketInspecting,
             OrderAction::Cancel,
             TenantType::Customer,
         );
-        assert!(result.success);
+        assert!(!result.success);
     }
 
     // ==================== 所有租户操作权限矩阵测试 ====================
@@ -1240,6 +1344,8 @@ mod test {
     fn test_market_capabilities() {
         let market_actions = [
             (OrderStatus::Pending, OrderAction::AssignSupplier),
+            (OrderStatus::Pending, OrderAction::Cancel),
+            (OrderStatus::Assigned, OrderAction::Cancel),
             (OrderStatus::SupplierDelivering, OrderAction::MarketInspect),
             (OrderStatus::MarketInspecting, OrderAction::MarketAccept),
             (OrderStatus::MarketAccepted, OrderAction::DeliverToCustomer),
@@ -1267,7 +1373,7 @@ mod test {
                 OrderAction::CustomerExchange,
             ),
             (OrderStatus::Pending, OrderAction::Cancel),
-            (OrderStatus::CustomerInspecting, OrderAction::Cancel),
+            (OrderStatus::Assigned, OrderAction::Cancel),
         ];
 
         for (status, action) in &customer_actions {
