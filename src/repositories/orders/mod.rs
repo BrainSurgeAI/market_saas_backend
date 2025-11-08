@@ -51,9 +51,9 @@ impl MySqlRepository {
             sqlx::query!(
                 r#"INSERT INTO order_details (
                     order_id, product_code, product_name, category_id, category_name,
-                    unit, quantity, original_price, discount_rate, actual_price,
-                    actual_amount, total_amount, processing_requirements, remark
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                    unit, quantity, original_price, discount_rate, actual_price, 
+                    total_amount, processing_requirements, remark
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
                 order_id,
                 &item.product_code,
                 &item.product_name,
@@ -64,7 +64,6 @@ impl MySqlRepository {
                 &item.original_price,
                 &item.discount_rate,
                 &item.price,
-                &item.total,
                 &item.total,
                 &processing_requirements,
                 &item.remark
@@ -117,17 +116,18 @@ impl MySqlRepository {
     /// * `error_msg` - Custom error message if order not found
     ///
     /// # Returns
-    /// A tuple containing (order_id, order_status)
+    /// A tuple containing (order_id, order_status, assignment_id)
     async fn fetch_provider_order(
         &self,
         provider_hash: &str,
         order_code: &str,
         error_msg: &str,
-    ) -> Result<(i32, String), AppError> {
+    ) -> Result<(i32, String, u32, Option<u64>), AppError> {
         let order = sqlx::query!(
-            r#"SELECT o.id, o.order_status FROM tenants t
+            r#"SELECT o.id, o.order_status, poa.id as assignment_id, pd.id as delivery_id FROM tenants t
                    INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
                    INNER JOIN orders o ON poa.order_id = o.id
+                   LEFT JOIN provider_deliveries pd ON poa.id = pd.assignment_id
                    WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ? FOR UPDATE"#,
             provider_hash,
             order_code
@@ -140,6 +140,6 @@ impl MySqlRepository {
             AppError::not_found(error_msg.to_string())
         })?;
 
-        Ok((order.id, order.order_status))
+        Ok((order.id, order.order_status, order.assignment_id, order.delivery_id))
     }
 }

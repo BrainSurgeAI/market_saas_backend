@@ -134,39 +134,62 @@ impl CommonOrderRepository for MySqlRepository {
             ));
         })?;
 
+        // 基础查询：customer_name 总是从 customer_id 对应的 tenant 获取
+        // provider_name 根据租户类型不同，从不同的地方获取
         let basic_query = r#"
-        SELECT o.id, o.order_code, t.name as customer_name, o.order_status,
+        SELECT o.id, o.order_code, tc.name as customer_name, o.order_status,
             o.total_amount, o.discount_amount, o.actual_amount, o.delivery_date, o.delivery_address,
             o.contact_name, o.contact_phone, o.remark, o.created_by, o.created_at, o.confirmed_by,
             o.confirmed_at, o.processed_by, o.processed_at, o.stocked_by, o.stocked_at, o.after_sale_at,
             o.rejected_by, o.rejected_at, o.reject_reason, o.completed_by, o.completed_at,
-            ds.name as delivery_staff_name, ds.phone as delivery_staff_phone, t.name as provider_name
-        FROM orders o {JOIN_CLAUSE} LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
+            ds.name as delivery_staff_name, ds.phone as delivery_staff_phone, {PROVIDER_NAME_SELECT}
+        FROM orders o 
+        INNER JOIN tenants tc ON o.customer_id = tc.id 
+        {JOIN_CLAUSE}
+        LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
         WHERE 1=1 "#;
 
         let mut builder: QueryBuilder<MySql>;
         match TenantType::try_from(claims.tenant_type.as_str())? {
             TenantType::Provider => {
-                let query = &basic_query.replace("{JOIN_CLAUSE}", 
-                r#" INNER JOIN provider_orders_assignments po ON po.order_id=o.id INNER JOIN tenants t ON po.provider_id = t.id "#);
-                builder = QueryBuilder::new(query);
-                builder.push(" AND t.id= ").push_bind(record.id);
+                // Provider: provider_name 从 provider_orders_assignments 关联的 provider 获取
+                let query = basic_query
+                    .replace("{PROVIDER_NAME_SELECT}", "tp.name as provider_name")
+                    .replace(
+                        "{JOIN_CLAUSE}",
+                        r#" INNER JOIN provider_orders_assignments po ON po.order_id=o.id 
+                            INNER JOIN tenants tp ON po.provider_id = tp.id "#,
+                    );
+                builder = QueryBuilder::new(&query);
+                builder.push(" AND tp.id= ").push_bind(record.id);
+                builder.push(" AND tp.name_hash= ").push_bind(claims.tenant_hash.as_str());
             }
             TenantType::Customer => {
-                let query = &basic_query.replace(
-                    "{JOIN_CLAUSE}",
-                    r#" INNER JOIN tenants t ON o.customer_id = t.id "#,
-                );
-                builder = QueryBuilder::new(query);
-                builder.push(" AND t.id= ").push_bind(record.id);
+                // Customer: provider_name 从 market_id 对应的 market tenant 获取
+                let query = basic_query
+                    .replace("{PROVIDER_NAME_SELECT}", "tm.name as provider_name")
+                    .replace(
+                        "{JOIN_CLAUSE}",
+                        r#" INNER JOIN tenants tm ON o.market_id = tm.id "#,
+                    );
+                builder = QueryBuilder::new(&query);
+                builder.push(" AND tc.id= ").push_bind(record.id);
+                builder.push(" AND tc.name_hash= ").push_bind(claims.tenant_hash.as_str());
             }
             TenantType::Market => {
-                let query = &basic_query.replace(
-                    "{JOIN_CLAUSE}",
-                    r#" INNER JOIN tenants t ON o.market_id = t.id "#,
-                );
-                builder = QueryBuilder::new(query);
-                builder.push(" AND t.id= ").push_bind(record.id);
+                // Market: provider_name 从 provider_orders_assignments 关联的 provider 获取
+                // 如果订单没有分配 provider，则 provider_name 为空（使用 LEFT JOIN）
+                let query = basic_query
+                    .replace("{PROVIDER_NAME_SELECT}", "tp.name as provider_name")
+                    .replace(
+                        "{JOIN_CLAUSE}",
+                        r#" INNER JOIN tenants tm ON o.market_id = tm.id 
+                            LEFT JOIN provider_orders_assignments po ON po.order_id = o.id 
+                            LEFT JOIN tenants tp ON po.provider_id = tp.id "#,
+                    );
+                builder = QueryBuilder::new(&query);
+                builder.push(" AND tm.id= ").push_bind(record.id);
+                builder.push(" AND tm.name_hash= ").push_bind(claims.tenant_hash.as_str());
             }
         };
 
@@ -187,25 +210,27 @@ impl CommonOrderRepository for MySqlRepository {
             OrderDetail,
             r#"
         SELECT 
-            id,
-            product_code,
-            product_name,
-            category_id,
-            category_name,
-            unit,
-            quantity,
-            original_price,
-            discount_rate,
-            actual_price,
-            actual_amount,
-            total_amount,
-            actual_quantity,
-            receipt_quantity,
-            processing_requirements,
-            remark,
-            status
-        FROM order_details
-        WHERE order_id = ?
+            od.id,
+            od.product_code,
+            od.product_name,
+            od.category_id,
+            od.category_name,
+            od.unit,
+            od.quantity,
+            od.original_price,
+            od.discount_rate,
+            od.actual_price,
+            od.actual_amount,
+            od.total_amount,
+            od.accepted_quantity,
+            od.processing_requirements,
+            od.remark,
+            od.status,
+            pdi.actual_qty AS delivered_quantity
+        FROM order_details od
+        LEFT JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
+        LEFT JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
+        WHERE od.order_id = ?
         "#,
             order.id
         )

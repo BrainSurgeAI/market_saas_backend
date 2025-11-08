@@ -808,7 +808,7 @@ CREATE TABLE `provider_delivery_items` (
   `order_detail_id` BIGINT UNSIGNED NOT NULL COMMENT '订单明细ID',
   `product_id` BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
   `actual_qty` DECIMAL(10,3) NOT NULL COMMENT '实际发货数量',
-  `unit_price` DECIMAL(10,2) NOT NULL COMMENT '单价',
+  `unit_price` DECIMAL(10,2) NOT NULL COMMENT '单价(折扣价)',
   `subtotal` DECIMAL(12,2) GENERATED ALWAYS AS (`actual_qty` * `unit_price`) STORED COMMENT '小计',
   `weight_unit` VARCHAR(8) DEFAULT 'kg' COMMENT '计量单位',
   `remark` VARCHAR(255) DEFAULT NULL COMMENT '备注',

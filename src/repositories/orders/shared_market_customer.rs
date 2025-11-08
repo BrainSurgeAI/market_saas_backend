@@ -42,7 +42,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
     ) -> Result<(), AppError> {
         // 验证订单存在且状态正确
         let record = sqlx::query!(
-            r#"SELECT o.id, od.id as detail_id, o.order_status, od.actual_quantity, od.actual_price
+            r#"SELECT o.id, od.id as detail_id, o.order_status, od.accepted_quantity, od.actual_price
                FROM orders o 
                JOIN order_details od ON o.id = od.order_id 
                WHERE o.order_code = ? AND od.id = ?"#,
@@ -77,10 +77,10 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         let order_id = record.id;
         let detail_id = record.detail_id;
-        let actual_quantity = record.actual_quantity.unwrap_or(Decimal::from(0));
+        let accepted_quantity = record.accepted_quantity.unwrap_or(Decimal::from(0));
         let actual_price = record.actual_price;
 
-        let actual_quantity_diff = actual_quantity - receipt.quantity;
+        let actual_quantity_diff = accepted_quantity - receipt.quantity;
         let actual_amount_diff = actual_price * actual_quantity_diff;
 
         match receipt.operation_type {
@@ -94,7 +94,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                         receipt_date = NOW(), 
                         receipt_notes = ?,
                         receipt_evidence = ?,
-                        actual_quantity = ?,
+                        accepted_quantity = ?,
                         actual_amount = actual_amount - ?
                       WHERE id = ?"#,
                     receipt.quantity, // 签收数量
@@ -123,11 +123,11 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 sqlx::query!(
                     r#"UPDATE order_details 
                       SET status = 'RETURNED', 
-                        receipt_quantity = actual_quantity - ?, 
+                        receipt_quantity = accepted_quantity - ?, 
                         receipt_date = NOW(), 
                         receipt_notes = ?,
                         receipt_evidence = ?,
-                        actual_quantity = actual_quantity - ?,
+                        accepted_quantity = accepted_quantity - ?,
                         actual_amount = ?    
                       WHERE id = ?"#,
                     receipt.quantity,
@@ -181,7 +181,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                         receipt_date = NOW(), 
                         receipt_notes = ?,
                         receipt_evidence = ?,
-                        actual_quantity = quantity - ?,
+                        accepted_quantity = accepted_quantity - ?,
                         actual_amount = actual_amount + ?
                       WHERE id = ?"#,
                     receipt.quantity,

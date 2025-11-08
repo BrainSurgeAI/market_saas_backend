@@ -5,7 +5,7 @@ use axum::{
 
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::services::order_services::get_after_sale_orders_by_provider;
-use crate::services::orders::shared_market_provider::{
+use crate::services::orders::shared_market_customer::{
     accept_order, begin_exchange_inspect_order, begin_inspect_order, cancel_order,
     exchange_request, inspect_sub_orders, return_order,
 };

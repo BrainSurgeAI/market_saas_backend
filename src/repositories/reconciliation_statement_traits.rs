@@ -265,7 +265,7 @@ impl ReconciliationStatementRepository for MySqlRepository {
             let order_details = sqlx::query!(
                 r#"
                 SELECT od.id, od.product_code, od.product_name, od.category_name, 
-                      od.unit, od.quantity, od.actual_quantity,
+                      od.unit, od.quantity, od.accepted_quantity,
                       od.original_price, od.actual_price,
                       od.total_amount, od.actual_amount
                 FROM order_details od
@@ -295,8 +295,8 @@ impl ReconciliationStatementRepository for MySqlRepository {
                     &detail.category_name,
                     &detail.unit,
                     &detail.quantity,
-                    &detail.actual_quantity,
-                    &detail.actual_quantity, // 假设收货数量等于实际数量
+                    &detail.accepted_quantity,
+                    &detail.accepted_quantity, // 假设收货数量等于实际数量
                     &detail.actual_price,
                     &detail.total_amount,
                     &detail.actual_amount,

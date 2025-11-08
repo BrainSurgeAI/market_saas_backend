@@ -243,8 +243,8 @@ pub(crate) struct OrderDetailResponse {
 pub(crate) struct OrderDetail {
     pub(crate) id: i32,
 
-    #[serde(rename = "receiptQuantity")]
-    pub(crate) receipt_quantity: Option<Decimal>,
+    #[serde(rename = "deliveredQuantity")]
+    pub(crate) delivered_quantity: Option<Decimal>,
 
     #[serde(rename = "productId")]
     pub(crate) product_code: String,
@@ -270,8 +270,8 @@ pub(crate) struct OrderDetail {
     #[serde(rename = "actualPrice")]
     pub(crate) actual_price: Decimal,
 
-    #[serde(rename = "actualQuantity")]
-    pub(crate) actual_quantity: Option<Decimal>,
+    #[serde(rename = "acceptedQuantity")]
+    pub(crate) accepted_quantity: Option<Decimal>,
 
     #[serde(rename = "actualAmount")]
     pub(crate) actual_amount: Option<Decimal>,
@@ -318,11 +318,11 @@ pub(crate) struct ExchangeAndReturnOrderDetailResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub(crate) struct ActualQuantity {
+pub(crate) struct DeliverQuantity {
     pub(crate) id: i32,
 
-    #[serde(rename = "actualQuantity")]
-    pub(crate) actual_quantity: Decimal,
+    #[serde(rename = "deliveredQuantity")]
+    pub(crate) delivered_quantity: Decimal,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
@@ -330,7 +330,7 @@ pub(crate) struct DeliverToMarketDTO {
     #[serde(rename = "stockedBy")]
     pub(crate) stocked_by: String,
 
-    pub(crate) items: Vec<ActualQuantity>,
+    pub(crate) items: Vec<DeliverQuantity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
