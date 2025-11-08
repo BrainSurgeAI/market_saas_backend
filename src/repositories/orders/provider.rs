@@ -36,6 +36,27 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
         exchange_dto: &ExchangeDTO,
     ) -> Result<(), AppError>;
 
+    /// This method is used to update the actual quantity of the exchange item when the return goods is processed.
+    /// It does not update the order details table and orders table.
+    /// 
+    /// # Arguments
+    /// * `operator` - The operator of the return goods.
+    /// * `exchange_item_update_dto` - The exchange item update dto.
+    ///
+    /// # Returns
+    /// * `Result<(), AppError>` - The result of the operation.
+    ///
+    /// # Errors
+    /// * `AppError` - The error of the operation.
+    ///
+    /// # Examples
+    /// ```rust
+    /// let exchange_item_update_dto = ExchangeItemUpdateDTO {
+    ///     order_detail_id: 1,
+    ///     actual_quantity: 10,
+    /// };
+    /// let result = repository.update_exchange_item_actual_quantity("operator", &exchange_item_update_dto);
+    /// ```
     async fn update_exchange_item_actual_quantity(
         &self,
         operator: &str,
@@ -333,6 +354,7 @@ impl ProviderOrderRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to commit transaction"))?;
         Ok(())
     }
+
 
     async fn update_exchange_item_actual_quantity(
         &self,

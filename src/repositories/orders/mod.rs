@@ -137,7 +137,7 @@ impl MySqlRepository {
         .map_err(map_db_err!("Failed to get order"))?
         .ok_or_else(|| {
             error!("Order {} was not found: {}", order_code, error_msg);
-            AppError::NotFound(error_msg.to_string())
+            AppError::not_found(error_msg.to_string())
         })?;
 
         Ok((order.id, order.order_status))
