@@ -23,7 +23,7 @@ where
     let next_status = repo
         .order_start_progress(
             &order_code,
-            &claims.username,
+            &claims.real_name,
             &claims.tenant_hash,
             Some(delivery_staff_id_dto.id_card.as_str()),
         )
@@ -44,7 +44,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     let next_status = repo
-        .order_start_progress(&order_code, &claims.username, &claims.tenant_hash, None)
+        .order_start_progress(&order_code, &claims.real_name, &claims.tenant_hash, None)
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),
@@ -89,7 +89,7 @@ where
 
     repo.exchange_deliver_to_market(
         &order_code,
-        &claims.username,
+        &claims.real_name,
         &claims.tenant_hash,
         &exchange_dto,
     )
@@ -106,7 +106,7 @@ pub(crate) async fn update_exchange_item_actual_quantity<T>(
 where
     T: ProviderOrderRepository + Send + Sync,
 {
-    repo.update_exchange_item_actual_quantity(&claims.username, &exchange_item_update_dto)
+    repo.update_exchange_item_actual_quantity(&claims.real_name, &exchange_item_update_dto)
         .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
