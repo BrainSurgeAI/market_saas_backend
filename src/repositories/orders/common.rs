@@ -1,10 +1,12 @@
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
-    dto::order::{ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderItem, OrderReceipt, ReceiptOperationType},
-    dto::order::{OrderDetailResponse, OrderQueryParams, OrderResponse},
+    dto::order::{
+        ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderDetailResponse, OrderItem,
+        OrderQueryParams, OrderReceipt, OrderResponse, ReceiptOperationType,
+    },
     map_db_err,
-    models::tenant_type::TenantType
+    models::{claims::Claims, tenant_type::TenantType},
 };
 use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
@@ -22,7 +24,7 @@ pub(crate) trait CommonOrderRepository: Send + Sync {
     async fn order_by_order_code(
         &self,
         order_code: &str,
-        tenant_hash: &str,
+        claims: &Claims,
     ) -> Result<Option<OrderDetailResponse>, AppError>;
 
     async fn get_exchange_and_return_order_details_by_order_code(
@@ -115,54 +117,66 @@ impl CommonOrderRepository for MySqlRepository {
     async fn order_by_order_code(
         &self,
         order_code: &str,
-        _tenant_hash: &str,
+        claims: &Claims,
     ) -> Result<Option<OrderDetailResponse>, AppError> {
-        // TODO: use tenant hash to filter order by customer or provider
-        let order = sqlx::query_as!(
-            OrderItem,
-            r#"
-        SELECT 
-            o.id,
-            o.order_code,
-            t.name as customer_name,
-            o.order_status,
-            o.total_amount,
-            o.discount_amount,
-            o.actual_amount,
-            o.delivery_date,
-            o.delivery_address,
-            o.contact_name,
-            o.contact_phone,
-            o.remark,
-            o.created_by,
-            o.created_at,
-            o.confirmed_by,
-            o.confirmed_at,
-            o.processed_by,
-            o.processed_at,
-            o.stocked_by,
-            o.stocked_at,
-            o.after_sale_at,
-            o.rejected_by,
-            o.rejected_at,
-            o.reject_reason,
-            o.completed_by,
-            o.completed_at,
-            ds.name as delivery_staff_name,
-            ds.phone as delivery_staff_phone,
-            p.name as provider_name
-        FROM orders o 
-        JOIN tenants t ON o.customer_id = t.id 
-        LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
-        LEFT JOIN provider_orders_assignments po ON o.id = po.order_id
-        LEFT JOIN tenants p ON po.provider_id = p.id
-        WHERE o.order_code = ?
-        "#,
-            order_code
+        let record = sqlx::query!(
+            r#"select id from tenants where name_hash=? and tenant_type=? and status='ACTIVE'"#,
+            claims.tenant_hash,
+            claims.tenant_type
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get order by code"))?;
+        .map_err(map_db_err!("Failed to get tenant by id"))?
+        .ok_or_else(|| {
+            return AppError::NotFound(format!(
+                "Can not find Tenant by type {} name_hash {} ",
+                claims.tenant_type, claims.tenant_hash
+            ));
+        })?;
+
+        let basic_query = r#"
+        SELECT o.id, o.order_code, t.name as customer_name, o.order_status,
+            o.total_amount, o.discount_amount, o.actual_amount, o.delivery_date, o.delivery_address,
+            o.contact_name, o.contact_phone, o.remark, o.created_by, o.created_at, o.confirmed_by,
+            o.confirmed_at, o.processed_by, o.processed_at, o.stocked_by, o.stocked_at, o.after_sale_at,
+            o.rejected_by, o.rejected_at, o.reject_reason, o.completed_by, o.completed_at,
+            ds.name as delivery_staff_name, ds.phone as delivery_staff_phone, t.name as provider_name
+        FROM orders o {JOIN_CLAUSE} LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
+        WHERE 1=1 "#;
+
+        let mut builder: QueryBuilder<MySql>;
+        match TenantType::try_from(claims.tenant_type.as_str())? {
+            TenantType::Provider => {
+                let query = &basic_query.replace("{JOIN_CLAUSE}", 
+                r#" INNER JOIN provider_orders_assignments po ON po.order_id=o.id INNER JOIN tenants t ON po.provider_id = t.id "#);
+                builder = QueryBuilder::new(query);
+                builder.push(" AND t.id= ").push_bind(record.id);
+            }
+            TenantType::Customer => {
+                let query = &basic_query.replace(
+                    "{JOIN_CLAUSE}",
+                    r#" INNER JOIN tenants t ON o.customer_id = t.id "#,
+                );
+                builder = QueryBuilder::new(query);
+                builder.push(" AND t.id= ").push_bind(record.id);
+            }
+            TenantType::Market => {
+                let query = &basic_query.replace(
+                    "{JOIN_CLAUSE}",
+                    r#" INNER JOIN tenants t ON o.market_id = t.id "#,
+                );
+                builder = QueryBuilder::new(query);
+                builder.push(" AND t.id= ").push_bind(record.id);
+            }
+        };
+
+        builder.push(" AND o.order_code= ").push_bind(order_code);
+
+        let order = builder
+            .build_query_as::<OrderItem>()
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get order by code"))?;
 
         let order = match order {
             Some(o) => o,

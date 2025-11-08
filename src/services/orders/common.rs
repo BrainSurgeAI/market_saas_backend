@@ -52,7 +52,7 @@ where
     );
 
     let order = repo
-        .order_by_order_code(&order_code, &claims.tenant_hash)
+        .order_by_order_code(&order_code, &claims)
         .await?;
 
     Ok(Json(ApiResponse::new(Some(order), &context)))
