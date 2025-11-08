@@ -827,3 +827,27 @@ DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_unicode_ci
 COMMENT='供应商发货明细表（商品维度）';
 
+CREATE TABLE order_inspections (
+    id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    order_id          INT NOT NULL,
+    inspected_by_type ENUM('MARKET', 'CUSTOMER') NOT NULL,
+    inspected_by_id   INT UNSIGNED NOT NULL,
+    inspection_result ENUM('PASS', 'PARTIAL', 'REJECTED') NOT NULL,
+    remarks           TEXT NULL,
+    inspected_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_order_inspections_orders FOREIGN KEY (order_id)
+        REFERENCES orders (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE order_inspection_items (
+    id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    inspection_id      INT UNSIGNED NOT NULL,
+    order_detail_id    INT  NOT NULL,
+    inspected_qty      DECIMAL(10,2) NOT NULL,
+    accepted           BOOLEAN DEFAULT TRUE,
+    remarks            VARCHAR(255) NULL,
+    CONSTRAINT fk_inspection_items FOREIGN KEY (inspection_id)
+        REFERENCES order_inspections (id) ON DELETE CASCADE,
+    CONSTRAINT fk_inspection_items_order_detail FOREIGN KEY (order_detail_id)
+        REFERENCES order_details (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
