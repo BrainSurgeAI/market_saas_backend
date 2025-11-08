@@ -771,3 +771,59 @@ CREATE TABLE reconciliation_statement_details (
     CONSTRAINT fk_statement_details_statement FOREIGN KEY (statement_id) REFERENCES reconciliation_statements (id) ON DELETE CASCADE,
     CONSTRAINT fk_statement_details_order_detail FOREIGN KEY (order_detail_id) REFERENCES order_details (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对账单明细表';
+
+-- =========================================
+-- Table: provider_deliveries
+-- 精简版供应商发货表（与 assignments 关联）
+-- =========================================
+CREATE TABLE `provider_deliveries` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `assignment_id` INT UNSIGNED NOT NULL COMMENT '关联 provider_orders_assignments.id',
+  `delivery_batch` VARCHAR(64) NOT NULL DEFAULT 'BATCH-1' COMMENT '发货批次号（可重复发货）',
+  `delivered_at` DATETIME DEFAULT NULL COMMENT '发货时间',
+  `delivered_by` VARCHAR(64) DEFAULT NULL COMMENT '操作人',
+  `delivery_status` ENUM('PREPARING','DELIVERED','CANCELLED') NOT NULL DEFAULT 'PREPARING' COMMENT '发货状态',
+  `remark` VARCHAR(255) DEFAULT NULL COMMENT '备注',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+  PRIMARY KEY (`id`),
+  KEY `idx_assignment_id` (`assignment_id`),
+
+  CONSTRAINT `fk_deliveries_assignment`
+    FOREIGN KEY (`assignment_id`) REFERENCES `provider_orders_assignments` (`id`)
+    ON DELETE CASCADE ON UPDATE CASCADE
+)
+ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci
+COMMENT='供应商发货记录表（关联订单分配表）';
+
+-- =========================================
+-- Table: provider_delivery_items
+-- =========================================
+CREATE TABLE `provider_delivery_items` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `delivery_id` BIGINT UNSIGNED NOT NULL COMMENT '对应 provider_deliveries.id',
+  `order_detail_id` BIGINT UNSIGNED NOT NULL COMMENT '订单明细ID',
+  `product_id` BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
+  `actual_qty` DECIMAL(10,3) NOT NULL COMMENT '实际发货数量',
+  `unit_price` DECIMAL(10,2) NOT NULL COMMENT '单价',
+  `subtotal` DECIMAL(12,2) GENERATED ALWAYS AS (`actual_qty` * `unit_price`) STORED COMMENT '小计',
+  `weight_unit` VARCHAR(8) DEFAULT 'kg' COMMENT '计量单位',
+  `remark` VARCHAR(255) DEFAULT NULL COMMENT '备注',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+  PRIMARY KEY (`id`),
+  KEY `idx_delivery_id` (`delivery_id`),
+
+  CONSTRAINT `fk_delivery_items_delivery`
+    FOREIGN KEY (`delivery_id`) REFERENCES `provider_deliveries` (`id`)
+    ON DELETE CASCADE ON UPDATE CASCADE
+)
+ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci
+COMMENT='供应商发货明细表（商品维度）';
+
