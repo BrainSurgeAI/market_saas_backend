@@ -305,15 +305,13 @@ impl CustomerOrderRepository for MySqlRepository {
         let order_id = sqlx::query!(
             r#"INSERT INTO orders (
                 order_code, market_id, customer_id, total_amount, discount_amount,
-                actual_amount, delivery_date, delivery_address, contact_name,
-                contact_phone, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                delivery_date, delivery_address, contact_name, contact_phone, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             order_code,
             record.market_id,
             record.customer_id,
-            total_amount,
-            discount_amount,
-            order_payload.total_amount,
+            total_amount,    // 客户下单时的总金额
+            discount_amount, // 客户下单时的折扣金额
             order_payload.delivery_info.delivery_date,
             order_payload.delivery_info.delivery_address,
             order_payload.delivery_info.contact_name,
