@@ -318,7 +318,7 @@ impl CustomerOrderRepository for MySqlRepository {
             order_payload.delivery_info.delivery_address,
             order_payload.delivery_info.contact_name,
             order_payload.delivery_info.contact_phone,
-            record.customer_name)
+            claims.real_name)
         .execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to create order"))?
@@ -336,7 +336,7 @@ impl CustomerOrderRepository for MySqlRepository {
         sqlx::query!(
             r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason) VALUES (?, ?, ?, ?, ?)"#,
             order_id,
-            "NONE".to_string(),
+            "CREATED".to_string(),
             "PENDING".to_string(),
             claims.real_name,
             OrderAction::Create.description()
