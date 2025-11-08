@@ -128,7 +128,7 @@ impl MySqlRepository {
             r#"SELECT o.id, o.order_status FROM tenants t
                    INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
                    INNER JOIN orders o ON poa.order_id = o.id
-                   WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ?"#,
+                   WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ? FOR UPDATE"#,
             provider_hash,
             order_code
         )
