@@ -832,7 +832,7 @@ CREATE TABLE order_inspections (
     order_id          INT NOT NULL,
     inspected_by_type ENUM('MARKET', 'CUSTOMER') NOT NULL,
     inspected_by_id   INT UNSIGNED NOT NULL,
-    inspection_result ENUM('PASS', 'PARTIAL', 'REJECTED') NOT NULL,
+    inspection_result ENUM('PENDING', 'PASS', 'PARTIAL', 'REJECTED') NOT NULL,
     remarks           TEXT NULL,
     inspected_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_order_inspections_orders FOREIGN KEY (order_id)

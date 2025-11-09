@@ -4,8 +4,8 @@ use crate::{
     dto::order::{OrderReceipt, ReceiptOperationType},
     map_db_err,
     models::{
-        order_action::OrderAction, order_machine::OrderStateMachine, order_status::OrderStatus,
-        tenant_type::TenantType,
+        claims::Claims, order_action::OrderAction, order_machine::OrderStateMachine,
+        order_status::OrderStatus, tenant_type::TenantType,
     },
 };
 use async_trait::async_trait;
@@ -30,6 +30,12 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         operator: &str,
     ) -> Result<OrderStatus, AppError>;
 
+    async fn begin_inspect_order(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+        action: OrderAction,
+    ) -> Result<OrderStatus, AppError>;
 }
 
 #[async_trait]
@@ -40,25 +46,6 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         operator: &str,
         transaction_id: &str,
     ) -> Result<(), AppError> {
-        // 验证订单存在且状态正确
-        let record = sqlx::query!(
-            r#"SELECT o.id, od.id as detail_id, o.order_status, od.accepted_quantity, od.actual_price
-               FROM orders o 
-               JOIN order_details od ON o.id = od.order_id 
-               WHERE o.order_code = ? AND od.id = ?"#,
-            receipt.order_code,
-            receipt.order_detail_id
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to find order"))?
-        .ok_or_else(|| {
-            AppError::NotFound(format!(
-                "Order {} with order detail id {} not found",
-                receipt.order_code, receipt.order_detail_id
-            ))
-        })?;
-
         // 处理凭证证据（如果有的话）
         let evidence_json = match &receipt.evidence_images {
             Some(evidence_images) if !evidence_images.is_empty() => {
@@ -75,6 +62,25 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
+        // 验证订单存在且状态正确
+        let record = sqlx::query!(
+                    r#"SELECT o.id, od.id as detail_id, o.order_status, od.accepted_quantity, od.actual_price
+                       FROM orders o 
+                       JOIN order_details od ON o.id = od.order_id 
+                       WHERE o.order_code = ? AND od.id = ? FOR UPDATE"#,
+                    receipt.order_code,
+                    receipt.order_detail_id
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to find order"))?
+                .ok_or_else(|| {
+                    AppError::NotFound(format!(
+                        "Order {} with order detail id {} not found",
+                        receipt.order_code, receipt.order_detail_id
+                    ))
+                })?;
+
         let order_id = record.id;
         let detail_id = record.detail_id;
         let accepted_quantity = record.accepted_quantity.unwrap_or(Decimal::from(0));
@@ -85,38 +91,47 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         match receipt.operation_type {
             ReceiptOperationType::Sign => {
-                // 处理正常签收
+                // 处理正常签收 TODO 修改这里，不更新order_details
                 debug!("Process normal sign receipt: {:?}", receipt);
-                sqlx::query!(
-                    r#"UPDATE order_details 
-                      SET status = 'SIGN', 
-                        receipt_quantity = ?, 
-                        receipt_date = NOW(), 
-                        receipt_notes = ?,
-                        receipt_evidence = ?,
-                        accepted_quantity = ?,
-                        actual_amount = actual_amount - ?
-                      WHERE id = ?"#,
-                    receipt.quantity, // 签收数量
-                    receipt.reason,
-                    evidence_json,
-                    receipt.quantity,
-                    actual_amount_diff,
-                    detail_id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update receipt status"))?;
+                // sqlx::query!(
+                //     r#"UPDATE order_details
+                //       SET status = 'SIGN',
+                //         receipt_quantity = ?,
+                //         receipt_date = NOW(),
+                //         receipt_notes = ?,
+                //         receipt_evidence = ?,
+                //         accepted_quantity = ?,
+                //         actual_amount = actual_amount - ?
+                //       WHERE id = ?"#,
+                //     receipt.quantity, // 签收数量
+                //     receipt.reason,
+                //     evidence_json,
+                //     receipt.quantity,
+                //     actual_amount_diff,
+                //     detail_id
+                // )
+                // .execute(&mut *tx)
+                // .await
+                // .map_err(map_db_err!("Failed to update receipt status"))?;
 
-                // 处理签收数量与实际数量不一致的情况，更新订单实际总金额
+                // // 处理签收数量与实际数量不一致的情况，更新订单实际总金额
+                // sqlx::query!(
+                //     r#"UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?"#,
+                //     actual_amount_diff,
+                //     order_id
+                // )
+                // .execute(&mut *tx)
+                // .await
+                // .map_err(map_db_err!("Failed to update order total amount"))?;
+
+                // Insert into order_inspection_items
                 sqlx::query!(
-                    r#"UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?"#,
-                    actual_amount_diff,
-                    order_id
+                    r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty, remarks) VALUES (?, ?, ?, ?)"#,
+                    1,detail_id, receipt.quantity, receipt.reason
                 )
                 .execute(&mut *tx)
                 .await
-                .map_err(map_db_err!("Failed to update order total amount"))?;
+                .map_err(map_db_err!("Failed to insert order inspection item"))?;
             }
             ReceiptOperationType::Return => {
                 // 处理退货
@@ -316,6 +331,77 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to update sub order status"))?;
         }
 
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(next_status)
+    }
+
+    async fn begin_inspect_order(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+        action: OrderAction,
+    ) -> Result<OrderStatus, AppError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        let order = sqlx::query!(
+            r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
+            order_code
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get order"))?
+        .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+
+        let user_record = sqlx::query!(
+            r#"SELECT id FROM users WHERE username = ?"#,
+            claims.username
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get user"))?
+        .ok_or_else(|| AppError::NotFound(format!("User not found: {}", claims.username)))?;
+
+        // Create a new order inspection record
+        sqlx::query!(
+            r#"INSERT INTO order_inspections (order_id, inspected_by_type, inspected_by_id) VALUES (?, ?, ?)"#,
+            order.id, claims.tenant_type, user_record.id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to create order inspection record"))?;
+
+        // Update the order status to MarketInspecting or CustomerInspecting
+        let next_status = MySqlRepository::validate_and_transition_order_state(
+            &order.order_status,
+            action,
+            TenantType::try_from(claims.tenant_type.as_str())?,
+            "订单状态不正确，无法进行验收",
+        )?;
+
+        sqlx::query!(
+            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+            next_status.to_str(),
+            order.id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to update order status"))?;
+
+        sqlx::query!(
+            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+            order.id, order.order_status, next_status.to_str(), claims.real_name, action.description()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert order status history"))?;
+
+        debug!("Order status updated to {}", next_status);
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
