@@ -63,41 +63,17 @@ where
 pub(crate) async fn inspect_sub_orders<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
-    Extension(_claims): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     ValidatedJSON(return_exchange_dto): ValidatedJSON<OrderReceiptDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: SharedMarketCustomerOrderRepository + Send + Sync,
 {
-    // let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
-    // let action = match return_exchange_dto.receipt.operation_type {
-    //     ReceiptOperationType::Sign => {
-    //         if tenant_type == TenantType::Market {
-    //             OrderAction::MarketAccept
-    //         } else {
-    //             OrderAction::Complete
-    //         }
-    //     }
-    //     ReceiptOperationType::Return => {
-    //         if tenant_type == TenantType::Market {
-    //             OrderAction::MarketReturn
-    //         } else {
-    //             OrderAction::CustomerReturn
-    //         }
-    //     }
-    //     ReceiptOperationType::Exchange => {
-    //         if tenant_type == TenantType::Market {
-    //             OrderAction::MarketExchange
-    //         } else {
-    //             OrderAction::CustomerExchange
-    //         }
-    //     }
-    // };
-
     repo.process_order_receipt(
         &return_exchange_dto.receipt,
-        &return_exchange_dto.operate_by,
+        &claims.real_name,
         &context.request_id,
+        &claims.tenant_type,
     )
     .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
@@ -108,7 +84,7 @@ pub(crate) async fn begin_inspect_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path(order_code): Path<String>
+    Path(order_code): Path<String>,
 ) -> Result<Json<ApiResponse<String>>, AppError>
 where
     T: SharedMarketCustomerOrderRepository + Send + Sync,
@@ -131,17 +107,9 @@ where
         }
     };
 
-    // let next_status = repo
-    //     .update_order_status(
-    //         tenant_type,
-    //         &claims.tenant_hash,
-    //         &order_code,
-    //         action,
-    //         &claims.username,
-    //     )
-    //     .await?;
-
-    let next_status = repo.begin_inspect_order(&order_code, &claims, action).await?;
+    let next_status = repo
+        .begin_inspect_order(&order_code, &claims, action)
+        .await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,

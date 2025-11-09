@@ -40,6 +40,26 @@ where
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
+
+// Accept order
+pub(crate) async fn accept_order<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+) -> Result<Json<ApiResponse<String>>, AppError>
+where
+    T: SharedMarketCustomerOrderRepository + Send + Sync,
+{
+    
+    let next_status = repo.determine_order_action_by_inspection_result(&order_code, &claims).await?;
+
+ 
+    Ok(Json(ApiResponse::new(Some(String::from(next_status.to_str())), &context)))
+}
+
+
+
 pub(crate) async fn deliver_to_customer<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,

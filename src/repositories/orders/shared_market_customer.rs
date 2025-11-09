@@ -9,7 +9,6 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use rust_decimal::Decimal;
 use tracing::{debug, error};
 
 #[async_trait]
@@ -19,6 +18,7 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         receipt: &OrderReceipt,
         operator: &str,
         transaction_id: &str,
+        tenant_type: &str,
     ) -> Result<(), AppError>;
 
     async fn update_order_status(
@@ -36,6 +36,18 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         claims: &Claims,
         action: OrderAction,
     ) -> Result<OrderStatus, AppError>;
+
+    /// 根据订单的签收、退货和换货情况，计算应该返回的 OrderAction
+    /// 
+    /// 逻辑：
+    /// - 如果有一个商品是换货，返回 MarketExchange 或 CustomerExchange（根据租户类型）
+    /// - 如果都是退货，返回 MarketReturn 或 CustomerReturn（根据租户类型）
+    /// - 其他情况返回 MarketAccept（客户没有 Accept，返回 MarketAccept）
+    async fn determine_order_action_by_inspection_result(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+    ) -> Result<OrderStatus, AppError>;
 }
 
 #[async_trait]
@@ -45,6 +57,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         receipt: &OrderReceipt,
         operator: &str,
         transaction_id: &str,
+        tenant_type: &str,
     ) -> Result<(), AppError> {
         // 处理凭证证据（如果有的话）
         let evidence_json = match &receipt.evidence_images {
@@ -63,33 +76,40 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
         // 验证订单存在且状态正确
-        let record = sqlx::query!(
-                    r#"SELECT o.id, od.id as detail_id, o.order_status, oi.id as inspection_id
-                       FROM orders o 
-                       INNER JOIN order_details od ON o.id = od.order_id
-                       INNER JOIN order_inspections oi ON o.id = oi.order_id
-                       WHERE o.order_code = ? AND od.id = ? FOR UPDATE"#,
-                    receipt.order_code,
-                    receipt.order_detail_id
-                )
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(map_db_err!("Failed to find order"))?
-                .ok_or_else(|| {
-                    AppError::NotFound(format!(
-                        "Order {} with order detail id {} not found",
-                        receipt.order_code, receipt.order_detail_id
-                    ))
-                })?;
+        let record = sqlx::query!(r#"
+            SELECT o.id, od.id as detail_id, o.order_status, oi.id as inspection_id, 
+                pdi.actual_qty as actual_quantity, pdi.subtotal as total_amount, od.actual_price as actual_price
+            FROM orders o 
+            INNER JOIN order_details od ON o.id = od.order_id
+            INNER JOIN order_inspections oi ON o.id = oi.order_id
+            INNER JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
+            WHERE o.order_code = ? AND od.id = ? AND oi.inspected_by_type = ? FOR UPDATE"#,
+            receipt.order_code,
+            receipt.order_detail_id,
+            tenant_type
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!(
+            "Failed to find order and order detail and inspection"
+        ))?
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Order {} with order detail id {} not found",
+                receipt.order_code, receipt.order_detail_id
+            ))
+        })?;
 
         let order_id = record.id;
         let detail_id = record.detail_id;
         let inspection_id = record.inspection_id;
+        let actual_price = record.actual_price;
+
         match receipt.operation_type {
             ReceiptOperationType::Sign => {
                 debug!("Process normal sign receipt: {:?}", receipt);
 
-                // Insert into order_inspection_items
+                // 允许部分签收，所以签收数量按前端传入的签收数量进行更新
                 sqlx::query!(
                     r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty, remarks) VALUES (?, ?, ?, ?)"#,
                     inspection_id, detail_id, receipt.quantity, receipt.reason
@@ -98,109 +118,53 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 .await
                 .map_err(map_db_err!("Failed to insert order inspection item"))?;
             }
-            _ => {
-                return Err(AppError::Validation(format!("Invalid receipt operation type: {:?}", receipt.operation_type)));
+            ReceiptOperationType::Return => {
+                let operation_type_str = String::from(ReceiptOperationType::Return);
+
+                // 退货只能全部退货，所以退货按实际发货量全部退货，不从前端拿退货数量
+                let return_exchange_id = sqlx::query!(
+                    r#"INSERT INTO return_exchange_records 
+                      (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
+                      VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+                    detail_id, operation_type_str, record.actual_quantity, receipt.reason, receipt.reason, operator, evidence_json
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to create return record"))?
+                .last_insert_id();
+
+                sqlx::query!(
+                    r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id, status, created_by)
+                      VALUES (?, ?, ?, ?, ?, ?)"#,
+                    return_exchange_id, record.total_amount, "ORIGINAL", transaction_id, "COMPLETED", operator
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to create refund record"))?;
             }
-            // ReceiptOperationType::Return => {
-            //     // 处理退货
-            //     sqlx::query!(
-            //         r#"UPDATE order_details 
-            //           SET status = 'RETURNED', 
-            //             receipt_quantity = accepted_quantity - ?, 
-            //             receipt_date = NOW(), 
-            //             receipt_notes = ?,
-            //             receipt_evidence = ?,
-            //             accepted_quantity = accepted_quantity - ?,
-            //             actual_amount = ?    
-            //           WHERE id = ?"#,
-            //         receipt.quantity,
-            //         receipt.reason,
-            //         evidence_json,
-            //         receipt.quantity, // 退货数量
-            //         actual_amount_diff,
-            //         detail_id
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to update return status"))?;
+            ReceiptOperationType::Exchange => {
+                // 创建换货记录， 换货允许只换部分，所以换货数量按前端传入的换货数量进行更新
+                let operation_type_str = String::from(ReceiptOperationType::Exchange);
+                let return_exchange_id = sqlx::query!(r#"
+                    INSERT INTO return_exchange_records
+                    (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+                    detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
+                  )
+                  .execute(&mut *tx)
+                  .await
+                  .map_err(map_db_err!("Failed to create exchange record"))?
+                  .last_insert_id();
 
-            //     // 处理签收数量与实际数量不一致的情况，更新订单实际总金额
-            //     sqlx::query!(
-            //         r#"UPDATE orders SET actual_amount = actual_amount - ? WHERE id = ?"#,
-            //         receipt.quantity * actual_price,
-            //         order_id
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to update order total amount"))?;
-
-            //     // 创建退货记录
-            //     let operation_type_str = String::from(ReceiptOperationType::Return);
-            //     let return_exchange_id = sqlx::query!(
-            //         r#"INSERT INTO return_exchange_records 
-            //           (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
-            //           VALUES (?, ?, ?, ?, ?, ?, ?)"#,
-            //         detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to create return record"))?
-            //     .last_insert_id();
-
-            //     sqlx::query!(
-            //         r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id, status, created_by)
-            //           VALUES (?, ?, ?, ?, ?, ?)"#,
-            //         return_exchange_id, actual_amount_diff, "ORIGINAL", transaction_id, "PENDING", operator
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to create refund record"))?;
-            // }
-            // ReceiptOperationType::Exchange => {
-            //     sqlx::query!(
-            //         r#"UPDATE order_details 
-            //           SET status = 'EXCHANGED', 
-            //             receipt_quantity = quantity - ?, 
-            //             receipt_date = NOW(), 
-            //             receipt_notes = ?,
-            //             receipt_evidence = ?,
-            //             accepted_quantity = accepted_quantity - ?,
-            //             actual_amount = actual_amount + ?
-            //           WHERE id = ?"#,
-            //         receipt.quantity,
-            //         receipt.reason,
-            //         evidence_json,
-            //         receipt.quantity,
-            //         actual_amount_diff,
-            //         detail_id
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to update exchange status"))?;
-
-            //     // 创建换货记录
-            //     let operation_type_str = String::from(ReceiptOperationType::Exchange);
-            //     let return_exchange_id = sqlx::query!(
-            //         r#"INSERT INTO return_exchange_records 
-            //           (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images)
-            //           VALUES (?, ?, ?, ?, ?, ?, ?)"#,
-            //         detail_id, operation_type_str, receipt.quantity, receipt.reason, receipt.reason, operator, evidence_json
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to create exchange record"))?
-            //     .last_insert_id();
-
-            //     sqlx::query!(
-            //                 r#"INSERT INTO exchange_items
-            //                   (return_exchange_id, product_code, product_name, quantity, price, total_amount)
-            //                   VALUES (?, ?, ?, ?, ?, ?)"#,
-            //         return_exchange_id, receipt.product_code, receipt.product_name, receipt.quantity, actual_price, actual_price * receipt.quantity
-            //     )
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(map_db_err!("Failed to create exchange item"))?;
-            // }
+                sqlx::query!(r#"
+                    INSERT INTO exchange_items(return_exchange_id, product_code, product_name, quantity, price, total_amount)
+                    VALUES (?, ?, ?, ?, ?, ?)"#,
+                    return_exchange_id, receipt.product_code, receipt.product_name, receipt.quantity, actual_price, actual_price * receipt.quantity
+                  )
+                  .execute(&mut *tx)
+                  .await
+                  .map_err(map_db_err!("Failed to create exchange item"))?;
+            }
         }
 
         tx.commit()
@@ -374,5 +338,161 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
         Ok(next_status)
+    }
+
+    async fn determine_order_action_by_inspection_result(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+    ) -> Result<OrderStatus, AppError> {
+        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        // 查询订单下所有商品的签收、退货和换货情况
+        // 使用 GROUP BY 确保每个商品只统计一次
+        let product_statuses = sqlx::query!(
+            r#"
+            SELECT o.id as order_id, o.order_status,
+                od.id as order_detail_id,
+                MAX(CASE WHEN rer.operation_type = 'EXCHANGE' THEN 1 ELSE 0 END) as has_exchange,
+                MAX(CASE WHEN rer.operation_type = 'RETURN' THEN 1 ELSE 0 END) as has_return,
+                MAX(CASE WHEN oii.id IS NOT NULL THEN 1 ELSE 0 END) as has_sign
+            FROM orders o
+            INNER JOIN order_details od ON o.id = od.order_id
+            LEFT JOIN return_exchange_records rer ON od.id = rer.order_detail_id
+            LEFT JOIN order_inspections oi ON o.id = oi.order_id AND oi.inspected_by_type = ?
+            LEFT JOIN order_inspection_items oii ON oi.id = oii.inspection_id AND od.id = oii.order_detail_id
+            WHERE o.order_code = ?
+            GROUP BY od.id FOR UPDATE
+            "#,
+            claims.tenant_type,
+            order_code
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to query product inspection status"))?;
+
+        if product_statuses.is_empty() {
+            return Err(AppError::NotFound(format!("订单 {} 没有找到商品明细", order_code)));
+        }
+
+        let (action, inspection_status) = if product_statuses.iter().any(|status| status.has_exchange == Some(1)) {
+            (match tenant_type {
+                TenantType::Market => OrderAction::MarketExchange,
+                TenantType::Customer => OrderAction::CustomerExchange,
+                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+            }, "PARTIAL")
+        } else if product_statuses.iter().any(|status| status.has_sign == Some(1)) {
+            (match tenant_type {
+                TenantType::Market => OrderAction::MarketAccept,
+                TenantType::Customer => OrderAction::Complete,
+                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+            }, "PASS")
+        } else if product_statuses.iter().any(|status| status.has_return == Some(1)) {
+            (match tenant_type {
+                TenantType::Market => OrderAction::MarketReturn,
+                TenantType::Customer => OrderAction::CustomerReturn,
+                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+            }, "REJECTED")
+        } else {
+            (match tenant_type {
+                TenantType::Market => OrderAction::MarketAccept,
+                TenantType::Customer => OrderAction::Complete,
+                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+            }, "PENDING")
+        };
+
+        // update order inspection status to COMPLETED
+        sqlx::query!(
+            r#"UPDATE order_inspections SET inspection_result = ? WHERE order_id = ? AND inspected_by_type = ?"#,
+            inspection_status,
+            product_statuses.first().unwrap().order_id,
+            claims.tenant_type
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to update order inspection status"))?;
+
+        // update order status
+        let next_status = OrderStateMachine::next_state(OrderStatus::try_from(product_statuses.first().unwrap().order_status.as_str())?, action, tenant_type)
+            .map_err(|e| {
+                error!("Order state transition error: {}", e);
+                AppError::Validation(format!(
+                    "Order status is not correct: {} -> {}",
+                    product_statuses.first().unwrap().order_status,
+                    action.description()
+                ))
+            })?;
+
+        sqlx::query!(
+            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+            next_status.to_str(),
+            product_statuses.first().unwrap().order_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to update order status"))?;
+
+        // insert order status history
+        sqlx::query!(
+            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
+            product_statuses.first().unwrap().order_id, product_statuses.first().unwrap().order_status, next_status.to_str(), claims.real_name, action.description()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert order status history"))?;
+
+        
+        if action == OrderAction::Complete {
+            // 查询 CUSTOMER 签收的数量，更新 order_details 表中的 accepted_quantity 和 actual_amount
+            let customer_inspection_items = sqlx::query!(
+                r#"
+                SELECT 
+                    od.id as order_detail_id,
+                    COALESCE(SUM(oii.inspected_qty), 0) as total_inspected_qty,
+                    od.actual_price
+                FROM order_details od
+                INNER JOIN orders o ON od.order_id = o.id
+                LEFT JOIN order_inspections oi ON o.id = oi.order_id AND oi.inspected_by_type = 'CUSTOMER'
+                LEFT JOIN order_inspection_items oii ON oi.id = oii.inspection_id AND od.id = oii.order_detail_id
+                WHERE o.order_code = ?
+                GROUP BY od.id, od.actual_price
+                "#,
+                order_code
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to query customer inspection items"))?;
+
+            // 更新每个订单明细的 accepted_quantity 和 actual_amount
+            for item in &customer_inspection_items {
+                let accepted_quantity = item.total_inspected_qty;
+                let actual_amount = item.actual_price * accepted_quantity;
+
+                sqlx::query!(
+                    r#"UPDATE order_details 
+                       SET accepted_quantity = ?, 
+                           actual_amount = ?
+                       WHERE id = ?"#,
+                    accepted_quantity,
+                    actual_amount,
+                    item.order_detail_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update order detail accepted quantity and actual amount"))?;
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(next_status)
+
     }
 }

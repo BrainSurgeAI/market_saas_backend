@@ -20,10 +20,10 @@ pub(super) fn shared_market_provider_routes() -> Router {
             "/{order_code}/begin-inspect-order",
             patch(begin_inspect_order::<MySqlRepository>),
         )
-        .route(
-            "/{order_code}/accept",
-            patch(accept_order::<MySqlRepository>),
-        )
+        // .route(
+        //     "/{order_code}/accept",
+        //     patch(accept_order::<MySqlRepository>),
+        // )
         .route(
             "/{order_code}/exchange-request",
             patch(exchange_request::<MySqlRepository>),
