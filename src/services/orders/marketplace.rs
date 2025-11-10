@@ -17,6 +17,7 @@ use crate::{
 pub(crate) async fn assign_order_to_provider<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
     Path(order_code): Path<String>,
     ValidatedJSON(dispatch_order_dto): ValidatedJSON<DispatchOrderDTO>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
@@ -29,6 +30,7 @@ where
         &order_code,
         dispatch_order_dto.provider_id,
         &dispatch_order_dto.confirmed_by,
+        &claims.username,
     )
     .await?;
 
