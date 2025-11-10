@@ -142,4 +142,57 @@ impl MySqlRepository {
 
         Ok((order.id, order.order_status, order.assignment_id, order.delivery_id))
     }
+
+    // help function to get tenant id by tenant hash and tenant type
+    async fn get_tenant_id_by_tenant_hash_and_tenant_type(
+        &self,
+        tenant_hash: &str,
+        tenant_type: &str,
+    ) -> Result<i32, AppError> {
+        let tenant = sqlx::query!(
+            r#"SELECT id FROM tenants WHERE name_hash = ? AND tenant_type = ? AND status = 'ACTIVE'"#,
+            tenant_hash, tenant_type)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get tenant by id"))?
+        .ok_or_else(|| {
+            return AppError::NotFound(format!(
+                "Can not find Tenant by type {} name_hash {} ",
+                tenant_type, tenant_hash
+            ));
+        })?;
+
+        Ok(tenant.id)
+    }
+
+    /// help function to insert into order_status_history table
+    /// 
+    /// # Arguments
+    /// * `tx` - The transaction to insert the order status history
+    /// * `order_id` i32 - The id of the order
+    /// * `from_status` &str - The from status of the order
+    /// * `to_status` OrderStatus - The to status of the order
+    /// * `changed_by` &str - The changed by of the order
+    /// * `action` OrderAction - The action of the order
+    ///
+    /// # Returns
+    /// A result containing the error if the order status history is not inserted
+    async fn insert_order_status_history(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        order_id: i32,
+        from_status: &str,
+        to_status: OrderStatus,
+        changed_by: &str,
+        action: OrderAction,
+    ) -> Result<(), AppError> {
+        sqlx::query!(
+            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason) VALUES (?, ?, ?, ?, ?)"#,
+            order_id, from_status, to_status.to_str(), changed_by, action.description()
+        )
+            .execute(&mut **tx)
+            .await
+            .map_err(map_db_err!("Failed to insert order status history"))?;
+        Ok(())
+    }
 }
