@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use tracing::error;
+use tracing::{debug, error};
 
 #[async_trait]
 pub(crate) trait MarketplaceOrderRepository: Send + Sync {
@@ -28,6 +28,7 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
         order_code: &str,
         provider_id: i32,
         confirmed_by: &str,
+        assign_by: &str,
     ) -> Result<OrderStatus, AppError>;
 
     async fn deliver_to_customer(
@@ -45,6 +46,7 @@ impl MarketplaceOrderRepository for MySqlRepository {
         order_code: &str,
         provider_id: i32,
         confirmed_by: &str,
+        assign_by: &str,
     ) -> Result<OrderStatus, AppError> {
         use chrono::Local;
         let current = OrderStatus::Pending;
@@ -93,14 +95,24 @@ impl MarketplaceOrderRepository for MySqlRepository {
                     AppError::Validation("Invalid transition".to_string())
                 })?;
 
+        debug!("Next status: {:?}", next);
+
         let affected = sqlx::query!(
             r#"
-            UPDATE orders
-            SET order_status = ?, confirmed_at = NOW(), confirmed_by = ?
-            WHERE id = ? AND order_status = ?
+                UPDATE orders AS o
+                JOIN users AS u ON u.username = ?
+                SET 
+                    o.order_status = ?,
+                    o.confirmed_at = NOW(),
+                    o.confirmed_by = ?,
+                    o.market_contact_number = u.phone
+                WHERE 
+                    o.id = ?
+                AND o.order_status = ?
             "#,
+            assign_by, // for JOIN
             next.to_str(),
-            confirmed_by,
+            confirmed_by, // confirmed_by field
             order.id,
             current.to_str()
         )
@@ -126,21 +138,15 @@ impl MarketplaceOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to insert provider orders assignments"))?;
 
-        sqlx::query!(
-            r#"
-            INSERT INTO order_status_history 
-                (order_id, from_status, to_status, changed_by, change_reason)
-            VALUES (?, ?, ?, ?, ?)
-            "#,
+        self.insert_order_status_history(
+            &mut tx,
             order.id,
             current.to_str(),
-            next.to_str(),
+            next,
             confirmed_by,
-            OrderAction::AssignSupplier.description()
+            OrderAction::AssignSupplier,
         )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+        .await?;
 
         tx.commit()
             .await
@@ -176,12 +182,15 @@ impl MarketplaceOrderRepository for MySqlRepository {
         let order =
             order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
 
-
-        let next = OrderStateMachine::next_state(OrderStatus::try_from(order.order_status.as_str())?, action, TenantType::try_from(claims.tenant_type.as_str())?)
-            .map_err(|e| {
-                error!("状态流转错误: {}", e);
-                AppError::Validation("Invalid transition".to_string())
-            })?;
+        let next = OrderStateMachine::next_state(
+            OrderStatus::try_from(order.order_status.as_str())?,
+            action,
+            TenantType::try_from(claims.tenant_type.as_str())?,
+        )
+        .map_err(|e| {
+            error!("状态流转错误: {}", e);
+            AppError::Validation("Invalid transition".to_string())
+        })?;
 
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
@@ -192,13 +201,15 @@ impl MarketplaceOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to update order status"))?;
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, order.order_status, next.to_str(), claims.real_name, action.description()
+        self.insert_order_status_history(
+            &mut tx,
+            order.id,
+            order.order_status.as_str(),
+            next,
+            claims.real_name.as_str(),
+            action,
         )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+        .await?;
 
         tx.commit()
             .await
