@@ -2,7 +2,7 @@ use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     dto::order::{
-        ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderDetailResponse, OrderItem,
+        ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderDetailResponse,
         OrderQueryParams, OrderReceipt, OrderResponse, ReceiptOperationType,
     },
     map_db_err,
