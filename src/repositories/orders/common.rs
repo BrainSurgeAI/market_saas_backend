@@ -12,6 +12,48 @@ use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
 
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+use rust_decimal::Decimal;
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
+pub(crate) struct OrderBaseInfoResponse {
+    pub(crate) id: i32,
+    #[serde(rename = "totalAmount")]
+    pub(crate) total_amount: Decimal,
+
+    #[serde(rename = "discountAmount")]
+    pub(crate) discount_amount: Decimal,
+
+    #[serde(rename = "actualAmount")]
+    pub(crate) actual_amount: Decimal,
+
+    #[serde(rename = "deliveryAddress")]
+    pub(crate) delivery_address: String,
+
+    #[serde(rename = "deliveryDate")]
+    pub(crate) delivery_date: NaiveDate,
+
+    #[serde(rename = "orderStatus")]
+    pub(crate) order_status: String,
+
+    #[serde(rename = "shipperName")]
+    pub(crate) shipper_name: Option<String>,
+
+    #[serde(rename = "shipperPhone")]
+    pub(crate) shipper_phone: Option<String>,
+
+    #[serde(rename = "receiverName")]
+    pub(crate) receiver_name: Option<String>,
+
+    #[serde(rename = "receiverPhone")]
+    pub(crate) receiver_phone: Option<String>,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+}
+
 #[async_trait]
 pub(crate) trait CommonOrderRepository: Send + Sync {
     async fn get_orders_by_tenant(
@@ -45,20 +87,9 @@ impl CommonOrderRepository for MySqlRepository {
         let page_size = query_params.page_size.unwrap_or(10);
         let offset = (page - 1) * page_size;
 
-        let record = sqlx::query!(
-            r#"select id from tenants where name_hash=? and tenant_type=? and status='ACTIVE'"#,
-            tenant_hash,
-            tenant_type
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get tenant by id"))?
-        .ok_or_else(|| {
-            return AppError::NotFound(format!(
-                "Can not find Tenant by type {} name_hash {} ",
-                tenant_type, tenant_hash
-            ));
-        })?;
+        let tenant_id = self
+            .get_tenant_id_by_tenant_hash_and_tenant_type(tenant_hash, tenant_type)
+            .await?;
 
         let basic_query = r#"SELECT 
                    o.order_code, 
@@ -79,13 +110,13 @@ impl CommonOrderRepository for MySqlRepository {
             );
 
             builder = QueryBuilder::new(query);
-            builder.push(" AND po.provider_id= ").push_bind(record.id);
+            builder.push(" AND po.provider_id= ").push_bind(tenant_id);
         } else {
             let query = &basic_query.replace("{JOIN_CLAUSE}", "");
 
             builder = QueryBuilder::new(query);
-            builder.push(" AND (o.market_id=").push_bind(record.id);
-            builder.push(" OR o.customer_id=").push_bind(record.id);
+            builder.push(" AND (o.market_id=").push_bind(tenant_id);
+            builder.push(" OR o.customer_id=").push_bind(tenant_id);
             builder.push(") ");
         }
 
@@ -108,9 +139,14 @@ impl CommonOrderRepository for MySqlRepository {
 
     /// Get order by order code and tenant hash
     ///
+    /// 根据不同的租户类型返回不同的数据：
+    /// - PROVIDER: 返回自己的发货记录（provider_delivery_items）
+    /// - MARKET: 返回 PROVIDER 的发货记录和市场验收记录
+    /// - CUSTOMER: 返回 MARKET 的签收数量（作为发货量）和客户验收记录
+    ///
     /// # Arguments
     /// * `order_code` - Order code
-    /// * `tenant_hash` - Tenant hash
+    /// * `claims` - Claims containing tenant information
     ///
     /// # Returns
     /// The order detail response
@@ -119,125 +155,197 @@ impl CommonOrderRepository for MySqlRepository {
         order_code: &str,
         claims: &Claims,
     ) -> Result<Option<OrderDetailResponse>, AppError> {
-        let record = sqlx::query!(
-            r#"select id from tenants where name_hash=? and tenant_type=? and status='ACTIVE'"#,
-            claims.tenant_hash,
-            claims.tenant_type
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get tenant by id"))?
-        .ok_or_else(|| {
-            return AppError::NotFound(format!(
-                "Can not find Tenant by type {} name_hash {} ",
-                claims.tenant_type, claims.tenant_hash
-            ));
-        })?;
+        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
 
-        // 基础查询：customer_name 总是从 customer_id 对应的 tenant 获取
-        // provider_name 根据租户类型不同，从不同的地方获取
-        let basic_query = r#"
-        SELECT o.id, o.order_code, tc.name as customer_name, o.order_status,
-            o.total_amount, o.discount_amount, o.actual_amount, o.delivery_date, o.delivery_address,
-            o.contact_name, o.contact_phone, o.remark, o.created_by, o.created_at, o.confirmed_by,
-            o.confirmed_at, o.processed_by, o.processed_at, o.stocked_by, o.stocked_at, o.after_sale_at,
-            o.rejected_by, o.rejected_at, o.reject_reason, o.completed_by, o.completed_at,
-            ds.name as delivery_staff_name, ds.phone as delivery_staff_phone, {PROVIDER_NAME_SELECT}
-        FROM orders o 
-        INNER JOIN tenants tc ON o.customer_id = tc.id 
-        {JOIN_CLAUSE}
-        LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id 
-        WHERE 1=1 "#;
+        let tenant_id = self
+            .get_tenant_id_by_tenant_hash_and_tenant_type(
+                claims.tenant_hash.as_str(),
+                claims.tenant_type.as_str(),
+            )
+            .await?;
 
-        let mut builder: QueryBuilder<MySql>;
-        match TenantType::try_from(claims.tenant_type.as_str())? {
+        let (order_base, order_items) = match tenant_type {
             TenantType::Provider => {
-                // Provider: provider_name 从 provider_orders_assignments 关联的 provider 获取
-                let query = basic_query
-                    .replace("{PROVIDER_NAME_SELECT}", "tp.name as provider_name")
-                    .replace(
-                        "{JOIN_CLAUSE}",
-                        r#" INNER JOIN provider_orders_assignments po ON po.order_id=o.id 
-                            INNER JOIN tenants tp ON po.provider_id = tp.id "#,
-                    );
-                builder = QueryBuilder::new(&query);
-                builder.push(" AND tp.id= ").push_bind(record.id);
-                builder.push(" AND tp.name_hash= ").push_bind(claims.tenant_hash.as_str());
-            }
-            TenantType::Customer => {
-                // Customer: provider_name 从 market_id 对应的 market tenant 获取
-                let query = basic_query
-                    .replace("{PROVIDER_NAME_SELECT}", "tm.name as provider_name")
-                    .replace(
-                        "{JOIN_CLAUSE}",
-                        r#" INNER JOIN tenants tm ON o.market_id = tm.id "#,
-                    );
-                builder = QueryBuilder::new(&query);
-                builder.push(" AND tc.id= ").push_bind(record.id);
-                builder.push(" AND tc.name_hash= ").push_bind(claims.tenant_hash.as_str());
+                let order_base = sqlx::query_as!(
+                    OrderBaseInfoResponse,
+                    r#"
+                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.confirmed_by AS receiver_name,
+                    o.total_amount, o.discount_amount, o.actual_amount, o.market_contact_number AS receiver_phone,
+                    t.address AS delivery_address, pd.delivered_by AS shipper_name, pd.delivery_contact_number AS shipper_phone
+                    FROM orders o 
+                    INNER JOIN provider_orders_assignments poa ON poa.order_id = o.id
+                    LEFT JOIN provider_deliveries pd ON pd.assignment_id = poa.id
+                    INNER JOIN tenants t ON o.market_id = t.id
+                    WHERE o.order_code = ? AND poa.provider_id = ?
+                    "#,
+                    order_code,
+                    tenant_id
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get order base info"))?
+                .ok_or_else(|| AppError::NotFound(format!("Order not found")))?;
+
+                let order_items = 
+                    // PROVIDER: 查询自己的发货记录
+                    // 只查询分配给该 PROVIDER 的订单，并且只统计该 PROVIDER 的发货记录
+                    sqlx::query_as!(
+                        OrderDetail,
+                        r#"
+                        SELECT 
+                            od.id,
+                            od.product_code,
+                            od.product_name,
+                            od.category_id,
+                            od.category_name,
+                            od.unit,
+                            od.quantity,
+                            od.original_price,
+                            od.discount_rate,
+                            od.actual_price,
+                            od.actual_amount,
+                            od.total_amount,
+                            od.accepted_quantity,
+                            od.processing_requirements,
+                            od.remark,
+                            od.status,
+                            COALESCE(SUM(CASE WHEN pd.assignment_id = poa.id THEN pdi.actual_qty ELSE 0 END), 0) AS delivered_quantity
+                        FROM order_details od
+                        INNER JOIN provider_orders_assignments poa ON od.order_id = poa.order_id AND poa.provider_id = ?
+                        LEFT JOIN provider_deliveries pd ON pd.assignment_id = poa.id
+                        LEFT JOIN provider_delivery_items pdi ON pdi.delivery_id = pd.id AND pdi.order_detail_id = od.id
+                        WHERE od.order_id = ?
+                        GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
+                                 od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
+                                 od.actual_amount, od.total_amount, od.accepted_quantity, od.processing_requirements,
+                                 od.remark, od.status
+                        "#,
+                        tenant_id,
+                        order_base.id
+                    )
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(map_db_err!("Failed to get order details for provider"))?;
+
+                (order_base, order_items)
+
+                
             }
             TenantType::Market => {
-                // Market: provider_name 从 provider_orders_assignments 关联的 provider 获取
-                // 如果订单没有分配 provider，则 provider_name 为空（使用 LEFT JOIN）
-                let query = basic_query
-                    .replace("{PROVIDER_NAME_SELECT}", "tp.name as provider_name")
-                    .replace(
-                        "{JOIN_CLAUSE}",
-                        r#" INNER JOIN tenants tm ON o.market_id = tm.id 
-                            LEFT JOIN provider_orders_assignments po ON po.order_id = o.id 
-                            LEFT JOIN tenants tp ON po.provider_id = tp.id "#,
-                    );
-                builder = QueryBuilder::new(&query);
-                builder.push(" AND tm.id= ").push_bind(record.id);
-                builder.push(" AND tm.name_hash= ").push_bind(claims.tenant_hash.as_str());
+                let order_base = sqlx::query_as!(
+                    OrderBaseInfoResponse,
+                    r#"
+                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, o.contact_phone AS receiver_phone,
+                    o.total_amount, o.discount_amount, o.actual_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
+                    FROM orders o
+                    INNER JOIN tenants t ON o.market_id = t.id
+                    WHERE o.order_code = ? AND t.id = ? AND t.tenant_type = 'MARKET'
+                    "#,
+                    order_code,
+                    tenant_id
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get order base info"))?.ok_or_else(|| AppError::NotFound(format!("Order not found")))?;
+
+                let order_items = sqlx::query_as!(
+                    OrderDetail,
+                    r#"
+                    SELECT 
+                        od.id,
+                        od.product_code,
+                        od.product_name,
+                        od.category_id,
+                        od.category_name,
+                        od.unit,
+                        od.quantity,
+                        od.original_price,
+                        od.discount_rate,
+                        od.actual_price,
+                        od.actual_amount,
+                        od.total_amount,
+                        od.accepted_quantity,
+                        od.processing_requirements,
+                        od.remark,
+                        od.status,
+                        COALESCE(SUM(pdi.actual_qty), 0) AS delivered_quantity
+                    FROM order_details od
+                    LEFT JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
+                    LEFT JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
+                    WHERE od.order_id = ?
+                    GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
+                             od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
+                             od.actual_amount, od.total_amount, od.accepted_quantity, od.processing_requirements,
+                             od.remark, od.status
+                    "#,
+                    order_base.id
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get order details for market"))?;
+
+                (order_base, order_items)
+            }
+            TenantType::Customer => {
+                let order_base = sqlx::query_as!(
+                    OrderBaseInfoResponse,
+                    r#"
+                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, o.contact_phone AS receiver_phone,
+                    o.total_amount, o.discount_amount, o.actual_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
+                    FROM orders o
+                    INNER JOIN tenants t ON o.customer_id = t.id
+                    WHERE o.order_code = ? AND t.id = ? AND t.tenant_type = 'CUSTOMER'
+                    "#,
+                    order_code,
+                    tenant_id
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get order base info"))?.ok_or_else(|| AppError::NotFound(format!("Order not found")))?;
+
+                let order_items = sqlx::query_as!(
+                    OrderDetail,
+                    r#"
+                    SELECT 
+                        od.id,
+                        od.product_code,
+                        od.product_name,
+                        od.category_id,
+                        od.category_name,
+                        od.unit,
+                        od.quantity,
+                        od.original_price,
+                        od.discount_rate,
+                        od.actual_price,
+                        od.actual_amount,
+                        od.total_amount,
+                        od.accepted_quantity,
+                        od.processing_requirements,
+                        od.remark,
+                        od.status,
+                        -- CUSTOMER 看到的发货量是 MARKET 的签收数量
+                        COALESCE(SUM(CASE WHEN oi_market.inspected_by_type = 'MARKET' THEN oii_market.inspected_qty ELSE 0 END), 0) AS delivered_quantity
+                    FROM order_details od
+                    LEFT JOIN order_inspections oi_market ON od.order_id = oi_market.order_id AND oi_market.inspected_by_type = 'MARKET'
+                    LEFT JOIN order_inspection_items oii_market ON oi_market.id = oii_market.inspection_id AND od.id = oii_market.order_detail_id
+                    WHERE od.order_id = ?
+                    GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
+                             od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
+                             od.actual_amount, od.total_amount, od.accepted_quantity, od.processing_requirements,
+                             od.remark, od.status
+                    "#,
+                    order_base.id
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get order details for customer"))?;
+
+                (order_base, order_items)
             }
         };
 
-        builder.push(" AND o.order_code= ").push_bind(order_code);
 
-        let order = builder
-            .build_query_as::<OrderItem>()
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get order by code"))?;
-
-        let order = match order {
-            Some(o) => o,
-            None => return Ok(None),
-        };
-
-        let items = sqlx::query_as!(
-            OrderDetail,
-            r#"
-        SELECT 
-            od.id,
-            od.product_code,
-            od.product_name,
-            od.category_id,
-            od.category_name,
-            od.unit,
-            od.quantity,
-            od.original_price,
-            od.discount_rate,
-            od.actual_price,
-            od.actual_amount,
-            od.total_amount,
-            od.accepted_quantity,
-            od.processing_requirements,
-            od.remark,
-            od.status,
-            pdi.actual_qty AS delivered_quantity
-        FROM order_details od
-        LEFT JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
-        LEFT JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
-        WHERE od.order_id = ?
-        "#,
-            order.id
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get order details"))?;
-
+        // 查询退货换货记录（所有租户类型都返回）
         let receipt_rows = sqlx::query!(
             r#"
         SELECT 
@@ -283,8 +391,8 @@ impl CommonOrderRepository for MySqlRepository {
             .collect::<Result<Vec<_>, AppError>>()?;
 
         Ok(Some(OrderDetailResponse {
-            order,
-            items,
+            order: order_base,
+            items: order_items,
             receipts,
         }))
     }
