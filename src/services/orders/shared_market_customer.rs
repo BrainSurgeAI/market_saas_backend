@@ -38,16 +38,7 @@ where
         &order_code, tenant_type, action
     );
 
-    let next_status = repo
-        .update_order_status(
-            tenant_type,
-            &claims.tenant_hash,
-            &order_code,
-            action,
-            //   target_status,
-            &claims.username,
-        )
-        .await?;
+    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
 
     info!(
         "Order {} cancelled by {} action {}",
@@ -69,7 +60,7 @@ pub(crate) async fn inspect_sub_orders<T>(
 where
     T: SharedMarketCustomerOrderRepository + Send + Sync,
 {
-    repo.process_order_receipt(
+    repo.insert_order_inspection_with_aftersales(
         &return_exchange_dto.receipt,
         &claims.real_name,
         &context.request_id,
@@ -142,16 +133,7 @@ where
         &order_code, tenant_type, action
     );
 
-    let next_status = repo
-        .update_order_status(
-            tenant_type,
-            &claims.tenant_hash,
-            &order_code,
-            action,
-            // target_status,
-            &claims.username,
-        )
-        .await?;
+    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,
@@ -184,16 +166,7 @@ where
         "Accept order {} by {} action {}",
         &order_code, tenant_type, action
     );
-    let next_status = repo
-        .update_order_status(
-            tenant_type,
-            &claims.tenant_hash,
-            &order_code,
-            action,
-            // target_status,
-            &claims.username,
-        )
-        .await?;
+    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,
@@ -226,15 +199,7 @@ where
         &order_code, tenant_type, action
     );
 
-    let next_status = repo
-        .update_order_status(
-            tenant_type,
-            &claims.tenant_hash,
-            &order_code,
-            action,
-            &claims.username,
-        )
-        .await?;
+    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
 
     info!(
         "Order {} return request processed by {} action {}",
@@ -272,16 +237,7 @@ where
         "Exchange {} by {} action {}",
         &order_code, tenant_type, action
     );
-    let next_status = repo
-        .update_order_status(
-            tenant_type,
-            &claims.tenant_hash,
-            &order_code,
-            action,
-            //  target_status,
-            &claims.username,
-        )
-        .await?;
+    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,

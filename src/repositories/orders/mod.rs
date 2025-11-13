@@ -16,7 +16,7 @@ use crate::{
 
 use super::my_sql_repository::MySqlRepository;
 
-use tracing::error;
+use tracing::{debug, error};
 
 impl MySqlRepository {
     /// Helper method to insert order details in batch
@@ -122,13 +122,18 @@ impl MySqlRepository {
         provider_hash: &str,
         order_code: &str,
         error_msg: &str,
-    ) -> Result<(i32, String, u32, Option<u64>), AppError> {
+    ) -> Result<(i32, String, u32, Option<u64>, Option<i32>), AppError> {
+        debug!(
+            "Fetching provider order for order code {} and provider hash {}",
+            order_code, provider_hash
+        );
         let order = sqlx::query!(
-            r#"SELECT o.id, o.order_status, poa.id as assignment_id, pd.id as delivery_id FROM tenants t
+            r#"SELECT o.id, o.order_status, poa.id as assignment_id, pd.id as delivery_id, pd.delivery_round FROM tenants t
                    INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
                    INNER JOIN orders o ON poa.order_id = o.id
-                   LEFT JOIN provider_deliveries pd ON poa.id = pd.assignment_id
-                   WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ? FOR UPDATE"#,
+                   LEFT JOIN provider_deliveries pd ON poa.id = pd.assignment_id AND pd.delivery_status = 'PREPARING'
+                   WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ? 
+                   FOR UPDATE"#,
             provider_hash,
             order_code
         )
@@ -140,7 +145,7 @@ impl MySqlRepository {
             AppError::not_found(error_msg.to_string())
         })?;
 
-        Ok((order.id, order.order_status, order.assignment_id, order.delivery_id))
+        Ok((order.id, order.order_status, order.assignment_id, order.delivery_id, order.delivery_round))
     }
 
     // help function to get tenant id by tenant hash and tenant type

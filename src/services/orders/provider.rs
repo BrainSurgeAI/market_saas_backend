@@ -21,12 +21,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     let next_status = repo
-        .order_start_progress(
-            &order_code,
-            &claims.real_name,
-            &claims.tenant_hash,
-            Some(delivery_staff_id_dto.id_card.as_str()),
-        )
+        .mark_order_as_processing(&order_code, &claims, Some(delivery_staff_id_dto.id_card.as_str()))
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),
@@ -44,7 +39,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     let next_status = repo
-        .order_start_progress(&order_code, &claims.real_name, &claims.tenant_hash, None)
+        .mark_order_as_processing(&order_code, &claims, None)
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),

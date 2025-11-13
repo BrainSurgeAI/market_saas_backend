@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, types::Decimal};
 use validator::{Validate, ValidationError};
 
-use crate::dto::validate_phone;
+use crate::{dto::validate_phone, repositories::orders::common::OrderBaseInfoResponse};
 
 fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
     let min = Decimal::new(1, 2); // 0.01
@@ -232,11 +232,49 @@ pub(crate) struct OrderItem {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct OrderDetailResponse {
-    pub(crate) order: OrderItem,
+    pub(crate) order: OrderBaseInfoResponse,
 
     pub(crate) items: Vec<OrderDetail>,
 
-    pub(crate) receipts: Vec<OrderReceipt>,
+    pub(crate) receipts: Vec<ReceiptResponse>,
+}
+
+/// 收据响应结构体（按 receipt 分组）
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ReceiptResponse {
+    #[serde(rename = "id")]
+    pub(crate) id: i32,
+
+    #[serde(rename = "operationType")]
+    pub(crate) operation_type: ReceiptOperationType,
+
+    #[serde(rename = "status")]
+    pub(crate) status: String,
+
+    #[serde(rename = "items")]
+    pub(crate) items: Vec<ReceiptItem>,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+}
+
+/// 收据项结构体
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ReceiptItem {
+    #[serde(rename = "productId")]
+    pub(crate) product_id: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "quantity")]
+    pub(crate) quantity: Decimal,
+
+    #[serde(rename = "unit")]
+    pub(crate) unit: String,
+
+    #[serde(rename = "reason")]
+    pub(crate) reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
@@ -286,6 +324,9 @@ pub(crate) struct OrderDetail {
 
     #[serde(rename = "status")]
     pub(crate) status: Option<String>,
+
+    #[serde(rename = "lastAcceptStatus")]
+    pub(crate) last_accept_status: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
@@ -343,6 +384,7 @@ pub(crate) struct ExchangeDTO {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct ExchangeItem {
+    // order detail id
     #[serde(rename = "id")]
     pub(crate) id: i32,
 

@@ -3,7 +3,7 @@ use crate::{
     common::AppError,
     dto::order::{
         ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderDetailResponse,
-        OrderQueryParams, OrderReceipt, OrderResponse, ReceiptOperationType,
+        OrderQueryParams, OrderResponse, ReceiptItem, ReceiptOperationType, ReceiptResponse,
     },
     map_db_err,
     models::{claims::Claims, tenant_type::TenantType},
@@ -20,6 +20,10 @@ use rust_decimal::Decimal;
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
 pub(crate) struct OrderBaseInfoResponse {
     pub(crate) id: i32,
+
+    #[serde(rename = "customerName")]
+    pub(crate) customer_name: String,
+
     #[serde(rename = "totalAmount")]
     pub(crate) total_amount: Decimal,
 
@@ -169,7 +173,7 @@ impl CommonOrderRepository for MySqlRepository {
                 let order_base = sqlx::query_as!(
                     OrderBaseInfoResponse,
                     r#"
-                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.confirmed_by AS receiver_name,
+                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.confirmed_by AS receiver_name, t.name AS customer_name,
                     o.total_amount, o.discount_amount, o.actual_amount, o.market_contact_number AS receiver_phone,
                     t.address AS delivery_address, pd.delivered_by AS shipper_name, pd.delivery_contact_number AS shipper_phone
                     FROM orders o 
@@ -205,20 +209,46 @@ impl CommonOrderRepository for MySqlRepository {
                             od.actual_price,
                             od.actual_amount,
                             od.total_amount,
-                            od.accepted_quantity,
+                            COALESCE((
+                                SELECT SUM(oii.inspected_qty)
+                                FROM order_inspection_items oii
+                                WHERE oii.order_detail_id = od.id
+                            ), 0) AS accepted_quantity,
                             od.processing_requirements,
                             od.remark,
                             od.status,
-                            COALESCE(SUM(CASE WHEN pd.assignment_id = poa.id THEN pdi.actual_qty ELSE 0 END), 0) AS delivered_quantity
+                            COALESCE(SUM(CASE WHEN pd.assignment_id = poa.id THEN pdi.actual_qty ELSE 0 END), 0) AS delivered_quantity,
+                            (
+                                SELECT CASE
+                                    WHEN oii.accepted = 1 THEN TRUE
+                                    WHEN oii.accepted = 0 THEN FALSE
+                                    ELSE NULL
+                                END
+                                FROM order_inspection_items oii
+                                INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                                WHERE oi.order_id = od.order_id
+                                  AND oii.order_detail_id = od.id
+                                  AND oi.inspection_round = (
+                                      SELECT MAX(inspection_round)
+                                      FROM order_inspections
+                                      WHERE order_id = od.order_id
+                                  )
+                                LIMIT 1
+                            ) AS `last_accept_status: bool`
+                    
                         FROM order_details od
-                        INNER JOIN provider_orders_assignments poa ON od.order_id = poa.order_id AND poa.provider_id = ?
-                        LEFT JOIN provider_deliveries pd ON pd.assignment_id = poa.id
-                        LEFT JOIN provider_delivery_items pdi ON pdi.delivery_id = pd.id AND pdi.order_detail_id = od.id
+                        INNER JOIN provider_orders_assignments poa 
+                            ON od.order_id = poa.order_id AND poa.provider_id = ?
+                        LEFT JOIN provider_deliveries pd 
+                            ON pd.assignment_id = poa.id
+                        LEFT JOIN provider_delivery_items pdi 
+                            ON pdi.delivery_id = pd.id AND pdi.order_detail_id = od.id
                         WHERE od.order_id = ?
-                        GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                                 od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
-                                 od.actual_amount, od.total_amount, od.accepted_quantity, od.processing_requirements,
-                                 od.remark, od.status
+                        GROUP BY 
+                            od.id, od.product_code, od.product_name, od.category_id, od.category_name,
+                            od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
+                            od.actual_amount, od.total_amount, 
+                            od.processing_requirements, od.remark, od.status
                         "#,
                         tenant_id,
                         order_base.id
@@ -226,6 +256,7 @@ impl CommonOrderRepository for MySqlRepository {
                     .fetch_all(&self.pool)
                     .await
                     .map_err(map_db_err!("Failed to get order details for provider"))?;
+                    
 
                 (order_base, order_items)
 
@@ -235,10 +266,13 @@ impl CommonOrderRepository for MySqlRepository {
                 let order_base = sqlx::query_as!(
                     OrderBaseInfoResponse,
                     r#"
-                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, o.contact_phone AS receiver_phone,
-                    o.total_amount, o.discount_amount, o.actual_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
+                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, 
+                    o.contact_phone AS receiver_phone, t.name AS customer_name,
+                    o.total_amount, o.discount_amount, o.actual_amount, o.delivery_address, 
+                    o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
                     FROM orders o
                     INNER JOIN tenants t ON o.market_id = t.id
+                    INNER JOIN tenants t_customer ON o.customer_id = t_customer.id
                     WHERE o.order_code = ? AND t.id = ? AND t.tenant_type = 'MARKET'
                     "#,
                     order_code,
@@ -264,18 +298,39 @@ impl CommonOrderRepository for MySqlRepository {
                         od.actual_price,
                         od.actual_amount,
                         od.total_amount,
-                        od.accepted_quantity,
+                        COALESCE((
+                            SELECT SUM(oii.inspected_qty)
+                            FROM order_inspection_items oii
+                            WHERE oii.order_detail_id = od.id
+                        ), 0) AS accepted_quantity,
                         od.processing_requirements,
                         od.remark,
                         od.status,
-                        COALESCE(SUM(pdi.actual_qty), 0) AS delivered_quantity
+                        COALESCE(SUM(pdi.actual_qty), 0) AS delivered_quantity,
+                        (
+                            SELECT CASE
+                                WHEN oii.accepted = 1 THEN TRUE
+                                WHEN oii.accepted = 0 THEN FALSE
+                                ELSE NULL
+                            END
+                            FROM order_inspection_items oii
+                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                            WHERE oi.order_id = od.order_id
+                              AND oii.order_detail_id = od.id
+                              AND oi.inspection_round = (
+                                  SELECT MAX(inspection_round)
+                                  FROM order_inspections
+                                  WHERE order_id = od.order_id
+                              )
+                            LIMIT 1
+                        ) AS `last_accept_status: bool`
                     FROM order_details od
                     LEFT JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
                     LEFT JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
                     WHERE od.order_id = ?
                     GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
                              od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
-                             od.actual_amount, od.total_amount, od.accepted_quantity, od.processing_requirements,
+                             od.actual_amount, od.total_amount, od.processing_requirements,
                              od.remark, od.status
                     "#,
                     order_base.id
@@ -290,8 +345,9 @@ impl CommonOrderRepository for MySqlRepository {
                 let order_base = sqlx::query_as!(
                     OrderBaseInfoResponse,
                     r#"
-                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, o.contact_phone AS receiver_phone,
-                    o.total_amount, o.discount_amount, o.actual_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
+                    SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, 
+                    o.contact_phone AS receiver_phone, t.name AS customer_name, o.total_amount, o.discount_amount, 
+                    o.actual_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
                     FROM orders o
                     INNER JOIN tenants t ON o.customer_id = t.id
                     WHERE o.order_code = ? AND t.id = ? AND t.tenant_type = 'CUSTOMER'
@@ -319,19 +375,40 @@ impl CommonOrderRepository for MySqlRepository {
                         od.actual_price,
                         od.actual_amount,
                         od.total_amount,
-                        od.accepted_quantity,
+                        COALESCE((
+                            SELECT SUM(oii.inspected_qty)
+                            FROM order_inspection_items oii
+                            WHERE oii.order_detail_id = od.id
+                        ), 0) AS accepted_quantity,
                         od.processing_requirements,
                         od.remark,
                         od.status,
                         -- CUSTOMER 看到的发货量是 MARKET 的签收数量
-                        COALESCE(SUM(CASE WHEN oi_market.inspected_by_type = 'MARKET' THEN oii_market.inspected_qty ELSE 0 END), 0) AS delivered_quantity
+                        COALESCE(SUM(CASE WHEN oi_market.inspected_by_type = 'MARKET' THEN oii_market.inspected_qty ELSE 0 END), 0) AS delivered_quantity,
+                        (
+                            SELECT CASE
+                                WHEN oii.accepted = 1 THEN TRUE
+                                WHEN oii.accepted = 0 THEN FALSE
+                                ELSE NULL
+                            END
+                            FROM order_inspection_items oii
+                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                            WHERE oi.order_id = od.order_id
+                              AND oii.order_detail_id = od.id
+                              AND oi.inspection_round = (
+                                  SELECT MAX(inspection_round)
+                                  FROM order_inspections
+                                  WHERE order_id = od.order_id
+                              )
+                            LIMIT 1
+                        ) AS `last_accept_status: bool`
                     FROM order_details od
                     LEFT JOIN order_inspections oi_market ON od.order_id = oi_market.order_id AND oi_market.inspected_by_type = 'MARKET'
                     LEFT JOIN order_inspection_items oii_market ON oi_market.id = oii_market.inspection_id AND od.id = oii_market.order_detail_id
                     WHERE od.order_id = ?
                     GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
                              od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
-                             od.actual_amount, od.total_amount, od.accepted_quantity, od.processing_requirements,
+                             od.actual_amount, od.total_amount, od.processing_requirements,
                              od.remark, od.status
                     "#,
                     order_base.id
@@ -346,23 +423,23 @@ impl CommonOrderRepository for MySqlRepository {
 
 
         // 查询退货换货记录（所有租户类型都返回）
-        let receipt_rows = sqlx::query!(
-            r#"
+        // 按 return_exchange_records.id 分组，每个 receipt 包含多个 items
+        let receipt_rows = sqlx::query!(r#"
         SELECT 
-            re.order_detail_id,
-            o.order_code,
+            re.id AS receipt_id,
+            re.operation_type,
+            re.status,
+            re.created_at,
             od.product_code,
             od.product_name,
-            re.operation_type,
             re.quantity,
-            re.reason,
             od.unit,
-            re.evidence_images
+            re.reason
         FROM return_exchange_records re
         JOIN order_details od ON re.order_detail_id = od.id
         JOIN orders o ON od.order_id = o.id
         WHERE o.order_code = ?
-        ORDER BY re.created_at DESC
+        ORDER BY re.created_at DESC, re.id DESC
         "#,
             order_code
         )
@@ -370,25 +447,39 @@ impl CommonOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to get receipt records"))?;
 
-        let receipts = receipt_rows
-            .into_iter()
-            .map(|r| {
-                let operation_type = ReceiptOperationType::try_from(r.operation_type)
-                    .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
+        // 按 receipt_id 分组，组装成 ReceiptResponse 格式
+        use std::collections::HashMap;
+        let mut receipts_map: HashMap<i32, ReceiptResponse> = HashMap::new();
 
-                Ok(OrderReceipt {
-                    order_detail_id: r.order_detail_id,
-                    order_code: r.order_code,
-                    product_code: r.product_code,
-                    product_name: r.product_name,
-                    operation_type,
-                    quantity: r.quantity,
-                    reason: r.reason,
-                    unit: r.unit,
-                    evidence_images: r.evidence_images,
+        for row in receipt_rows {
+            let operation_type = ReceiptOperationType::try_from(row.operation_type.clone())
+                .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
+
+            let receipt_item = ReceiptItem {
+                product_id: row.product_code,
+                product_name: row.product_name,
+                quantity: row.quantity,
+                unit: row.unit,
+                reason: row.reason,
+            };
+
+            receipts_map
+                .entry(row.receipt_id)
+                .and_modify(|receipt| {
+                    receipt.items.push(receipt_item.clone());
                 })
-            })
-            .collect::<Result<Vec<_>, AppError>>()?;
+                .or_insert_with(|| ReceiptResponse {
+                    id: row.receipt_id,
+                    operation_type,
+                    status: row.status,
+                    items: vec![receipt_item],
+                    created_at: row.created_at,
+                });
+        }
+
+        // 转换为 Vec 并保持排序（按创建时间倒序）
+        let mut receipts: Vec<ReceiptResponse> = receipts_map.into_values().collect();
+        receipts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         Ok(Some(OrderDetailResponse {
             order: order_base,

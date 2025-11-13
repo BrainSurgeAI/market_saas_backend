@@ -13,7 +13,7 @@ use tracing::{debug, error};
 
 #[async_trait]
 pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
-    async fn process_order_receipt(
+    async fn insert_order_inspection_with_aftersales(
         &self,
         receipt: &OrderReceipt,
         operator: &str,
@@ -23,11 +23,9 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
 
     async fn update_order_status(
         &self,
-        tenant_type: TenantType,
-        tenant_hash: &str,
         order_code: &str,
         action: OrderAction,
-        operator: &str,
+        claims: &Claims
     ) -> Result<OrderStatus, AppError>;
 
     async fn begin_inspect_order(
@@ -52,7 +50,7 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
 
 #[async_trait]
 impl SharedMarketCustomerOrderRepository for MySqlRepository {
-    async fn process_order_receipt(
+    async fn insert_order_inspection_with_aftersales(
         &self,
         receipt: &OrderReceipt,
         operator: &str,
@@ -77,7 +75,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         // 验证订单存在且状态正确
         let record = sqlx::query!(r#"
-            SELECT o.id, od.id as detail_id, o.order_status, oi.id as inspection_id, 
+            SELECT od.id as detail_id, o.order_status, oi.id as inspection_id, 
                 pdi.actual_qty as actual_quantity, pdi.subtotal as total_amount, od.actual_price as actual_price
             FROM orders o 
             INNER JOIN order_details od ON o.id = od.order_id
@@ -100,7 +98,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             ))
         })?;
 
-        let order_id = record.id;
+       // let order_id = record.id;
         let detail_id = record.detail_id;
         let inspection_id = record.inspection_id;
         let actual_price = record.actual_price;
@@ -134,9 +132,9 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 .last_insert_id();
 
                 sqlx::query!(
-                    r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id, status, created_by)
-                      VALUES (?, ?, ?, ?, ?, ?)"#,
-                    return_exchange_id, record.total_amount, "ORIGINAL", transaction_id, "COMPLETED", operator
+                    r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id)
+                      VALUES (?, ?, ?, ?)"#,
+                    return_exchange_id, record.total_amount, "ORIGINAL", transaction_id
                 )
                 .execute(&mut *tx)
                 .await
@@ -175,12 +173,12 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
     async fn update_order_status(
         &self,
-        tenant_type: TenantType,
-        _tenant_hash: &str,
         order_code: &str,
         action: OrderAction,
-        operator: &str,
+        claims: &Claims
     ) -> Result<OrderStatus, AppError> {
+
+        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
         let mut tx = self
             .pool
             .begin()
@@ -188,6 +186,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
         // Use SELECT FOR UPDATE to lock the record, prevent concurrent modification
+        // TODO: check if the order is belongs with the tenant_relationships table
         let order = sqlx::query!(
             r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
             order_code
@@ -212,15 +211,15 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         debug!("Next status: {}", next_status);
 
         // 因市场前面验收过，对 order_details 表中的 status 进行重置到待验收
-        if next_status == OrderStatus::MarketDelivering {
-            sqlx::query!(
-                r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
-                order.id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update sub order status"))?;
-        }
+        // if next_status == OrderStatus::MarketDelivering {
+        //     sqlx::query!(
+        //         r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
+        //         order.id
+        //     )
+        //     .execute(&mut *tx)
+        //     .await
+        //     .map_err(map_db_err!("Failed to update sub order status"))?;
+        // }
 
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
@@ -231,26 +230,17 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to update order status"))?;
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, order.order_status, next_status.to_str(), operator, action.description()
+        self.insert_order_status_history(
+            &mut tx,
+            order.id,
+            order.order_status.as_str(),
+            next_status,
+            claims.real_name.as_str(),
+            action
         )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+        .await?;
 
         debug!("Order status updated to {}", next_status);
-
-        // 如果是客户开始验收，则需要重置子订单状态到待验收
-        // if tenant_type == TenantType::Customer && action == OrderAction::CustomerInspect {
-        //     sqlx::query!(
-        //         r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
-        //         order.id
-        //     )
-        //     .execute(&mut *tx)
-        //     .await
-        //     .map_err(map_db_err!("Failed to reset sub order status"))?;
-        // }
 
         // 如果客户直接确认收货，则将子订单更新到
         if tenant_type == TenantType::Customer && action == OrderAction::Complete {
@@ -281,6 +271,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
+        // TODO: check if the order is belongs with the tenant_relationships table by tenant_type
         let order = sqlx::query!(
             r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
             order_code
@@ -299,22 +290,44 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get user"))?
         .ok_or_else(|| AppError::NotFound(format!("User not found: {}", claims.username)))?;
 
+        // Before create a new order inspection record, check if order inspections table has a record with the same order_id
+        // get the inspection_round from the order inspections table
+        let inspection = sqlx::query!(
+            r#"SELECT id, inspection_round FROM order_inspections WHERE order_id = ?"#,
+            order.id
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get inspection round"))?;
+
+        let (parent_id, inspection_round) = if let Some(inspection_record) = inspection {
+            (Some(inspection_record.id), inspection_record.inspection_round + 1)
+        } else {
+            (None, 1)
+        };
         // Create a new order inspection record
         sqlx::query!(
-            r#"INSERT INTO order_inspections (order_id, inspected_by_type, inspected_by_id) VALUES (?, ?, ?)"#,
-            order.id, claims.tenant_type, user_record.id
+            r#"INSERT INTO order_inspections (order_id, inspected_by_type, inspected_by_id, inspection_round, parent_id) VALUES (?, ?, ?, ?, ?)"#,
+            order.id, claims.tenant_type, user_record.id, inspection_round, parent_id
         )
         .execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to create order inspection record"))?;
 
         // Update the order status to MarketInspecting or CustomerInspecting
-        let next_status = MySqlRepository::validate_and_transition_order_state(
-            &order.order_status,
+        let next_status = OrderStateMachine::next_state(
+            OrderStatus::try_from(order.order_status.as_str())?,
             action,
-            TenantType::try_from(claims.tenant_type.as_str())?,
-            "订单状态不正确，无法进行验收",
-        )?;
+            TenantType::try_from(claims.tenant_type.as_str())?
+        )
+        .map_err(|e| {
+            error!("Order state transition error: {}", e);
+            AppError::Validation(format!(
+                "Order status is not correct: {} -> {}",
+                order.order_status,
+                action.description()
+            ))
+        })?;
 
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
@@ -325,13 +338,16 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to update order status"))?;
 
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, order.order_status, next_status.to_str(), claims.real_name, action.description()
+        // insert order status history
+        self.insert_order_status_history(
+            &mut tx,
+            order.id,
+            order.order_status.as_str(),
+            next_status,
+            claims.real_name.as_str(),
+            action
         )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+        .await?;
 
         debug!("Order status updated to {}", next_status);
         tx.commit()
@@ -439,15 +455,16 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to update order status"))?;
 
         // insert order status history
-        sqlx::query!(
-            r#"INSERT INTO order_status_history (order_id, from_status, to_status, changed_by, change_reason ) VALUES (?, ?, ?, ?, ?)"#,
-            product_statuses.first().unwrap().order_id, product_statuses.first().unwrap().order_status, next_status.to_str(), claims.real_name, action.description()
+        self.insert_order_status_history(
+            &mut tx,
+            product_statuses.first().unwrap().order_id,
+            product_statuses.first().unwrap().order_status.as_str(),
+            next_status,
+            claims.real_name.as_str(),
+            action
         )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert order status history"))?;
+        .await?;
 
-        
         if action == OrderAction::Complete {
             // 查询 CUSTOMER 签收的数量，更新 order_details 表中的 accepted_quantity 和 actual_amount
             let customer_inspection_items = sqlx::query!(

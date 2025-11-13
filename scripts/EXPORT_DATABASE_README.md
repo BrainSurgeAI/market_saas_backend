@@ -16,7 +16,7 @@
 
 ### 1. 使用默认配置（推荐）
 
-如果你的 MySQL 运行在 Docker 中，并且端口映射到了 3307：
+如果你的 MySQL 运行在 Docker 中，并且端口映射到了 3306：
 
 ```bash
 # 导出整个数据库（表结构 + 数据）
@@ -44,7 +44,7 @@
 docker ps | grep mysql
 
 # 使用容器名称导出
-./scripts/export_database.sh -c mysql_container_name
+./scripts/export_database.sh -c mysql_market_saas
 ```
 
 ### 3. 自定义连接参数
@@ -54,7 +54,7 @@ docker ps | grep mysql
   -u root \
   -p your_password \
   -H 127.0.0.1 \
-  -P 3307 \
+  -P 3306 \
   -d tenant_saas \
   -o ./backup
 ```
@@ -65,7 +65,7 @@ docker ps | grep mysql
 export MYSQL_USER=root
 export MYSQL_PASS=your_password
 export MYSQL_HOST=127.0.0.1
-export MYSQL_PORT=3307
+export MYSQL_PORT=3306
 export MYSQL_DB=tenant_saas
 export MYSQL_CONTAINER=mysql_container  # 可选
 export OUTPUT_DIR=./backup  # 可选

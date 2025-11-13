@@ -1,0 +1,10 @@
+数据库导出信息
+================
+导出时间: 2025-11-13 19:51:23
+数据库名称: market_saas
+数据库主机: 127.0.0.1
+数据库端口: 3306
+数据库用户: market_saas
+导出类型: structure
+导出表: _sqlx_test_databases,categories,customer_category_discount_history,customer_category_discounts,delivery_staff,exchange_items,menu_config,messages,order_details,order_inspection_items,order_inspections,order_status_history,orders,permissions,product_prices,product_processing_fee_relations,product_processing_fees,products,provider_deliveries,provider_delivery_items,provider_financial_profiles,provider_orders_assignments,reconciliation_statement_details,reconciliation_statement_orders,reconciliation_statements,refund_records,return_exchange_records,role_menu,role_permissions,roles,temp_image_urls,tenant_relationships,tenants,user_category_assignments,user_roles,users
+Docker 容器: mysql_market_saas

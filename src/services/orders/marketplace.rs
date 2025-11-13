@@ -87,16 +87,7 @@ where
         &order_code, tenant_type, action
     );
 
-    let next_status = repo
-        .update_order_status(
-            tenant_type,
-            &claims.tenant_hash,
-            &order_code,
-            action,
-            //   target_status,
-            &claims.username,
-        )
-        .await?;
+    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
 
     info!(
         "Order {} delivered to customer by {} action {}",

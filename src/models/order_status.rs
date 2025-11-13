@@ -79,6 +79,29 @@ impl OrderStatus {
         }
     }
 
+    pub(crate) fn description(&self) -> &'static str {
+        match self {
+            OrderStatus::Pending => "待分配供应商",
+            OrderStatus::Assigned => "已分配供应商",
+            OrderStatus::SupplierPreparing => "供应商备货中",
+            OrderStatus::SupplierDelivering => "供应商配送中",
+            OrderStatus::MarketInspecting => "市场验货中",
+            OrderStatus::MarketAccepted => "市场验收完成",
+            OrderStatus::MarketDelivering => "市场送货中",
+            OrderStatus::CustomerInspecting => "客户验货中",
+            OrderStatus::Completed => "客户完成订单",
+            OrderStatus::ReturnRequested => "退货申请中",
+            OrderStatus::ExchangeRequested => "换货申请中",
+            OrderStatus::ExchangeInProgress => "换货进行中",
+            OrderStatus::ExchangeDelivering => "换货配送中",
+            OrderStatus::ExchangeInspecting => "换货验货中",
+            OrderStatus::ExchangeNewDelivering => "换货商品配送中",
+            OrderStatus::ExchangeCompleted => "换货完成",
+            OrderStatus::Returned => "退货完成",
+            OrderStatus::Cancelled => "订单取消",
+        }
+    }
+
     /// 检查状态是否为终态（不可再转移）
     pub(super) fn is_terminal(&self) -> bool {
         matches!(

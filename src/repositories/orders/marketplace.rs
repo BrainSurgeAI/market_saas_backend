@@ -49,8 +49,10 @@ impl MarketplaceOrderRepository for MySqlRepository {
         assign_by: &str,
     ) -> Result<OrderStatus, AppError> {
         use chrono::Local;
-        let current = OrderStatus::Pending;
 
+        // TODO: check if the provider is active and is belongs with the tenant_relationships table
+        //       and check if the self(market) is belongs with the orders market_id
+        
         // begin transaction
         let mut tx = self
             .pool
@@ -74,13 +76,6 @@ impl MarketplaceOrderRepository for MySqlRepository {
         let order =
             order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
 
-        if order.order_status != current.to_str() {
-            return Err(AppError::Validation(format!(
-                "订单 {} 状态不是可分配状态 (当前: {})",
-                order_code, order.order_status
-            )));
-        }
-
         if order.delivery_date < Local::now().date_naive() {
             return Err(AppError::Validation(format!(
                 "不能指派已过期订单 {}",
@@ -88,15 +83,30 @@ impl MarketplaceOrderRepository for MySqlRepository {
             )));
         }
 
-        let next =
-            OrderStateMachine::next_state(current, OrderAction::AssignSupplier, TenantType::Market)
-                .map_err(|e| {
-                    error!("状态流转错误: {}", e);
-                    AppError::Validation("Invalid transition".to_string())
-                })?;
+        let next = OrderStateMachine::next_state(
+            OrderStatus::try_from(order.order_status.as_str())?,
+            OrderAction::AssignSupplier,
+            TenantType::Market,
+        )
+        .map_err(|e| {
+            error!("状态流转错误: {}", e);
+            AppError::Validation("Invalid transition".to_string())
+        })?;
 
         debug!("Next status: {:?}", next);
 
+        // Assign order to provider
+        sqlx::query!(
+            r#"INSERT INTO provider_orders_assignments (order_id, provider_id)
+                       VALUES (?, ?)"#,
+            order.id,
+            provider_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert provider orders assignments"))?;
+
+        // update order status to assigned, confirmed_at, confirmed_by, market_contact_number
         let affected = sqlx::query!(
             r#"
                 UPDATE orders AS o
@@ -114,7 +124,7 @@ impl MarketplaceOrderRepository for MySqlRepository {
             next.to_str(),
             confirmed_by, // confirmed_by field
             order.id,
-            current.to_str()
+            order.order_status.as_str()
         )
         .execute(&mut *tx)
         .await
@@ -128,20 +138,11 @@ impl MarketplaceOrderRepository for MySqlRepository {
             )));
         }
 
-        sqlx::query!(
-            r#"INSERT INTO provider_orders_assignments (order_id, provider_id)
-               VALUES (?, ?)"#,
-            order.id,
-            provider_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to insert provider orders assignments"))?;
-
+        // insert order status history
         self.insert_order_status_history(
             &mut tx,
             order.id,
-            current.to_str(),
+            order.order_status.as_str(),
             next,
             confirmed_by,
             OrderAction::AssignSupplier,

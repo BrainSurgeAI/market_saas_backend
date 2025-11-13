@@ -12,12 +12,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 默认配置（可以从环境变量或命令行参数覆盖）
-DB_USER="${MYSQL_USER:-root}"
+DB_USER="${MYSQL_USER:-market_saas}"
 DB_PASS="${MYSQL_PASS:-Nihaoccj123}"
 DB_HOST="${MYSQL_HOST:-127.0.0.1}"
-DB_PORT="${MYSQL_PORT:-3307}"
-DB_NAME="${MYSQL_DB:-tenant_saas}"
-DOCKER_CONTAINER="${MYSQL_CONTAINER:-}"
+DB_PORT="${MYSQL_PORT:-3306}"
+DB_NAME="${MYSQL_DB:-market_saas}"
+DOCKER_CONTAINER="${MYSQL_CONTAINER:-mysql_market_saas}"
 OUTPUT_DIR="${OUTPUT_DIR:-./database_backup}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
@@ -30,11 +30,11 @@ show_help() {
 
 选项:
     -h, --help              显示帮助信息
-    -u, --user USER        数据库用户名 (默认: root)
+    -u, --user USER        数据库用户名 (默认: market_saas)
     -p, --password PASS     数据库密码 (默认: Nihaoccj123)
     -H, --host HOST         数据库主机 (默认: 127.0.0.1)
-    -P, --port PORT         数据库端口 (默认: 3307)
-    -d, --database DB       数据库名称 (默认: tenant_saas)
+    -P, --port PORT         数据库端口 (默认: 3306)
+    -d, --database DB       数据库名称 (默认: market_saas)
     -c, --container NAME    Docker 容器名称（如果使用 Docker）
     -o, --output DIR        输出目录 (默认: ./database_backup)
     -t, --tables TABLES     指定要导出的表，用逗号分隔（默认: 所有表）
