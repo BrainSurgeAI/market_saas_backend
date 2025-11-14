@@ -172,181 +172,182 @@ impl ReconciliationStatementRepository for MySqlRepository {
         provider_id: i32,
         statement_code: &str,
     ) -> Result<i32, AppError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(map_db_err!("Failed to begin transaction"))?;
+        // let mut tx = self
+        //     .pool
+        //     .begin()
+        //     .await
+        //     .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        // 1. 创建对账单主表记录（暂时金额为0，后面会更新）
-        let statement_id = sqlx::query!(
-            r#"
-            INSERT INTO reconciliation_statements (
-                statement_code, customer_id, market_id, provider_id,
-                start_date, end_date, total_amount, discount_amount,
-                actual_amount, status, created_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 'PENDING', 'system', NOW(), NOW())
-            "#,
-            statement_code,
-            customer_id,
-            market_id,
-            provider_id,
-            start_date,
-            end_date
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to create reconciliation statement"))?
-        .last_insert_id() as i32;
+        // // 1. 创建对账单主表记录（暂时金额为0，后面会更新）
+        // let statement_id = sqlx::query!(
+        //     r#"
+        //     INSERT INTO reconciliation_statements (
+        //         statement_code, customer_id, market_id, provider_id,
+        //         start_date, end_date, total_amount, discount_amount,
+        //         actual_amount, status, created_by, created_at, updated_at
+        //     ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 'PENDING', 'system', NOW(), NOW())
+        //     "#,
+        //     statement_code,
+        //     customer_id,
+        //     market_id,
+        //     provider_id,
+        //     start_date,
+        //     end_date
+        // )
+        // .execute(&mut *tx)
+        // .await
+        // .map_err(map_db_err!("Failed to create reconciliation statement"))?
+        // .last_insert_id() as i32;
 
-        // 2. 查询该组合下的已完成订单
-        let orders = sqlx::query!(
-            r#"
-            SELECT o.id, o.order_code, DATE(o.created_at) as order_date,
-                    o.total_amount, o.discount_amount, o.actual_amount
-            FROM orders o
-            JOIN provider_orders_assignments po ON o.id = po.order_id
-            WHERE o.customer_id = ?
-            AND o.market_id = ?
-            AND po.provider_id = ?
-            AND o.created_at BETWEEN ? AND ?
-            AND o.order_status = 'COMPLETED'
-            AND o.deleted_at IS NULL
-            "#,
-            customer_id,
-            market_id,
-            provider_id,
-            start_date,
-            end_date
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to fetch orders"))?;
+        // // 2. 查询该组合下的已完成订单
+        // let orders = sqlx::query!(
+        //     r#"
+        //     SELECT o.id, o.order_code, DATE(o.created_at) as order_date,
+        //             o.total_amount, o.discount_amount, o.actual_amount
+        //     FROM orders o
+        //     JOIN provider_orders_assignments po ON o.id = po.order_id
+        //     WHERE o.customer_id = ?
+        //     AND o.market_id = ?
+        //     AND po.provider_id = ?
+        //     AND o.created_at BETWEEN ? AND ?
+        //     AND o.order_status = 'COMPLETED'
+        //     AND o.deleted_at IS NULL
+        //     "#,
+        //     customer_id,
+        //     market_id,
+        //     provider_id,
+        //     start_date,
+        //     end_date
+        // )
+        // .fetch_all(&mut *tx)
+        // .await
+        // .map_err(map_db_err!("Failed to fetch orders"))?;
 
-        // 如果没有订单，则回滚事务并返回错误
-        if orders.is_empty() {
-            tx.rollback()
-                .await
-                .map_err(map_db_err!("Failed to rollback transaction"))?;
-            return Err(AppError::NotFound(format!(
-                "未找到需要对账的订单: customer_id={}, market_id={}, provider_id={}",
-                customer_id, market_id, provider_id
-            )));
-        }
+        // // 如果没有订单，则回滚事务并返回错误
+        // if orders.is_empty() {
+        //     tx.rollback()
+        //         .await
+        //         .map_err(map_db_err!("Failed to rollback transaction"))?;
+        //     return Err(AppError::NotFound(format!(
+        //         "未找到需要对账的订单: customer_id={}, market_id={}, provider_id={}",
+        //         customer_id, market_id, provider_id
+        //     )));
+        // }
 
-        // 3. 插入对账单订单关联表和计算金额总和
-        let mut total_amount_sum = 0.0;
-        let mut discount_amount_sum = 0.0;
-        let mut actual_amount_sum = 0.0;
+        // // 3. 插入对账单订单关联表和计算金额总和
+        // let mut total_amount_sum = 0.0;
+        // let mut discount_amount_sum = 0.0;
+        // let mut actual_amount_sum = 0.0;
 
-        for order in &orders {
-            // 3.1 插入对账单订单关联表
-            sqlx::query!(
-                r#"
-                INSERT INTO reconciliation_statement_orders (
-                    statement_id, order_id, order_code, order_date,
-                    total_amount, actual_amount, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, NOW())
-                "#,
-                statement_id,
-                order.id,
-                &order.order_code,
-                &order.order_date,
-                &order.total_amount,
-                &order.actual_amount
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!(
-                "Failed to create reconciliation statement order relation"
-            ))?;
+        // for order in &orders {
+        //     // 3.1 插入对账单订单关联表
+        //     sqlx::query!(
+        //         r#"
+        //         INSERT INTO reconciliation_statement_orders (
+        //             statement_id, order_id, order_code, order_date,
+        //             total_amount, actual_amount, created_at
+        //         ) VALUES (?, ?, ?, ?, ?, ?, NOW())
+        //         "#,
+        //         statement_id,
+        //         order.id,
+        //         &order.order_code,
+        //         &order.order_date,
+        //         &order.total_amount,
+        //         &order.actual_amount
+        //     )
+        //     .execute(&mut *tx)
+        //     .await
+        //     .map_err(map_db_err!(
+        //         "Failed to create reconciliation statement order relation"
+        //     ))?;
 
-            // 3.2 查询订单详情
-            let order_details = sqlx::query!(
-                r#"
-                SELECT od.id, od.product_code, od.product_name, od.category_name, 
-                      od.unit, od.quantity, od.accepted_quantity,
-                      od.original_price, od.actual_price,
-                      od.total_amount, od.actual_amount
-                FROM order_details od
-                WHERE od.order_id = ?
-                "#,
-                order.id
-            )
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to fetch order details"))?;
+        //     // 3.2 查询订单详情
+        //     let order_details = sqlx::query!(
+        //         r#"
+        //         SELECT od.id, od.product_code, od.product_name, od.category_name, 
+        //               od.unit, od.ordered_qty, od.accepted_quantity,
+        //               od.unit_price, od.discounted_unit_price,
+        //               od.ordered_amount, od.net_amount
+        //         FROM order_details od
+        //         WHERE od.order_id = ?
+        //         "#,
+        //         order.id
+        //     )
+        //     .fetch_all(&mut *tx)
+        //     .await
+        //     .map_err(map_db_err!("Failed to fetch order details"))?;
 
-            for detail in &order_details {
-                // 按照reconciliation_statement_details表的实际结构插入数据
-                sqlx::query!(
-                    r#"
-                    INSERT INTO reconciliation_statement_details (
-                        statement_id, order_detail_id, product_code, product_name,
-                        category_name, unit, original_quantity, actual_quantity,
-                        receipt_quantity, returned_quantity, price, original_amount, actual_amount,
-                        order_date, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NOW())
-                    "#,
-                    statement_id,
-                    detail.id,
-                    &detail.product_code,
-                    &detail.product_name,
-                    &detail.category_name,
-                    &detail.unit,
-                    &detail.quantity,
-                    &detail.accepted_quantity,
-                    &detail.accepted_quantity, // 假设收货数量等于实际数量
-                    &detail.actual_price,
-                    &detail.total_amount,
-                    &detail.actual_amount,
-                    &order.order_date
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!(
-                    "Failed to create reconciliation statement detail"
-                ))?;
-            }
+        //     for detail in &order_details {
+        //         // 按照reconciliation_statement_details表的实际结构插入数据
+        //         sqlx::query!(
+        //             r#"
+        //             INSERT INTO reconciliation_statement_details (
+        //                 statement_id, order_detail_id, product_code, product_name,
+        //                 category_name, unit, original_quantity, actual_quantity,
+        //                 receipt_quantity, returned_quantity, price, original_amount, actual_amount,
+        //                 order_date, created_at
+        //             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NOW())
+        //             "#,
+        //             statement_id,
+        //             detail.id,
+        //             &detail.product_code,
+        //             &detail.product_name,
+        //             &detail.category_name,
+        //             &detail.unit,
+        //             &detail.quantity,
+        //             &detail.accepted_quantity,
+        //             &detail.accepted_quantity, // 假设收货数量等于实际数量
+        //             &detail.actual_price,
+        //             &detail.total_amount,
+        //             &detail.actual_amount,
+        //             &order.order_date
+        //         )
+        //         .execute(&mut *tx)
+        //         .await
+        //         .map_err(map_db_err!(
+        //             "Failed to create reconciliation statement detail"
+        //         ))?;
+        //     }
 
-            // 3.3 累加金额
-            total_amount_sum += order.total_amount.to_string().parse::<f64>().unwrap_or(0.0);
-            discount_amount_sum += order
-                .discount_amount
-                .to_string()
-                .parse::<f64>()
-                .unwrap_or(0.0);
-            actual_amount_sum += order
-                .actual_amount
-                .to_string()
-                .parse::<f64>()
-                .unwrap_or(0.0);
-        }
+        //     // 3.3 累加金额
+        //     total_amount_sum += order.total_amount.to_string().parse::<f64>().unwrap_or(0.0);
+        //     discount_amount_sum += order
+        //         .discount_amount
+        //         .to_string()
+        //         .parse::<f64>()
+        //         .unwrap_or(0.0);
+        //     actual_amount_sum += order
+        //         .actual_amount
+        //         .to_string()
+        //         .parse::<f64>()
+        //         .unwrap_or(0.0);
+        // }
 
-        // 4. 更新对账单主表的金额
-        sqlx::query!(
-            r#"
-            UPDATE reconciliation_statements
-            SET total_amount = ?, discount_amount = ?, actual_amount = ?, updated_at = NOW()
-            WHERE id = ?
-            "#,
-            total_amount_sum,
-            discount_amount_sum,
-            actual_amount_sum,
-            statement_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!(
-            "Failed to update reconciliation statement amounts"
-        ))?;
+        // // 4. 更新对账单主表的金额
+        // sqlx::query!(
+        //     r#"
+        //     UPDATE reconciliation_statements
+        //     SET total_amount = ?, discount_amount = ?, actual_amount = ?, updated_at = NOW()
+        //     WHERE id = ?
+        //     "#,
+        //     total_amount_sum,
+        //     discount_amount_sum,
+        //     actual_amount_sum,
+        //     statement_id
+        // )
+        // .execute(&mut *tx)
+        // .await
+        // .map_err(map_db_err!(
+        //     "Failed to update reconciliation statement amounts"
+        // ))?;
 
-        // 5. 提交事务
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
+        // // 5. 提交事务
+        // tx.commit()
+        //     .await
+        //     .map_err(map_db_err!("Failed to commit transaction"))?;
 
-        Ok(statement_id)
+        // Ok(statement_id)
+        Ok(0)
     }
 
     async fn get_statements_by_tenant_and_date(

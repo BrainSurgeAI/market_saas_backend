@@ -2,7 +2,7 @@ mod common;
 mod customer;
 mod marketplace;
 mod provider;
-mod shared_market_provider;
+mod shared_market_customer;
 
 use axum::Router;
 
@@ -14,6 +14,6 @@ pub(super) fn order_routes() -> Router {
             .merge(customer::customer_routes())
             .merge(marketplace::marketplace_routes())
             .merge(provider::provider_routes())
-            .merge(shared_market_provider::shared_market_provider_routes()),
+            .merge(shared_market_customer::shared_market_customer_routes()),
     )
 }

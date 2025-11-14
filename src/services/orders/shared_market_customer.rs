@@ -71,7 +71,7 @@ where
 }
 
 /// Market or Customer begin to inspect the order
-pub(crate) async fn begin_inspect_order<T>(
+pub(crate) async fn start_order_inspection<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -98,9 +98,7 @@ where
         }
     };
 
-    let next_status = repo
-        .begin_inspect_order(&order_code, &claims, action)
-        .await?;
+    let next_status = repo.insert_order_inspection(&order_code, &claims, action).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,
@@ -141,37 +139,37 @@ where
 }
 
 /// 市场和客户通过订单验收, 针对主订单
-pub(crate) async fn accept_order<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Path(order_code): Path<String>,
-) -> Result<Json<ApiResponse<String>>, AppError>
-where
-    T: SharedMarketCustomerOrderRepository + Send + Sync,
-{
-    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
-    let action = match tenant_type {
-        TenantType::Market => OrderAction::MarketAccept,
-        TenantType::Customer => OrderAction::Complete,
-        _ => {
-            return Err(AppError::Forbidden(format!(
-                "{} 不能执行签收操作",
-                claims.tenant_type
-            )));
-        }
-    };
+// pub(crate) async fn accept_order<T>(
+//     Extension(repo): Extension<T>,
+//     Extension(context): Extension<RequestContext>,
+//     Extension(claims): Extension<Claims>,
+//     Path(order_code): Path<String>,
+// ) -> Result<Json<ApiResponse<String>>, AppError>
+// where
+//     T: SharedMarketCustomerOrderRepository + Send + Sync,
+// {
+//     let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+//     let action = match tenant_type {
+//         TenantType::Market => OrderAction::MarketAccept,
+//         TenantType::Customer => OrderAction::Complete,
+//         _ => {
+//             return Err(AppError::Forbidden(format!(
+//                 "{} 不能执行签收操作",
+//                 claims.tenant_type
+//             )));
+//         }
+//     };
 
-    debug!(
-        "Accept order {} by {} action {}",
-        &order_code, tenant_type, action
-    );
-    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
-    Ok(Json(ApiResponse::new(
-        Some(String::from(next_status.to_str())),
-        &context,
-    )))
-}
+//     debug!(
+//         "Accept order {} by {} action {}",
+//         &order_code, tenant_type, action
+//     );
+//     let next_status = repo.update_order_status(&order_code, action, &claims).await?;
+//     Ok(Json(ApiResponse::new(
+//         Some(String::from(next_status.to_str())),
+//         &context,
+//     )))
+// }
 
 pub(crate) async fn return_order<T>(
     Extension(repo): Extension<T>,

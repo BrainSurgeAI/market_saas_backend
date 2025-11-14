@@ -1287,7 +1287,7 @@ impl OrderRepository for MySqlRepository {
             r#"SELECT
                 od.product_code,
                 od.product_name,
-                SUM(od.quantity) AS total_quantity,
+                SUM(od.ordered_qty) AS total_quantity,
                 od.unit,
                 od.processing_requirements,
                 c.name AS customer_name,

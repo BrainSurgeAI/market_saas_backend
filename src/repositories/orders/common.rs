@@ -24,14 +24,14 @@ pub(crate) struct OrderBaseInfoResponse {
     #[serde(rename = "customerName")]
     pub(crate) customer_name: String,
 
-    #[serde(rename = "totalAmount")]
-    pub(crate) total_amount: Decimal,
+    #[serde(rename = "orderedAmount")]
+    pub(crate) ordered_amount: Decimal,
 
     #[serde(rename = "discountAmount")]
     pub(crate) discount_amount: Decimal,
 
-    #[serde(rename = "actualAmount")]
-    pub(crate) actual_amount: Decimal,
+    #[serde(rename = "netAmount")]
+    pub(crate) net_amount: Decimal,
 
     #[serde(rename = "deliveryAddress")]
     pub(crate) delivery_address: String,
@@ -98,8 +98,8 @@ impl CommonOrderRepository for MySqlRepository {
         let basic_query = r#"SELECT 
                    o.order_code, 
                    o.delivery_address, 
-                   o.total_amount,
-                   o.actual_amount, 
+                   o.ordered_amount,
+                   o.net_amount, 
                    o.delivery_date, 
                    o.order_status,
                    o.created_at,
@@ -174,7 +174,7 @@ impl CommonOrderRepository for MySqlRepository {
                     OrderBaseInfoResponse,
                     r#"
                     SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.confirmed_by AS receiver_name, t.name AS customer_name,
-                    o.total_amount, o.discount_amount, o.actual_amount, o.market_contact_number AS receiver_phone,
+                    o.ordered_amount, o.discount_amount, o.net_amount, o.market_contact_number AS receiver_phone,
                     t.address AS delivery_address, pd.delivered_by AS shipper_name, pd.delivery_contact_number AS shipper_phone
                     FROM orders o 
                     INNER JOIN provider_orders_assignments poa ON poa.order_id = o.id
@@ -203,38 +203,35 @@ impl CommonOrderRepository for MySqlRepository {
                             od.category_id,
                             od.category_name,
                             od.unit,
-                            od.quantity,
-                            od.original_price,
+                            od.ordered_qty,
+                            od.unit_price,
                             od.discount_rate,
-                            od.actual_price,
-                            od.actual_amount,
-                            od.total_amount,
-                            COALESCE((
-                                SELECT SUM(oii.inspected_qty)
-                                FROM order_inspection_items oii
-                                WHERE oii.order_detail_id = od.id
-                            ), 0) AS accepted_quantity,
+                            od.discounted_unit_price,
+                            od.net_amount,
+                            od.ordered_amount,
                             od.processing_requirements,
                             od.remark,
-                            od.status,
                             COALESCE(SUM(CASE WHEN pd.assignment_id = poa.id THEN pdi.actual_qty ELSE 0 END), 0) AS delivered_quantity,
-                            (
-                                SELECT CASE
-                                    WHEN oii.accepted = 1 THEN TRUE
-                                    WHEN oii.accepted = 0 THEN FALSE
-                                    ELSE NULL
-                                END
+                            COALESCE((
+                                SELECT oii.inspected_qty
                                 FROM order_inspection_items oii
                                 INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
                                 WHERE oi.order_id = od.order_id
                                   AND oii.order_detail_id = od.id
-                                  AND oi.inspection_round = (
-                                      SELECT MAX(inspection_round)
-                                      FROM order_inspections
-                                      WHERE order_id = od.order_id
-                                  )
+                                  AND oi.inspected_by_type = 'MARKET'
+                                ORDER BY oi.inspection_round DESC
                                 LIMIT 1
-                            ) AS `last_accept_status: bool`
+                            ), 0) AS market_inspected_quantity,
+                            COALESCE((
+                                SELECT oii.inspected_qty
+                                FROM order_inspection_items oii
+                                INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                                WHERE oi.order_id = od.order_id
+                                  AND oii.order_detail_id = od.id
+                                  AND oi.inspected_by_type = 'CUSTOMER'
+                                ORDER BY oi.inspection_round DESC
+                                LIMIT 1
+                            ), 0) AS customer_inspected_quantity
                     
                         FROM order_details od
                         INNER JOIN provider_orders_assignments poa 
@@ -246,9 +243,9 @@ impl CommonOrderRepository for MySqlRepository {
                         WHERE od.order_id = ?
                         GROUP BY 
                             od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                            od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
-                            od.actual_amount, od.total_amount, 
-                            od.processing_requirements, od.remark, od.status
+                            od.unit, od.ordered_qty, od.unit_price, od.discount_rate, od.discounted_unit_price,
+                            od.ordered_amount, od.net_amount, 
+                            od.processing_requirements, od.remark
                         "#,
                         tenant_id,
                         order_base.id
@@ -268,7 +265,7 @@ impl CommonOrderRepository for MySqlRepository {
                     r#"
                     SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, 
                     o.contact_phone AS receiver_phone, t.name AS customer_name,
-                    o.total_amount, o.discount_amount, o.actual_amount, o.delivery_address, 
+                    o.ordered_amount, o.discount_amount, o.net_amount, o.delivery_address, 
                     o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
                     FROM orders o
                     INNER JOIN tenants t ON o.market_id = t.id
@@ -292,46 +289,43 @@ impl CommonOrderRepository for MySqlRepository {
                         od.category_id,
                         od.category_name,
                         od.unit,
-                        od.quantity,
-                        od.original_price,
+                        od.ordered_qty,
+                        od.unit_price,
                         od.discount_rate,
-                        od.actual_price,
-                        od.actual_amount,
-                        od.total_amount,
-                        COALESCE((
-                            SELECT SUM(oii.inspected_qty)
-                            FROM order_inspection_items oii
-                            WHERE oii.order_detail_id = od.id
-                        ), 0) AS accepted_quantity,
+                        od.discounted_unit_price,
+                        od.net_amount,
+                        od.ordered_amount,
                         od.processing_requirements,
                         od.remark,
-                        od.status,
                         COALESCE(SUM(pdi.actual_qty), 0) AS delivered_quantity,
-                        (
-                            SELECT CASE
-                                WHEN oii.accepted = 1 THEN TRUE
-                                WHEN oii.accepted = 0 THEN FALSE
-                                ELSE NULL
-                            END
+                        COALESCE((
+                            SELECT oii.inspected_qty
                             FROM order_inspection_items oii
                             INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
                             WHERE oi.order_id = od.order_id
                               AND oii.order_detail_id = od.id
-                              AND oi.inspection_round = (
-                                  SELECT MAX(inspection_round)
-                                  FROM order_inspections
-                                  WHERE order_id = od.order_id
-                              )
+                              AND oi.inspected_by_type = 'MARKET'
+                            ORDER BY oi.inspection_round DESC
                             LIMIT 1
-                        ) AS `last_accept_status: bool`
+                        ), 0) AS market_inspected_quantity,
+                        COALESCE((
+                            SELECT oii.inspected_qty
+                            FROM order_inspection_items oii
+                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                            WHERE oi.order_id = od.order_id
+                              AND oii.order_detail_id = od.id
+                              AND oi.inspected_by_type = 'CUSTOMER'
+                            ORDER BY oi.inspection_round DESC
+                            LIMIT 1
+                        ), 0) AS customer_inspected_quantity
                     FROM order_details od
                     LEFT JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
                     LEFT JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
                     WHERE od.order_id = ?
                     GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                             od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
-                             od.actual_amount, od.total_amount, od.processing_requirements,
-                             od.remark, od.status
+                             od.unit, od.ordered_qty, od.unit_price, od.discount_rate, od.discounted_unit_price,
+                             od.ordered_amount, od.net_amount, od.processing_requirements,
+                             od.remark
                     "#,
                     order_base.id
                 )
@@ -346,8 +340,8 @@ impl CommonOrderRepository for MySqlRepository {
                     OrderBaseInfoResponse,
                     r#"
                     SELECT o.id, o.delivery_date, o.created_at, o.order_status, o.contact_name AS receiver_name, 
-                    o.contact_phone AS receiver_phone, t.name AS customer_name, o.total_amount, o.discount_amount, 
-                    o.actual_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
+                    o.contact_phone AS receiver_phone, t.name AS customer_name, o.ordered_amount, o.discount_amount, 
+                    o.net_amount, o.delivery_address, o.confirmed_by AS shipper_name, o.market_contact_number AS shipper_phone
                     FROM orders o
                     INNER JOIN tenants t ON o.customer_id = t.id
                     WHERE o.order_code = ? AND t.id = ? AND t.tenant_type = 'CUSTOMER'
@@ -369,47 +363,44 @@ impl CommonOrderRepository for MySqlRepository {
                         od.category_id,
                         od.category_name,
                         od.unit,
-                        od.quantity,
-                        od.original_price,
+                        od.ordered_qty,
+                        od.unit_price,
                         od.discount_rate,
-                        od.actual_price,
-                        od.actual_amount,
-                        od.total_amount,
-                        COALESCE((
-                            SELECT SUM(oii.inspected_qty)
-                            FROM order_inspection_items oii
-                            WHERE oii.order_detail_id = od.id
-                        ), 0) AS accepted_quantity,
+                        od.discounted_unit_price,
+                        od.net_amount,
+                        od.ordered_amount,
                         od.processing_requirements,
                         od.remark,
-                        od.status,
                         -- CUSTOMER 看到的发货量是 MARKET 的签收数量
                         COALESCE(SUM(CASE WHEN oi_market.inspected_by_type = 'MARKET' THEN oii_market.inspected_qty ELSE 0 END), 0) AS delivered_quantity,
-                        (
-                            SELECT CASE
-                                WHEN oii.accepted = 1 THEN TRUE
-                                WHEN oii.accepted = 0 THEN FALSE
-                                ELSE NULL
-                            END
+                        COALESCE((
+                            SELECT oii.inspected_qty
                             FROM order_inspection_items oii
                             INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
                             WHERE oi.order_id = od.order_id
                               AND oii.order_detail_id = od.id
-                              AND oi.inspection_round = (
-                                  SELECT MAX(inspection_round)
-                                  FROM order_inspections
-                                  WHERE order_id = od.order_id
-                              )
+                              AND oi.inspected_by_type = 'MARKET'
+                            ORDER BY oi.inspection_round DESC
                             LIMIT 1
-                        ) AS `last_accept_status: bool`
+                        ), 0) AS market_inspected_quantity,
+                        COALESCE((
+                            SELECT oii.inspected_qty
+                            FROM order_inspection_items oii
+                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                            WHERE oi.order_id = od.order_id
+                              AND oii.order_detail_id = od.id
+                              AND oi.inspected_by_type = 'CUSTOMER'
+                            ORDER BY oi.inspection_round DESC
+                            LIMIT 1
+                        ), 0) AS customer_inspected_quantity
                     FROM order_details od
                     LEFT JOIN order_inspections oi_market ON od.order_id = oi_market.order_id AND oi_market.inspected_by_type = 'MARKET'
                     LEFT JOIN order_inspection_items oii_market ON oi_market.id = oii_market.inspection_id AND od.id = oii_market.order_detail_id
                     WHERE od.order_id = ?
                     GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                             od.unit, od.quantity, od.original_price, od.discount_rate, od.actual_price,
-                             od.actual_amount, od.total_amount, od.processing_requirements,
-                             od.remark, od.status
+                             od.unit, od.ordered_qty, od.unit_price, od.discount_rate, od.discounted_unit_price,
+                             od.ordered_amount, od.net_amount, od.processing_requirements,
+                             od.remark
                     "#,
                     order_base.id
                 )

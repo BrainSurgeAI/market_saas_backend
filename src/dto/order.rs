@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, types::Decimal};
 use validator::{Validate, ValidationError};
 
-use crate::{dto::validate_phone, repositories::orders::common::OrderBaseInfoResponse};
+use crate::{dto::{validate_delivery_date, validate_phone}, repositories::orders::common::OrderBaseInfoResponse};
 
 fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
     let min = Decimal::new(1, 2); // 0.01
@@ -16,23 +16,20 @@ fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
 
 /// Data transfer object for creating a new order
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
-pub(crate) struct CreateOrderDTO {
-    #[validate(custom(function = "validate_total_amount_range"))]
-    #[serde(rename = "totalAmount")]
-    pub(crate) total_amount: Decimal,
-
+pub(crate) struct CreateOrderRequestDTO {
     #[validate(nested)]
     #[serde(rename = "deliveryInfo")]
     pub(crate) delivery_info: DeliveryInfo,
 
     #[serde(rename = "items")]
-    pub(crate) items: Vec<CreateOrderItem>,
+    pub(crate) items: Vec<OrderedItem>,
 }
 
 /// Delivery information for an order
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
 pub(crate) struct DeliveryInfo {
     #[serde(rename = "deliveryDate")]
+    #[validate(custom(function = "validate_delivery_date"))]
     pub(crate) delivery_date: String,
 
     #[validate(length(min = 4, max = 255))]
@@ -50,41 +47,17 @@ pub(crate) struct DeliveryInfo {
 
 /// Individual item in an order creation request
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub(crate) struct CreateOrderItem {
-    #[serde(rename = "productId")]
-    pub(crate) product_code: String,
-
-    #[serde(rename = "name")]
-    pub(crate) product_name: String,
+pub(crate) struct OrderedItem {
 
     #[serde(rename = "categoryId")]
-    pub(crate) category_id: i32,
+    pub(crate) category_level_1_id: i32,
 
-    #[serde(rename = "category")]
-    pub(crate) category_name: String,
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
 
-    #[serde(rename = "unit")]
-    pub(crate) unit: String,
+    #[serde(rename = "orderedQty")]
+    pub(crate) ordered_qty: Decimal,
 
-    #[serde(rename = "quantity")]
-    pub(crate) quantity: Decimal,
-
-    #[serde(rename = "price")]
-    pub(crate) price: Decimal,
-
-    #[serde(rename = "originalPrice")]
-    pub(crate) original_price: Decimal,
-
-    #[serde(rename = "originalTotal")]
-    pub(crate) original_amount: Decimal,
-
-    #[serde(rename = "discountRate")]
-    pub(crate) discount_rate: Decimal,
-
-    #[serde(rename = "total")]
-    pub(crate) total: Decimal,
-
-    #[serde(rename = "customNote")]
     pub(crate) remark: Option<String>,
 
     #[serde(rename = "processingServices")]
@@ -107,10 +80,10 @@ pub(crate) struct OrderResponse {
     pub(crate) order_code: String,
 
     #[serde(rename = "totalAmount")]
-    pub(crate) total_amount: Decimal,
+    pub(crate) ordered_amount: Decimal,
 
     #[serde(rename = "actualAmount")]
-    pub(crate) actual_amount: Decimal,
+    pub(crate) net_amount: Decimal,
 
     #[serde(rename = "deliveryDate")]
     pub(crate) delivery_date: NaiveDate,
@@ -297,36 +270,34 @@ pub(crate) struct OrderDetail {
     pub(crate) category_name: String,
 
     pub(crate) unit: String,
-    pub(crate) quantity: Decimal,
+    #[serde(rename = "orderedQty")]
+    pub(crate) ordered_qty: Decimal,
 
-    #[serde(rename = "price")]
-    pub(crate) original_price: Decimal,
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
 
     #[serde(rename = "discountRate")]
     pub(crate) discount_rate: Decimal,
 
-    #[serde(rename = "actualPrice")]
-    pub(crate) actual_price: Decimal,
+    #[serde(rename = "discountedUnitPrice")]
+    pub(crate) discounted_unit_price: Decimal,
 
-    #[serde(rename = "acceptedQuantity")]
-    pub(crate) accepted_quantity: Option<Decimal>,
+    #[serde(rename = "netAmount")]
+    pub(crate) net_amount: Option<Decimal>,
 
-    #[serde(rename = "actualAmount")]
-    pub(crate) actual_amount: Option<Decimal>,
-
-    #[serde(rename = "total")]
-    pub(crate) total_amount: Decimal,
+    #[serde(rename = "orderedAmount")]
+    pub(crate) ordered_amount: Decimal,
 
     #[serde(rename = "processingRequirements")]
     pub(crate) processing_requirements: Option<String>,
 
     pub(crate) remark: Option<String>,
 
-    #[serde(rename = "status")]
-    pub(crate) status: Option<String>,
+    #[serde(rename = "marketInspectedQuantity")]
+    pub(crate) market_inspected_quantity: Option<Decimal>,
 
-    #[serde(rename = "lastAcceptStatus")]
-    pub(crate) last_accept_status: Option<bool>,
+    #[serde(rename = "customerInspectedQuantity")]
+    pub(crate) customer_inspected_quantity: Option<Decimal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]

@@ -25,10 +25,10 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         &self,
         order_code: &str,
         action: OrderAction,
-        claims: &Claims
+        claims: &Claims,
     ) -> Result<OrderStatus, AppError>;
 
-    async fn begin_inspect_order(
+    async fn insert_order_inspection(
         &self,
         order_code: &str,
         claims: &Claims,
@@ -36,7 +36,7 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
     ) -> Result<OrderStatus, AppError>;
 
     /// 根据订单的签收、退货和换货情况，计算应该返回的 OrderAction
-    /// 
+    ///
     /// 逻辑：
     /// - 如果有一个商品是换货，返回 MarketExchange 或 CustomerExchange（根据租户类型）
     /// - 如果都是退货，返回 MarketReturn 或 CustomerReturn（根据租户类型）
@@ -75,8 +75,8 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         // 验证订单存在且状态正确
         let record = sqlx::query!(r#"
-            SELECT od.id as detail_id, o.order_status, oi.id as inspection_id, 
-                pdi.actual_qty as actual_quantity, pdi.subtotal as total_amount, od.actual_price as actual_price
+            SELECT o.id, od.id as detail_id, o.order_status, oi.id as inspection_id, 
+                pdi.actual_qty as actual_quantity, pdi.subtotal as total_amount, od.discounted_unit_price as actual_price
             FROM orders o 
             INNER JOIN order_details od ON o.id = od.order_id
             INNER JOIN order_inspections oi ON o.id = oi.order_id
@@ -98,7 +98,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             ))
         })?;
 
-       // let order_id = record.id;
+        let order_id = record.id;
         let detail_id = record.detail_id;
         let inspection_id = record.inspection_id;
         let actual_price = record.actual_price;
@@ -162,6 +162,37 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                   .execute(&mut *tx)
                   .await
                   .map_err(map_db_err!("Failed to create exchange item"))?;
+
+                // get the expect quantity
+                let expect_qty_record = sqlx::query!(
+                    r#"SELECT od.ordered_qty FROM order_details od INNER JOIN orders o ON od.order_id = o.id WHERE o.id = ? AND od.id = ?"#,
+                    order_id,
+                    detail_id
+                )
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get expect quantity"))?
+                .ok_or_else(|| {
+                    AppError::NotFound(format!("Expect quantity not found: {}", detail_id))
+                })?;
+
+                let expect_qty = expect_qty_record.ordered_qty;
+                let accepted_quantity = expect_qty - receipt.quantity;
+
+                // get the last inspection record
+                sqlx::query!(r#"SELECT id FROM order_inspections where order_id = ? and inspected_by_type = ? order by inspection_round desc limit 1"#, order_id, tenant_type)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get order inspection"))?
+                .ok_or_else(|| AppError::NotFound(format!("Order inspection not found: {}", order_id)))?;
+
+                sqlx::query!(
+                    r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty) VALUES (?, ?, ?)"#,
+                    inspection_id, detail_id, accepted_quantity
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update order inspection item"))?;
             }
         }
 
@@ -175,9 +206,8 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         &self,
         order_code: &str,
         action: OrderAction,
-        claims: &Claims
+        claims: &Claims,
     ) -> Result<OrderStatus, AppError> {
-
         let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
         let mut tx = self
             .pool
@@ -210,17 +240,6 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         debug!("Next status: {}", next_status);
 
-        // 因市场前面验收过，对 order_details 表中的 status 进行重置到待验收
-        // if next_status == OrderStatus::MarketDelivering {
-        //     sqlx::query!(
-        //         r#"UPDATE order_details SET status = 'PENDING' WHERE order_id = ?"#,
-        //         order.id
-        //     )
-        //     .execute(&mut *tx)
-        //     .await
-        //     .map_err(map_db_err!("Failed to update sub order status"))?;
-        // }
-
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
             next_status.to_str(),
@@ -236,22 +255,11 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             order.order_status.as_str(),
             next_status,
             claims.real_name.as_str(),
-            action
+            action,
         )
         .await?;
 
         debug!("Order status updated to {}", next_status);
-
-        // 如果客户直接确认收货，则将子订单更新到
-        if tenant_type == TenantType::Customer && action == OrderAction::Complete {
-            sqlx::query!(
-                r#"UPDATE order_details SET status = 'SIGN' WHERE order_id = ?"#,
-                order.id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update sub order status"))?;
-        }
 
         tx.commit()
             .await
@@ -259,7 +267,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         Ok(next_status)
     }
 
-    async fn begin_inspect_order(
+    async fn insert_order_inspection(
         &self,
         order_code: &str,
         claims: &Claims,
@@ -293,7 +301,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         // Before create a new order inspection record, check if order inspections table has a record with the same order_id
         // get the inspection_round from the order inspections table
         let inspection = sqlx::query!(
-            r#"SELECT id, inspection_round FROM order_inspections WHERE order_id = ?"#,
+            r#"SELECT id, inspection_round FROM order_inspections WHERE order_id = ? ORDER BY inspection_round DESC LIMIT 1"#,
             order.id
         )
         .fetch_optional(&mut *tx)
@@ -301,7 +309,10 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get inspection round"))?;
 
         let (parent_id, inspection_round) = if let Some(inspection_record) = inspection {
-            (Some(inspection_record.id), inspection_record.inspection_round + 1)
+            (
+                Some(inspection_record.id),
+                inspection_record.inspection_round + 1,
+            )
         } else {
             (None, 1)
         };
@@ -318,7 +329,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         let next_status = OrderStateMachine::next_state(
             OrderStatus::try_from(order.order_status.as_str())?,
             action,
-            TenantType::try_from(claims.tenant_type.as_str())?
+            TenantType::try_from(claims.tenant_type.as_str())?,
         )
         .map_err(|e| {
             error!("Order state transition error: {}", e);
@@ -345,7 +356,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             order.order_status.as_str(),
             next_status,
             claims.real_name.as_str(),
-            action
+            action,
         )
         .await?;
 
@@ -394,34 +405,60 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to query product inspection status"))?;
 
         if product_statuses.is_empty() {
-            return Err(AppError::NotFound(format!("订单 {} 没有找到商品明细", order_code)));
+            return Err(AppError::NotFound(format!(
+                "订单 {} 没有找到商品明细",
+                order_code
+            )));
         }
 
-        let (action, inspection_status) = if product_statuses.iter().any(|status| status.has_exchange == Some(1)) {
-            (match tenant_type {
-                TenantType::Market => OrderAction::MarketExchange,
-                TenantType::Customer => OrderAction::CustomerExchange,
-                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
-            }, "PARTIAL")
-        } else if product_statuses.iter().any(|status| status.has_sign == Some(1)) {
-            (match tenant_type {
-                TenantType::Market => OrderAction::MarketAccept,
-                TenantType::Customer => OrderAction::Complete,
-                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
-            }, "PASS")
-        } else if product_statuses.iter().any(|status| status.has_return == Some(1)) {
-            (match tenant_type {
-                TenantType::Market => OrderAction::MarketReturn,
-                TenantType::Customer => OrderAction::CustomerReturn,
-                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
-            }, "REJECTED")
+        let (action, inspection_status) = if product_statuses
+            .iter()
+            .any(|status| status.has_exchange == Some(1))
+        {
+            (
+                match tenant_type {
+                    TenantType::Market => OrderAction::MarketExchange,
+                    TenantType::Customer => OrderAction::CustomerExchange,
+                    _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+                },
+                "PARTIAL",
+            )
+        } else if product_statuses
+            .iter()
+            .any(|status| status.has_sign == Some(1))
+        {
+            (
+                match tenant_type {
+                    TenantType::Market => OrderAction::MarketAccept,
+                    TenantType::Customer => OrderAction::Complete,
+                    _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+                },
+                "PASS",
+            )
+        } else if product_statuses
+            .iter()
+            .any(|status| status.has_return == Some(1))
+        {
+            (
+                match tenant_type {
+                    TenantType::Market => OrderAction::MarketReturn,
+                    TenantType::Customer => OrderAction::CustomerReturn,
+                    _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+                },
+                "REJECTED",
+            )
         } else {
-            (match tenant_type {
-                TenantType::Market => OrderAction::MarketAccept,
-                TenantType::Customer => OrderAction::Complete,
-                _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
-            }, "PENDING")
+            (
+                match tenant_type {
+                    TenantType::Market => OrderAction::MarketAccept,
+                    TenantType::Customer => OrderAction::Complete,
+                    _ => return Err(AppError::Validation("不支持的租户类型".to_string())),
+                },
+                "PENDING",
+            )
         };
+
+        debug!("Inspection status: {}", inspection_status);
 
         // update order inspection status to COMPLETED
         sqlx::query!(
@@ -435,15 +472,19 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to update order inspection status"))?;
 
         // update order status
-        let next_status = OrderStateMachine::next_state(OrderStatus::try_from(product_statuses.first().unwrap().order_status.as_str())?, action, tenant_type)
-            .map_err(|e| {
-                error!("Order state transition error: {}", e);
-                AppError::Validation(format!(
-                    "Order status is not correct: {} -> {}",
-                    product_statuses.first().unwrap().order_status,
-                    action.description()
-                ))
-            })?;
+        let next_status = OrderStateMachine::next_state(
+            OrderStatus::try_from(product_statuses.first().unwrap().order_status.as_str())?,
+            action,
+            tenant_type,
+        )
+        .map_err(|e| {
+            error!("Order state transition error: {}", e);
+            AppError::Validation(format!(
+                "Order status is not correct: {} -> {}",
+                product_statuses.first().unwrap().order_status,
+                action.description()
+            ))
+        })?;
 
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
@@ -461,7 +502,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             product_statuses.first().unwrap().order_status.as_str(),
             next_status,
             claims.real_name.as_str(),
-            action
+            action,
         )
         .await?;
 
@@ -472,13 +513,13 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 SELECT 
                     od.id as order_detail_id,
                     COALESCE(SUM(oii.inspected_qty), 0) as total_inspected_qty,
-                    od.actual_price
+                    od.discounted_unit_price
                 FROM order_details od
                 INNER JOIN orders o ON od.order_id = o.id
                 LEFT JOIN order_inspections oi ON o.id = oi.order_id AND oi.inspected_by_type = 'CUSTOMER'
                 LEFT JOIN order_inspection_items oii ON oi.id = oii.inspection_id AND od.id = oii.order_detail_id
                 WHERE o.order_code = ?
-                GROUP BY od.id, od.actual_price
+                GROUP BY od.id, od.discounted_unit_price
                 "#,
                 order_code
             )
@@ -486,30 +527,31 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to query customer inspection items"))?;
 
-            // 更新每个订单明细的 accepted_quantity 和 actual_amount
-            for item in &customer_inspection_items {
-                let accepted_quantity = item.total_inspected_qty;
-                let actual_amount = item.actual_price * accepted_quantity;
+            // // 更新每个订单明细的 accepted_quantity 和 actual_amount
+            // for item in &customer_inspection_items {
+            //     let accepted_quantity = item.total_inspected_qty;
+            //     let actual_amount = item.discounted_unit_price * accepted_quantity;
 
-                sqlx::query!(
-                    r#"UPDATE order_details 
-                       SET accepted_quantity = ?, 
-                           actual_amount = ?
-                       WHERE id = ?"#,
-                    accepted_quantity,
-                    actual_amount,
-                    item.order_detail_id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update order detail accepted quantity and actual amount"))?;
-            }
+            //     sqlx::query!(
+            //         r#"UPDATE order_details 
+            //            SET accepted_quantity = ?, 
+            //                actual_amount = ?
+            //            WHERE id = ?"#,
+            //         accepted_quantity,
+            //         actual_amount,
+            //         item.order_detail_id
+            //     )
+            //     .execute(&mut *tx)
+            //     .await
+            //     .map_err(map_db_err!(
+            //         "Failed to update order detail accepted quantity and actual amount"
+            //     ))?;
+            // }
         }
 
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
         Ok(next_status)
-
     }
 }

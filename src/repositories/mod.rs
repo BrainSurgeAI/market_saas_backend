@@ -18,9 +18,9 @@ pub(crate) mod orders;
 #[macro_export]
 macro_rules! map_db_err {
     ($msg:expr) => {
-        |e| {
-            error!(concat!($msg, ": {:#?}"), e);
-            AppError::Database(e)
+        |e: sqlx::Error| -> $crate::common::AppError {
+            tracing::error!(concat!($msg, ": {:#?}"), e);
+            $crate::common::AppError::Database(e)
         }
     };
 }

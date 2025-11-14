@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, patch, put},
+    routing::{get, patch, post, put},
     Router,
 };
 
@@ -12,8 +12,8 @@ use crate::services::orders::provider::{
 pub(super) fn provider_routes() -> Router {
     Router::new()
         .route(
-            "/{order_code}/preparing",
-            patch(start_preparing::<MySqlRepository>),
+            "/{order_code}/start-preparing",
+            post(start_preparing::<MySqlRepository>),
         )
         .route(
             "/{order_code}/start-exchange-preparing",

@@ -3,7 +3,7 @@ use axum::{extract::Path, Extension};
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        order::CreateOrderDTO,
+        order::CreateOrderRequestDTO,
         ValidatedJSON,
     },
     middleware::context::RequestContext,
@@ -16,7 +16,7 @@ pub(crate) async fn create_order<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    ValidatedJSON(order): ValidatedJSON<CreateOrderDTO>,
+    ValidatedJSON(order): ValidatedJSON<CreateOrderRequestDTO>,
 ) -> Result<Json<ApiResponse<String>>, AppError>
 where
     T: CustomerOrderRepository + Send + Sync,

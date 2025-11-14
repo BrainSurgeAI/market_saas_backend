@@ -16,68 +16,11 @@ use crate::{
 
 use super::my_sql_repository::MySqlRepository;
 
+use rust_decimal::Decimal;
 use tracing::{debug, error};
 
 impl MySqlRepository {
-    /// Helper method to insert order details in batch
-    /// This improves performance by preparing processing requirements once
-    /// and using a single method for the detail insertion logic    
-    async fn insert_order_details(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        order_id: u64,
-        items: &[crate::dto::order::CreateOrderItem],
-    ) -> Result<(), AppError> {
-        for item in items {
-            // Prepare processing requirements efficiently
-            let processing_requirements = if item.processing_services.is_empty() {
-                None
-            } else {
-                Some(
-                    item.processing_services
-                        .iter()
-                        .map(|service| {
-                            format!(
-                                "{}:{}",
-                                service.name,
-                                service.description.as_deref().unwrap_or_default()
-                            )
-                        })
-                        .collect::<Vec<String>>()
-                        .join(","),
-                )
-            };
-
-            sqlx::query!(
-                r#"INSERT INTO order_details (
-                    order_id, product_code, product_name, category_id, category_name,
-                    unit, quantity, original_price, discount_rate, actual_price, 
-                    total_amount, processing_requirements, remark
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-                order_id,
-                &item.product_code,
-                &item.product_name,
-                &item.category_id,
-                &item.category_name,
-                &item.unit,
-                &item.quantity,
-                &item.original_price,
-                &item.discount_rate,
-                &item.price,
-                &item.total,
-                &processing_requirements,
-                &item.remark
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| {
-                error!("Failed to create order detail: {:#?}", e);
-                AppError::Database(e)
-            })?;
-        }
-        Ok(())
-    }
-
+   
     /// Helper method to validate and transition order state using OrderStateMachine
     /// This method encapsulates the logic for:
     /// 1. Converting current status string to OrderStatus enum
@@ -168,6 +111,114 @@ impl MySqlRepository {
         })?;
 
         Ok(tenant.id)
+    }
+
+    /// 获取产品的折扣价格
+    /// 
+    /// 根据产品代码、市场ID、分类ID和客户ID，查询产品中间价和客户分类折扣率，
+    /// 计算并返回客户下单时该产品的折扣价
+    /// 
+    /// # 参数
+    /// * `product_code` - 产品代码
+    /// * `market_id` - 市场ID
+    /// * `category_level_1_id` - 一级分类ID
+    /// * `customer_id` - 客户ID（tenant_id）
+    /// 
+    /// # 返回
+    /// 返回计算后的折扣价格，如果产品价格不存在则返回错误
+    async fn get_product_price_with_discount_rate(
+        &self,
+        product_code: &str,
+        market_id: i32,
+        category_level_1_id: i32,
+        customer_id: i32,
+    ) -> Result<(Decimal, Decimal), AppError> {
+        // 1. 根据 product_code 查询 products 表获取 product_id
+        let product = sqlx::query!(
+            r#"SELECT id FROM products WHERE product_code = ? AND is_disabled = 0"#,
+            product_code
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get product by product_code"))?
+        .ok_or_else(|| AppError::NotFound(format!("Product not found: {}", product_code)))?;
+
+        // 2. 查询 product_prices 表获取中间价（avg_price）
+        // 优先查询当天的价格，如果没有则查询最近的历史价格，且状态必须为 PUBLISHED
+        let price_result = sqlx::query!(
+            r#"
+            SELECT COALESCE(today_price.avg_price, history_price.avg_price) as avg_price
+            FROM products p
+            LEFT JOIN (
+                SELECT product_id, avg_price 
+                FROM product_prices 
+                WHERE price_date = CURDATE() 
+                  AND status = 'PUBLISHED'
+                  AND market_id = ?
+            ) today_price ON p.id = today_price.product_id
+            LEFT JOIN (
+                SELECT pp.product_id, pp.avg_price 
+                FROM product_prices pp
+                INNER JOIN (
+                    SELECT product_id, MAX(price_date) as latest_date
+                    FROM product_prices
+                    WHERE status = 'PUBLISHED' 
+                      AND price_date < CURDATE()
+                      AND market_id = ?
+                    GROUP BY product_id
+                ) latest ON pp.product_id = latest.product_id 
+                          AND pp.price_date = latest.latest_date
+                          AND pp.status = 'PUBLISHED'
+                          AND pp.market_id = ?
+            ) history_price ON p.id = history_price.product_id AND today_price.product_id IS NULL
+            WHERE p.id = ?
+            "#,
+            market_id,
+            market_id,
+            market_id,
+            product.id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get product price"))?
+        .and_then(|r| r.avg_price)
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Product price not found for product_code: {}, market_id: {}",
+                product_code, market_id
+            ))
+        })?;
+
+        let avg_price = price_result;
+
+        // 3. 查询 customer_category_discounts 表获取折扣率
+        // 根据 tenant_id (customer_id), category_id (category_level_1_id), 
+        // 当前日期在 start_date 和 end_date 之间，status = true
+        let discount_result = sqlx::query!(
+            r#"
+            SELECT discount_rate 
+            FROM customer_category_discounts 
+            WHERE tenant_id = ? 
+              AND category_id = ? 
+              AND status = true
+              AND CURRENT_DATE BETWEEN start_date AND COALESCE(end_date, '9999-12-31')
+            ORDER BY start_date DESC
+            LIMIT 1
+            "#,
+            customer_id,
+            category_level_1_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get customer category discount"))?;
+
+        // 如果没有折扣，则折扣率为 1.0（不打折）
+        // discount_rate 在数据库中是 0.8 表示 8 折（原价的 80%），1.0 表示不打折
+        let discount_rate = discount_result
+            .map(|r| r.discount_rate)
+            .unwrap_or(Decimal::new(100, 2)); // 默认 1.00
+
+        Ok((avg_price, discount_rate))
     }
 
     /// help function to insert into order_status_history table

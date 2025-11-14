@@ -392,7 +392,7 @@ def main():
     # OBS配置
     bucket_name = os.getenv('OBS_BUCKET_NAME', 'your-bucket-name')
     prefix = 'products/'
-    expires_in = int(os.getenv('URL_EXPIRES_IN', 3600))  # 1小时
+    expires_in = int(os.getenv('URL_EXPIRES_IN', 36000))  # 10小时
 
     # 解析命令行参数
     if len(sys.argv) > 1:

@@ -21,7 +21,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     let next_status = repo
-        .mark_order_as_processing(&order_code, &claims, Some(delivery_staff_id_dto.id_card.as_str()))
+        .start_preparing_order(&order_code, &claims, Some(delivery_staff_id_dto.id_card.as_str()))
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),
@@ -39,7 +39,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     let next_status = repo
-        .mark_order_as_processing(&order_code, &claims, None)
+        .start_preparing_order(&order_code, &claims, None)
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),
@@ -58,8 +58,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     debug!("Deliver to market: {:?}", deliver_to_market_dto);
-    repo.deliver_to_market(&order_code, &claims.tenant_hash, &deliver_to_market_dto)
-        .await?;
+    repo.deliver_to_market(&order_code, &claims.tenant_hash, &deliver_to_market_dto).await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
