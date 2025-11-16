@@ -203,6 +203,19 @@ pub(crate) struct OrderItem {
     pub(crate) completed_at: Option<DateTime<Utc>>,
 }
 
+/// 订单验收信息
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
+pub(crate) struct OrderInspection {
+    #[serde(rename = "inspectedByType")]
+    pub(crate) inspected_by_type: String,
+
+    #[serde(rename = "inspectionResult")]
+    pub(crate) inspection_result: String,
+
+    #[serde(rename = "inspectionRound")]
+    pub(crate) inspection_round: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct OrderDetailResponse {
     pub(crate) order: OrderBaseInfoResponse,
@@ -210,6 +223,9 @@ pub(crate) struct OrderDetailResponse {
     pub(crate) items: Vec<OrderDetail>,
 
     pub(crate) receipts: Vec<ReceiptResponse>,
+
+    #[serde(rename = "inspections")]
+    pub(crate) inspections: Vec<OrderInspection>,
 }
 
 /// 收据响应结构体（按 receipt 分组）
@@ -451,10 +467,7 @@ pub(crate) struct DispatchOrderDTO {
 
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
-pub(crate) struct ExchangeItemUpdateDTO {
-    #[serde(rename = "orderDetailId")]
-    pub(crate) order_detail_id: i32,
-
+pub(crate) struct ExchangeItemQuantityUpdateRequest {
     #[serde(rename = "actualQuantity")]
     pub(crate) actual_quantity: Decimal,
 }

@@ -3,7 +3,11 @@ use tracing::debug;
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::{delivery_staff::DeliveryStaffIdDTO, order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemUpdateDTO}, ValidatedJSON},
+    dto::{
+        delivery_staff::DeliveryStaffIdDTO,
+        order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest},
+        ValidatedJSON,
+    },
     middleware::context::RequestContext,
     models::{claims::Claims, tenant_type::TenantType},
     repositories::orders::provider::ProviderOrderRepository,
@@ -21,7 +25,11 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     let next_status = repo
-        .start_preparing_order(&order_code, &claims, Some(delivery_staff_id_dto.id_card.as_str()))
+        .start_preparing_order(
+            &order_code,
+            &claims,
+            Some(delivery_staff_id_dto.id_card.as_str()),
+        )
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),
@@ -29,7 +37,7 @@ where
     )))
 }
 
-pub(crate) async fn start_exchange_preparing<T>(
+pub(crate) async fn accept_after_sales_request<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -58,10 +66,10 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     debug!("Deliver to market: {:?}", deliver_to_market_dto);
-    repo.deliver_to_market(&order_code, &claims.tenant_hash, &deliver_to_market_dto).await?;
+    repo.deliver_to_market(&order_code, &claims.tenant_hash, &deliver_to_market_dto)
+        .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
-
 
 pub(crate) async fn exchange_deliver_to_market<T>(
     Extension(repo): Extension<T>,
@@ -91,16 +99,22 @@ where
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
-pub(crate) async fn update_exchange_item_actual_quantity<T>(
+pub(crate) async fn update_exchange_item_quantity<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    ValidatedJSON(exchange_item_update_dto): ValidatedJSON<ExchangeItemUpdateDTO>,
+    Path((_order_code, order_detail_id)): Path<(String, i32)>,
+    ValidatedJSON(exchange_item_update_dto): ValidatedJSON<ExchangeItemQuantityUpdateRequest>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
     T: ProviderOrderRepository + Send + Sync,
 {
-    repo.update_exchange_item_actual_quantity(&claims.real_name, &exchange_item_update_dto)
-        .await?;
+    debug!("Update exchange item quantity: {:?} for order detail id {}", exchange_item_update_dto, order_detail_id);
+    repo.update_exchange_item_quantity(
+        order_detail_id,
+        &claims.real_name,
+        &exchange_item_update_dto,
+    )
+    .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }

@@ -3,14 +3,14 @@ use crate::{
     common::AppError,
     dto::order::{
         ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderDetailResponse,
-        OrderQueryParams, OrderResponse, ReceiptItem, ReceiptOperationType, ReceiptResponse,
+        OrderInspection, OrderQueryParams, OrderResponse, ReceiptItem, ReceiptOperationType, ReceiptResponse,
     },
     map_db_err,
     models::{claims::Claims, tenant_type::TenantType},
 };
 use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error};
+use tracing::debug;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -472,10 +472,29 @@ impl CommonOrderRepository for MySqlRepository {
         let mut receipts: Vec<ReceiptResponse> = receipts_map.into_values().collect();
         receipts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
+        // 查询订单的验收记录
+        let inspections = sqlx::query_as!(
+            OrderInspection,
+            r#"
+            SELECT 
+                inspected_by_type,
+                inspection_result,
+                inspection_round
+            FROM order_inspections
+            WHERE order_id = ?
+            ORDER BY inspection_round DESC, inspected_at DESC
+            "#,
+            order_base.id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order inspections"))?;
+
         Ok(Some(OrderDetailResponse {
             order: order_base,
             items: order_items,
             receipts,
+            inspections,
         }))
     }
 

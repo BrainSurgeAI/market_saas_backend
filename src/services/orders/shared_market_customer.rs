@@ -210,7 +210,7 @@ where
     )))
 }
 
-pub(crate) async fn exchange_request<T>(
+pub(crate) async fn create_after_sales_request<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -235,7 +235,7 @@ where
         "Exchange {} by {} action {}",
         &order_code, tenant_type, action
     );
-    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
+    let next_status = repo.create_after_sales_request(&order_code, &claims, action, tenant_type).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,

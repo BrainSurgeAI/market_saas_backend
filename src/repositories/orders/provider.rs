@@ -1,6 +1,6 @@
 use crate::{
     common::AppError,
-    dto::order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemUpdateDTO},
+    dto::order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest},
     map_db_err,
     models::{
         claims::Claims, order_action::OrderAction, order_machine::OrderStateMachine,
@@ -55,6 +55,7 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
     /// It does not update the order details table and orders table.
     ///
     /// # Arguments
+    /// * `order_detail_id` - The id of the order detail.
     /// * `operator` - The operator of the return goods.
     /// * `exchange_item_update_dto` - The exchange item update dto.
     ///
@@ -70,12 +71,13 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
     ///     order_detail_id: 1,
     ///     actual_quantity: 10,
     /// };
-    /// let result = repository.update_exchange_item_actual_quantity("operator", &exchange_item_update_dto);
+    /// let result = repository.update_exchange_item_quantity("operator", &exchange_item_update_dto);
     /// ```
-    async fn update_exchange_item_actual_quantity(
+    async fn update_exchange_item_quantity(
         &self,
+        order_detail_id: i32,
         operator: &str,
-        exchange_item_update_dto: &ExchangeItemUpdateDTO,
+        exchange_item_update_dto: &ExchangeItemQuantityUpdateRequest,
     ) -> Result<(), AppError>;
 }
 
@@ -137,7 +139,7 @@ impl ProviderOrderRepository for MySqlRepository {
                 return Err(AppError::NotFound(format!("配送员 {} 没有找到", id_card)));
             }
         } else {
-            // if the order is in the ExchangeRequested state, update the provider delivery message using already existing delivery record
+            // if the order is in the ExchangeRequested state, insert new provider delivery message
             let provider_delivery = sqlx::query!(
                 r#"
                 SELECT id, delivered_by, delivery_contact_number, delivery_round
@@ -260,6 +262,7 @@ impl ProviderOrderRepository for MySqlRepository {
 
         let action = match current_status {
             OrderStatus::SupplierPreparing => OrderAction::DeliverToMarket,
+            OrderStatus::ExchangeInProgress => OrderAction::DeliverToMarket,
             _ => return Err(AppError::validation(invalid_state_msg)),
         };
 
@@ -439,15 +442,17 @@ impl ProviderOrderRepository for MySqlRepository {
         Ok(())
     }
 
-    async fn update_exchange_item_actual_quantity(
+    async fn update_exchange_item_quantity(
         &self,
+        order_detail_id: i32,
         operator: &str,
-        exchange_item_update_dto: &ExchangeItemUpdateDTO,
+        exchange_item_update_dto: &ExchangeItemQuantityUpdateRequest,
     ) -> Result<(), AppError> {
         debug!(
             "Provider {} updates exchange item actual quantity for order detail id {} and actual quantity {}",
-            operator, exchange_item_update_dto.order_detail_id, exchange_item_update_dto.actual_quantity
+            operator, order_detail_id, exchange_item_update_dto.actual_quantity
         );
+
         let mut tx = self
             .pool
             .begin()
@@ -456,7 +461,7 @@ impl ProviderOrderRepository for MySqlRepository {
 
         let exchange_item_id = sqlx::query!(
             r#"SELECT id FROM return_exchange_records WHERE order_detail_id = ? FOR UPDATE"#,
-            exchange_item_update_dto.order_detail_id
+            order_detail_id
         )
         .fetch_optional(&mut *tx)
         .await
@@ -464,14 +469,14 @@ impl ProviderOrderRepository for MySqlRepository {
         .ok_or_else(|| {
             AppError::NotFound(format!(
                 "Return exchange record not found: {}",
-                exchange_item_update_dto.order_detail_id
+                order_detail_id
             ))
         })?;
 
         sqlx::query!(
             r#"UPDATE return_exchange_records SET actual_quantity = ?, status = 'PROGRESSED', processed_by = ?, processed_at = NOW()
              WHERE order_detail_id = ?"#,
-            exchange_item_update_dto.actual_quantity, operator, exchange_item_update_dto.order_detail_id
+            exchange_item_update_dto.actual_quantity, operator, order_detail_id
         )
         .execute(&mut *tx)
         .await

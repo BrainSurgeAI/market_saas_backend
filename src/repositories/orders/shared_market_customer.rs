@@ -28,6 +28,14 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         claims: &Claims,
     ) -> Result<OrderStatus, AppError>;
 
+    async fn create_after_sales_request(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+        action: OrderAction,
+        tenant_type: TenantType,
+    ) -> Result<OrderStatus, AppError>;
+
     async fn insert_order_inspection(
         &self,
         order_code: &str,
@@ -380,6 +388,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
+        // 好像没这必要，因为这是完成验收的逻辑，不会有partial的情况
         // 查询订单下所有商品的签收、退货和换货情况
         // 使用 GROUP BY 确保每个商品只统计一次
         let product_statuses = sqlx::query!(
@@ -508,7 +517,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         if action == OrderAction::Complete {
             // 查询 CUSTOMER 签收的数量，更新 order_details 表中的 accepted_quantity 和 actual_amount
-            let customer_inspection_items = sqlx::query!(
+            sqlx::query!(
                 r#"
                 SELECT 
                     od.id as order_detail_id,
@@ -548,6 +557,71 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             //     ))?;
             // }
         }
+
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(next_status)
+    }
+
+    async fn create_after_sales_request(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+        action: OrderAction,
+        tenant_type: TenantType,
+    ) -> Result<OrderStatus, AppError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(map_db_err!("Failed to begin transaction"))?;
+
+        // TODO: check if the order is belongs with the tenant_relationships table by tenant_type
+        let order = sqlx::query!(
+            r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
+            order_code  
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get order"))?
+        .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+
+        let current_status = OrderStatus::try_from(order.order_status.as_str())?;
+
+        let next_status = OrderStateMachine::next_state(current_status, action, tenant_type).map_err(|e| {
+            error!("Order state transition error: {}", e);
+            AppError::Validation(e.to_string())
+        })?;
+
+        sqlx::query!(
+            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+            next_status.to_str(),
+            order.id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to update order status"))?;
+
+        // update order inspections status to PARTIAL
+        sqlx::query!(
+            r#"UPDATE order_inspections SET inspection_result = 'PARTIAL' WHERE order_id = ? AND inspected_by_type = ? AND inspection_result = 'PENDING'"#,
+            order.id, claims.tenant_type
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to update order inspections status"))?;
+
+        // insert order status history
+        self.insert_order_status_history(
+            &mut tx,
+            order.id,
+            order.order_status.as_str(),
+            next_status,
+            claims.real_name.as_str(),
+            action,
+        )
+        .await?;
 
         tx.commit()
             .await
