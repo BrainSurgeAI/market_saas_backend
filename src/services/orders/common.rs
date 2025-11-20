@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query},
     Extension,
+    response::IntoResponse,
 };
 use tracing::{debug, info};
 
@@ -42,7 +43,7 @@ pub(crate) async fn get_order_by_order_code<T>(
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     Path(order_code): Path<String>,
-) -> Result<Json<ApiResponse<Option<OrderDetailResponse>>>, AppError>
+) -> Result<impl IntoResponse, AppError>
 where
     T: CommonOrderRepository + Send + Sync,
 {

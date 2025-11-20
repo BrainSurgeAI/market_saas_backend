@@ -3,7 +3,7 @@ use crate::{
     common::AppError,
     dto::order::{
         ExchangeAndReturnOrderDetailResponse, OrderDetail, OrderDetailResponse,
-        OrderInspection, OrderQueryParams, OrderResponse, ReceiptItem, ReceiptOperationType, ReceiptResponse,
+        OrderDelivery, OrderDeliveryItem, OrderQueryParams, OrderResponse, OrderStatusHistory, ReceiptItem, ReceiptOperationType, ReceiptResponse,
     },
     map_db_err,
     models::{claims::Claims, tenant_type::TenantType},
@@ -16,6 +16,45 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use rust_decimal::Decimal;
+
+// 查询所有 inspection items
+#[derive(Debug, sqlx::FromRow)]
+struct InspectionItemRow {
+    inspection_id: u32,
+    order_detail_id: i32,
+    inspected_qty: Decimal,
+    remarks: Option<String>,
+}
+
+// 查询订单的发货记录
+#[derive(Debug, sqlx::FromRow)]
+struct DeliveryRow {
+    id: u64,
+    assignment_id: u32,
+    parent_id: Option<u64>,
+    delivery_round: i32,
+    delivery_type: String,
+    delivered_at: Option<chrono::NaiveDateTime>,
+    delivered_by: String,
+    delivery_status: String,
+    remark: Option<String>,
+    delivery_contact_number: String,
+    created_at: chrono::NaiveDateTime,
+    updated_at: chrono::NaiveDateTime,
+}
+
+        // 查询订单的验收记录
+// 先查询所有 inspections
+#[derive(Debug, sqlx::FromRow)]
+struct InspectionRow {
+    id: u32,
+    parent_id: Option<u32>,
+    inspection_round: i32,
+    inspected_by_type: String,
+    inspected_by_id: i32,
+    inspection_result: String,
+    inspected_at: Option<chrono::NaiveDateTime>,
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
 pub(crate) struct OrderBaseInfoResponse {
@@ -192,7 +231,6 @@ impl CommonOrderRepository for MySqlRepository {
 
                 let order_items = 
                     // PROVIDER: 查询自己的发货记录
-                    // 只查询分配给该 PROVIDER 的订单，并且只统计该 PROVIDER 的发货记录
                     sqlx::query_as!(
                         OrderDetail,
                         r#"
@@ -210,42 +248,11 @@ impl CommonOrderRepository for MySqlRepository {
                             od.net_amount,
                             od.ordered_amount,
                             od.processing_requirements,
-                            od.remark,
-                            COALESCE(SUM(CASE WHEN pd.assignment_id = poa.id THEN pdi.actual_qty ELSE 0 END), 0) AS delivered_quantity,
-                            COALESCE((
-                                SELECT oii.inspected_qty
-                                FROM order_inspection_items oii
-                                INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                                WHERE oi.order_id = od.order_id
-                                  AND oii.order_detail_id = od.id
-                                  AND oi.inspected_by_type = 'MARKET'
-                                ORDER BY oi.inspection_round DESC
-                                LIMIT 1
-                            ), 0) AS market_inspected_quantity,
-                            COALESCE((
-                                SELECT oii.inspected_qty
-                                FROM order_inspection_items oii
-                                INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                                WHERE oi.order_id = od.order_id
-                                  AND oii.order_detail_id = od.id
-                                  AND oi.inspected_by_type = 'CUSTOMER'
-                                ORDER BY oi.inspection_round DESC
-                                LIMIT 1
-                            ), 0) AS customer_inspected_quantity
-                    
+                            od.remark
                         FROM order_details od
                         INNER JOIN provider_orders_assignments poa 
                             ON od.order_id = poa.order_id AND poa.provider_id = ?
-                        LEFT JOIN provider_deliveries pd 
-                            ON pd.assignment_id = poa.id
-                        LEFT JOIN provider_delivery_items pdi 
-                            ON pdi.delivery_id = pd.id AND pdi.order_detail_id = od.id
                         WHERE od.order_id = ?
-                        GROUP BY 
-                            od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                            od.unit, od.ordered_qty, od.unit_price, od.discount_rate, od.discounted_unit_price,
-                            od.ordered_amount, od.net_amount, 
-                            od.processing_requirements, od.remark
                         "#,
                         tenant_id,
                         order_base.id
@@ -254,10 +261,7 @@ impl CommonOrderRepository for MySqlRepository {
                     .await
                     .map_err(map_db_err!("Failed to get order details for provider"))?;
                     
-
                 (order_base, order_items)
-
-                
             }
             TenantType::Market => {
                 let order_base = sqlx::query_as!(
@@ -296,36 +300,9 @@ impl CommonOrderRepository for MySqlRepository {
                         od.net_amount,
                         od.ordered_amount,
                         od.processing_requirements,
-                        od.remark,
-                        COALESCE(SUM(pdi.actual_qty), 0) AS delivered_quantity,
-                        COALESCE((
-                            SELECT oii.inspected_qty
-                            FROM order_inspection_items oii
-                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                            WHERE oi.order_id = od.order_id
-                              AND oii.order_detail_id = od.id
-                              AND oi.inspected_by_type = 'MARKET'
-                            ORDER BY oi.inspection_round DESC
-                            LIMIT 1
-                        ), 0) AS market_inspected_quantity,
-                        COALESCE((
-                            SELECT oii.inspected_qty
-                            FROM order_inspection_items oii
-                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                            WHERE oi.order_id = od.order_id
-                              AND oii.order_detail_id = od.id
-                              AND oi.inspected_by_type = 'CUSTOMER'
-                            ORDER BY oi.inspection_round DESC
-                            LIMIT 1
-                        ), 0) AS customer_inspected_quantity
+                        od.remark
                     FROM order_details od
-                    LEFT JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
-                    LEFT JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
                     WHERE od.order_id = ?
-                    GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                             od.unit, od.ordered_qty, od.unit_price, od.discount_rate, od.discounted_unit_price,
-                             od.ordered_amount, od.net_amount, od.processing_requirements,
-                             od.remark
                     "#,
                     order_base.id
                 )
@@ -370,37 +347,9 @@ impl CommonOrderRepository for MySqlRepository {
                         od.net_amount,
                         od.ordered_amount,
                         od.processing_requirements,
-                        od.remark,
-                        -- CUSTOMER 看到的发货量是 MARKET 的签收数量
-                        COALESCE(SUM(CASE WHEN oi_market.inspected_by_type = 'MARKET' THEN oii_market.inspected_qty ELSE 0 END), 0) AS delivered_quantity,
-                        COALESCE((
-                            SELECT oii.inspected_qty
-                            FROM order_inspection_items oii
-                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                            WHERE oi.order_id = od.order_id
-                              AND oii.order_detail_id = od.id
-                              AND oi.inspected_by_type = 'MARKET'
-                            ORDER BY oi.inspection_round DESC
-                            LIMIT 1
-                        ), 0) AS market_inspected_quantity,
-                        COALESCE((
-                            SELECT oii.inspected_qty
-                            FROM order_inspection_items oii
-                            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                            WHERE oi.order_id = od.order_id
-                              AND oii.order_detail_id = od.id
-                              AND oi.inspected_by_type = 'CUSTOMER'
-                            ORDER BY oi.inspection_round DESC
-                            LIMIT 1
-                        ), 0) AS customer_inspected_quantity
+                        od.remark
                     FROM order_details od
-                    LEFT JOIN order_inspections oi_market ON od.order_id = oi_market.order_id AND oi_market.inspected_by_type = 'MARKET'
-                    LEFT JOIN order_inspection_items oii_market ON oi_market.id = oii_market.inspection_id AND od.id = oii_market.order_detail_id
                     WHERE od.order_id = ?
-                    GROUP BY od.id, od.product_code, od.product_name, od.category_id, od.category_name,
-                             od.unit, od.ordered_qty, od.unit_price, od.discount_rate, od.discounted_unit_price,
-                             od.ordered_amount, od.net_amount, od.processing_requirements,
-                             od.remark
                     "#,
                     order_base.id
                 )
@@ -419,6 +368,7 @@ impl CommonOrderRepository for MySqlRepository {
         SELECT 
             re.id AS receipt_id,
             re.operation_type,
+            re.inspection_id,
             re.status,
             re.created_at,
             od.product_code,
@@ -447,6 +397,7 @@ impl CommonOrderRepository for MySqlRepository {
                 .map_err(|e| AppError::Validation(format!("无效的收据操作类型: {}", e)))?;
 
             let receipt_item = ReceiptItem {
+                inspection_id: row.inspection_id,
                 product_id: row.product_code,
                 product_name: row.product_name,
                 quantity: row.quantity,
@@ -461,6 +412,7 @@ impl CommonOrderRepository for MySqlRepository {
                 })
                 .or_insert_with(|| ReceiptResponse {
                     id: row.receipt_id,
+                    inspection_id: row.inspection_id,
                     operation_type,
                     status: row.status,
                     items: vec![receipt_item],
@@ -472,17 +424,22 @@ impl CommonOrderRepository for MySqlRepository {
         let mut receipts: Vec<ReceiptResponse> = receipts_map.into_values().collect();
         receipts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-        // 查询订单的验收记录
-        let inspections = sqlx::query_as!(
-            OrderInspection,
+
+
+        let inspection_rows = sqlx::query_as!(
+            InspectionRow,
             r#"
             SELECT 
+                id,
+                parent_id,
+                inspection_round,
                 inspected_by_type,
+                inspected_by_id,
                 inspection_result,
-                inspection_round
+                inspected_at
             FROM order_inspections
             WHERE order_id = ?
-            ORDER BY inspection_round DESC, inspected_at DESC
+            ORDER BY inspection_round ASC, inspected_at ASC
             "#,
             order_base.id
         )
@@ -490,11 +447,249 @@ impl CommonOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to get order inspections"))?;
 
+
+
+        let inspection_item_rows = sqlx::query_as!(
+            InspectionItemRow,
+            r#"
+            SELECT 
+                oii.inspection_id,
+                oii.order_detail_id,
+                oii.inspected_qty,
+                oii.remarks
+            FROM order_inspection_items oii
+            INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+            WHERE oi.order_id = ?
+            "#,
+            order_base.id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order inspection items"))?;
+
+        // 构建 inspection_id -> items 的映射
+        let mut inspection_items_map: HashMap<u32, Vec<crate::dto::order::OrderInspectionItem>> = HashMap::new();
+        for item_row in inspection_item_rows {
+            let inspection_id = item_row.inspection_id;
+            let inspection = inspection_rows.iter().find(|r| r.id == inspection_id);
+            
+            let inspection_item = if let Some(_) = inspection {
+                // if insp.inspection_result == "PENDING" {
+                //     crate::dto::order::OrderInspectionItem {
+                //         order_detail_id: item_row.order_detail_id,
+                //         inspected_qty: None,
+                //         quantity: Some(item_row.inspected_qty),
+                //         remark: item_row.remarks,
+                //     }
+                // } else {
+                    // 非 PENDING 状态：使用 inspectedQty 和 remark
+                    crate::dto::order::OrderInspectionItem {
+                        order_detail_id: item_row.order_detail_id,
+                        inspected_qty: Some(item_row.inspected_qty),
+                        quantity: None,
+                        remark: item_row.remarks,
+                    }
+                //}
+            } 
+            else {
+                // 如果没有找到对应的 inspection，使用默认值
+                crate::dto::order::OrderInspectionItem {
+                    order_detail_id: item_row.order_detail_id,
+                    inspected_qty: Some(item_row.inspected_qty),
+                    quantity: None,
+                    remark: item_row.remarks,
+                }
+            };
+
+            inspection_items_map
+                .entry(inspection_id)
+                .or_insert_with(Vec::new)
+                .push(inspection_item);
+        }
+
+        // 组装 inspections
+        let mut inspections: Vec<crate::dto::order::OrderInspection> = Vec::new();
+        for row in inspection_rows {
+            // 只获取已验收的商品 items（如果 inspection_items 表中有记录）
+            let items = inspection_items_map
+                .get(&row.id)
+                .cloned()
+                .unwrap_or_default();
+
+            let inspection = crate::dto::order::OrderInspection {
+                inspection_id: row.id as i32,
+                parent_id: row.parent_id.map(|p| p as i32),
+                inspection_round: row.inspection_round,
+                inspected_by_type: row.inspected_by_type,
+                inspected_by_id: row.inspected_by_id,
+                result: row.inspection_result,
+                inspected_at: row.inspected_at.map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc)),
+                items,
+            };
+
+            inspections.push(inspection);
+        }
+
+
+        let delivery_rows = sqlx::query_as!(
+            DeliveryRow,
+            r#"
+            SELECT 
+                pd.id,
+                pd.assignment_id,
+                pd.parent_id,
+                pd.delivery_round,
+                pd.delivery_type,
+                pd.delivered_at,
+                pd.delivered_by,
+                pd.delivery_status,
+                pd.remark,
+                pd.delivery_contact_number,
+                pd.created_at,
+                pd.updated_at
+            FROM provider_deliveries pd
+            INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
+            WHERE poa.order_id = ?
+            ORDER BY pd.delivery_round ASC, pd.created_at ASC
+            "#,
+            order_base.id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order deliveries"))?;
+
+        // 查询所有 delivery items
+        #[derive(Debug, sqlx::FromRow)]
+        struct DeliveryItemRow {
+            id: u64,
+            delivery_id: u64,
+            order_detail_id: u64,
+            product_code: String,
+            actual_qty: Decimal,
+            unit_price: Decimal,
+            subtotal: Option<Decimal>,
+            weight_unit: Option<String>,
+            remark: Option<String>,
+            created_at: chrono::NaiveDateTime,
+            updated_at: chrono::NaiveDateTime,
+        }
+
+        let delivery_item_rows = sqlx::query_as!(
+            DeliveryItemRow,
+            r#"
+            SELECT 
+                pdi.id,
+                pdi.delivery_id,
+                pdi.order_detail_id,
+                pdi.product_code,
+                pdi.actual_qty,
+                pdi.unit_price,
+                pdi.subtotal,
+                pdi.weight_unit,
+                pdi.remark,
+                pdi.created_at,
+                pdi.updated_at
+            FROM provider_delivery_items pdi
+            INNER JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
+            INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
+            WHERE poa.order_id = ?
+            "#,
+            order_base.id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order delivery items"))?;
+
+        // 构建 delivery_id -> items 的映射
+        let mut delivery_items_map: HashMap<u64, Vec<OrderDeliveryItem>> = HashMap::new();
+        for item_row in delivery_item_rows {
+            let delivery_item = OrderDeliveryItem {
+                id: item_row.id as i64,
+                order_detail_id: item_row.order_detail_id as i64,
+                product_code: item_row.product_code,
+                actual_qty: item_row.actual_qty,
+                unit_price: item_row.unit_price,
+                subtotal: item_row.subtotal.unwrap_or(item_row.actual_qty * item_row.unit_price),
+                weight_unit: item_row.weight_unit,
+                remark: item_row.remark,
+                created_at: DateTime::from_naive_utc_and_offset(item_row.created_at, Utc),
+                updated_at: DateTime::from_naive_utc_and_offset(item_row.updated_at, Utc),
+            };
+
+            delivery_items_map
+                .entry(item_row.delivery_id)
+                .or_insert_with(Vec::new)
+                .push(delivery_item);
+        }
+
+        // 组装 deliveries
+        let mut deliveries: Vec<OrderDelivery> = Vec::new();
+        for row in delivery_rows {
+            let items = delivery_items_map
+                .get(&row.id)
+                .cloned()
+                .unwrap_or_default();
+
+            let delivery = OrderDelivery {
+                id: row.id as i64,
+                assignment_id: row.assignment_id,
+                parent_id: row.parent_id.map(|p| p as i64),
+                delivery_round: row.delivery_round,
+                delivery_type: row.delivery_type,
+                delivered_at: row.delivered_at.map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc)),
+                delivered_by: row.delivered_by,
+                delivery_status: row.delivery_status,
+                remark: row.remark,
+                delivery_contact_number: row.delivery_contact_number,
+                created_at: DateTime::from_naive_utc_and_offset(row.created_at, Utc),
+                updated_at: DateTime::from_naive_utc_and_offset(row.updated_at, Utc),
+                items,
+            };
+
+            deliveries.push(delivery);
+        }
+
+        // 查询订单状态变更历史
+        #[derive(Debug, sqlx::FromRow)]
+        struct StatusHistoryRow {
+            to_status: String,
+            change_reason: Option<String>,
+            created_at: DateTime<Utc>,
+        }
+
+        let status_history_rows = sqlx::query_as!(
+            StatusHistoryRow,
+            r#"
+            SELECT 
+                to_status,
+                change_reason,
+                created_at
+            FROM order_status_history
+            WHERE order_id = ?
+            ORDER BY created_at ASC
+            "#,
+            order_base.id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order status history"))?;
+
+        let status_history: Vec<OrderStatusHistory> = status_history_rows
+            .into_iter()
+            .map(|row| OrderStatusHistory {
+                to_status: row.to_status,
+                change_reason: row.change_reason,
+                created_at: row.created_at,
+            })
+            .collect();
+
         Ok(Some(OrderDetailResponse {
             order: order_base,
             items: order_items,
-            receipts,
+            after_sales: receipts,
             inspections,
+            deliveries,
+            status_history,
         }))
     }
 

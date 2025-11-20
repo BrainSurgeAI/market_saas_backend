@@ -169,7 +169,7 @@ docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}" | grep -i mysql
 mysql -h127.0.0.1 -P3307 -uroot -p tenant_saas < database_backup/tenant_saas_full_20240101_120000.sql
 
 # 如果使用 Docker
-docker exec -i mysql_container mysql -uroot -p tenant_saas < database_backup/tenant_saas_full_20240101_120000.sql
+docker exec -i mysql_market_saas mysql --default-character-set=utf8mb4 -uroot -p3m4c3n9q8J! market_saas < scripts/database_backup/market_saas_full_20251119_151412.sql   
 
 # 如果是压缩文件
 gunzip < database_backup/tenant_saas_full_20240101_120000.sql.gz | mysql -h127.0.0.1 -P3307 -uroot -p tenant_saas

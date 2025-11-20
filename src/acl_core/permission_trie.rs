@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
-use tracing::debug;
 
 pub use crate::acl_core::radix_node::{PermissionRule, RadixNode};
 
@@ -86,7 +85,6 @@ impl PermissionTrie {
     ) -> Option<(Arc<PermissionRule>, HashMap<String, String>)> {
         let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
-        debug!("Finding path: {}, segments: {:?}", path, segments);
         self.find_recursive(&self.root, &segments, &mut HashMap::new())
     }
 
@@ -133,7 +131,6 @@ impl PermissionTrie {
             params.remove(star_name);
         }
 
-        debug!("No match found for segment: {}", current_segment);
         None
     }
 }

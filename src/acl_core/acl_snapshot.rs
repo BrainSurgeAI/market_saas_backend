@@ -9,7 +9,7 @@ use arc_swap::ArcSwap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::LazyLock;
-use tracing::{debug, error};
+use tracing::error;
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct AclSnapshot {
@@ -52,21 +52,15 @@ impl AclSnapshot {
             StatusCode::METHOD_NOT_ALLOWED
         })?;
 
-        debug!(
-            "Verifying access for {} {} with roles {:?}",
-            method, path, claim.roles
-        );
         let (rule, params) = trie.find(path).ok_or_else(|| {
             error!("No path_pattern and method matches {} {}", path, method);
             StatusCode::UNAUTHORIZED
         })?;
 
         if rule.self_only {
-            debug!("Route {} is self-only, verifying username", path);
 
             // If username in the url, e.g /users/{username}
             if let Some(username) = params.get("username") {
-                debug!("Extracted username parameter: {}", username);
                 if username != &claim.username {
                     error!(
                         "Self-only route {} accessed by user {} (expected: {})",
@@ -75,16 +69,10 @@ impl AclSnapshot {
                     return Err(StatusCode::FORBIDDEN);
                 }
             }
-            debug!("Self-only verification ignored for user {}", claim.username);
         }
-
-        debug!("params: {:?}", params);
 
         // If the url contains tenant hashed name, e.g /tenants/{hashed_name}
         if let Some(hashed_name) = params.get("hashed_name") {
-            debug!("Extracted hashed_name parameter: {}", hashed_name);
-            debug!("Route {} is tenant-specific, verifying hashed_name", path);
-
             if hashed_name != &claim.tenant_hash && claim.roles.iter().any(|r| r != "MARKET_ADMIN")
             {
                 error!(
@@ -93,10 +81,6 @@ impl AclSnapshot {
                 );
                 return Err(StatusCode::FORBIDDEN);
             }
-            debug!(
-                "Tenant-only verification passed for tenant {}",
-                claim.tenant_hash
-            );
         }
 
         let perms = self.permissions_for_roles(&claim.roles);

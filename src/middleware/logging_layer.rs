@@ -106,42 +106,29 @@ where
         let log_service = Arc::clone(&self.log_service);
         let start_time = Instant::now();
 
-        tracing::debug!("请求路径: {} {}", request.method(), request.uri().path());
-
         let operation_context = request.extensions().get::<OperationContext>().cloned();
-        if let Some(ctx) = &operation_context {
-            tracing::debug!(
-                "操作上下文: category={}, component={}, action={}",
-                ctx.category,
-                ctx.component,
-                ctx.action
-            );
-        } else {
-            tracing::debug!("未找到操作上下文");
-        }
-
+        // if let Some(ctx) = &operation_context {
+        //     tracing::debug!(
+        //         "操作上下文: category={}, component={}, action={}",
+        //         ctx.category,
+        //         ctx.component,
+        //         ctx.action
+        //     );
+        // }
         // 获取请求上下文和用户信息
         let request_context = request.extensions().get::<RequestContext>().cloned();
-        if let Some(ctx) = &request_context {
-            tracing::debug!(
-                "请求上下文: request_id={}, client_ip={:?}",
-                ctx.request_id,
-                ctx.client_ip
-            );
-        } else {
-            tracing::debug!("未找到请求上下文");
-        }
+        // if let Some(ctx) = &request_context {
+        //     tracing::debug!(
+        //         "请求上下文: request_id={}, client_ip={:?}",
+        //         ctx.request_id,
+        //         ctx.client_ip
+        //     );
+        // } else {
+        //     tracing::debug!("未找到请求上下文");
+        // }
 
         let claims = request.extensions().get::<Claims>().cloned();
-        if let Some(user) = &claims {
-            tracing::debug!(
-                "用户信息: username={}, tenant_type={}",
-                user.username,
-                user.tenant_type
-            );
-        } else {
-            tracing::debug!("未找到用户信息");
-        }
+      
 
         let future = self.inner.call(request);
         Box::pin(async move {
@@ -222,7 +209,7 @@ where
                     });
                 }
             }
-            tracing::debug!("Response: {}", response.status());
+          
             Ok(response)
         })
     }

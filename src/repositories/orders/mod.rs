@@ -74,8 +74,9 @@ impl MySqlRepository {
             r#"SELECT o.id, o.order_status, poa.id as assignment_id, pd.id as delivery_id, pd.delivery_round FROM tenants t
                    INNER JOIN provider_orders_assignments poa ON t.id = poa.provider_id
                    INNER JOIN orders o ON poa.order_id = o.id
-                   LEFT JOIN provider_deliveries pd ON poa.id = pd.assignment_id AND pd.delivery_status = 'PREPARING'
+                   LEFT JOIN provider_deliveries pd ON poa.id = pd.assignment_id
                    WHERE t.tenant_type = 'PROVIDER' AND t.name_hash = ? AND o.order_code = ? 
+                   ORDER BY pd.delivery_round DESC LIMIT 1
                    FOR UPDATE"#,
             provider_hash,
             order_code

@@ -56,18 +56,18 @@ pub(crate) async fn inspect_sub_orders<T>(
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     ValidatedJSON(return_exchange_dto): ValidatedJSON<OrderReceiptDTO>,
-) -> Result<Json<ApiResponse<()>>, AppError>
+) -> Result<Json<ApiResponse<String>>, AppError>
 where
     T: SharedMarketCustomerOrderRepository + Send + Sync,
 {
-    repo.insert_order_inspection_with_aftersales(
+    let inspect_status = repo.insert_order_inspection_with_aftersales(
         &return_exchange_dto.receipt,
         &claims.real_name,
         &context.request_id,
         &claims.tenant_type,
     )
     .await?;
-    Ok(Json(ApiResponse::new(Some(()), &context)))
+    Ok(Json(ApiResponse::new(Some(inspect_status), &context)))
 }
 
 /// Market or Customer begin to inspect the order

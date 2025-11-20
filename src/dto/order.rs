@@ -14,6 +14,13 @@ fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
     Ok(())
 }
 
+fn validate_delivered_quantity_positive(value: &Decimal) -> Result<(), ValidationError> {
+    if value <= &Decimal::ZERO {
+        return Err(ValidationError::new("delivered_quantity_must_be_positive"));
+    }
+    Ok(())
+}
+
 /// Data transfer object for creating a new order
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
 pub(crate) struct CreateOrderRequestDTO {
@@ -203,17 +210,138 @@ pub(crate) struct OrderItem {
     pub(crate) completed_at: Option<DateTime<Utc>>,
 }
 
-/// 订单验收信息
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
-pub(crate) struct OrderInspection {
-    #[serde(rename = "inspectedByType")]
-    pub(crate) inspected_by_type: String,
+/// 订单验收项信息
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderInspectionItem {
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i32,
 
-    #[serde(rename = "inspectionResult")]
-    pub(crate) inspection_result: String,
+    #[serde(rename = "inspectedQty", skip_serializing_if = "Option::is_none")]
+    pub(crate) inspected_qty: Option<Decimal>,
+
+    #[serde(rename = "quantity", skip_serializing_if = "Option::is_none")]
+    pub(crate) quantity: Option<Decimal>,
+
+    #[serde(rename = "remark", skip_serializing_if = "Option::is_none")]
+    pub(crate) remark: Option<String>,
+}
+
+/// 订单验收信息
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderInspection {
+    #[serde(rename = "inspectionId")]
+    pub(crate) inspection_id: i32,
+
+    #[serde(rename = "parent_id", skip_serializing_if = "Option::is_none")]
+    pub(crate) parent_id: Option<i32>,
 
     #[serde(rename = "inspectionRound")]
     pub(crate) inspection_round: i32,
+
+    #[serde(rename = "inspectedByType")]
+    pub(crate) inspected_by_type: String,
+
+    #[serde(rename = "inspectedById")]
+    pub(crate) inspected_by_id: i32,
+
+    #[serde(rename = "result")]
+    pub(crate) result: String,
+
+    #[serde(rename = "inspectedAt", skip_serializing_if = "Option::is_none")]
+    pub(crate) inspected_at: Option<DateTime<Utc>>,
+
+    #[serde(rename = "items")]
+    pub(crate) items: Vec<OrderInspectionItem>,
+}
+
+/// 发货明细项
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderDeliveryItem {
+    #[serde(rename = "id")]
+    pub(crate) id: i64,
+
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i64,
+
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "actualQty")]
+    pub(crate) actual_qty: Decimal,
+
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
+
+    #[serde(rename = "subtotal")]
+    pub(crate) subtotal: Decimal,
+
+    #[serde(rename = "weightUnit")]
+    pub(crate) weight_unit: Option<String>,
+
+    #[serde(rename = "remark", skip_serializing_if = "Option::is_none")]
+    pub(crate) remark: Option<String>,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+
+    #[serde(rename = "updatedAt")]
+    pub(crate) updated_at: DateTime<Utc>,
+}
+
+/// 发货记录
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderDelivery {
+    #[serde(rename = "id")]
+    pub(crate) id: i64,
+
+    #[serde(rename = "assignmentId")]
+    pub(crate) assignment_id: u32,
+
+    #[serde(rename = "parentId", skip_serializing_if = "Option::is_none")]
+    pub(crate) parent_id: Option<i64>,
+
+    #[serde(rename = "deliveryRound")]
+    pub(crate) delivery_round: i32,
+
+    #[serde(rename = "deliveryType")]
+    pub(crate) delivery_type: String,
+
+    #[serde(rename = "deliveredAt", skip_serializing_if = "Option::is_none")]
+    pub(crate) delivered_at: Option<DateTime<Utc>>,
+
+    #[serde(rename = "deliveredBy")]
+    pub(crate) delivered_by: String,
+
+    #[serde(rename = "deliveryStatus")]
+    pub(crate) delivery_status: String,
+
+    #[serde(rename = "remark", skip_serializing_if = "Option::is_none")]
+    pub(crate) remark: Option<String>,
+
+    #[serde(rename = "deliveryContactNumber")]
+    pub(crate) delivery_contact_number: String,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+
+    #[serde(rename = "updatedAt")]
+    pub(crate) updated_at: DateTime<Utc>,
+
+    #[serde(rename = "items")]
+    pub(crate) items: Vec<OrderDeliveryItem>,
+}
+
+/// 订单状态变更历史
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderStatusHistory {
+    #[serde(rename = "toStatus")]
+    pub(crate) to_status: String,
+
+    #[serde(rename = "changeReason", skip_serializing_if = "Option::is_none")]
+    pub(crate) change_reason: Option<String>,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -222,10 +350,17 @@ pub(crate) struct OrderDetailResponse {
 
     pub(crate) items: Vec<OrderDetail>,
 
-    pub(crate) receipts: Vec<ReceiptResponse>,
+    #[serde(rename = "afterSales")]
+    pub(crate) after_sales: Vec<ReceiptResponse>,
 
     #[serde(rename = "inspections")]
     pub(crate) inspections: Vec<OrderInspection>,
+
+    #[serde(rename = "deliveries")]
+    pub(crate) deliveries: Vec<OrderDelivery>,
+
+    #[serde(rename = "statusHistory")]
+    pub(crate) status_history: Vec<OrderStatusHistory>,
 }
 
 /// 收据响应结构体（按 receipt 分组）
@@ -233,6 +368,9 @@ pub(crate) struct OrderDetailResponse {
 pub(crate) struct ReceiptResponse {
     #[serde(rename = "id")]
     pub(crate) id: i32,
+
+    #[serde(rename = "inspectionId")]
+    pub(crate) inspection_id: u32,
 
     #[serde(rename = "operationType")]
     pub(crate) operation_type: ReceiptOperationType,
@@ -250,6 +388,9 @@ pub(crate) struct ReceiptResponse {
 /// 收据项结构体
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct ReceiptItem {
+    #[serde(rename = "inspectionId")]
+    pub(crate) inspection_id: u32,
+
     #[serde(rename = "productId")]
     pub(crate) product_id: String,
 
@@ -269,9 +410,6 @@ pub(crate) struct ReceiptItem {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
 pub(crate) struct OrderDetail {
     pub(crate) id: i32,
-
-    #[serde(rename = "deliveredQuantity")]
-    pub(crate) delivered_quantity: Option<Decimal>,
 
     #[serde(rename = "productId")]
     pub(crate) product_code: String,
@@ -308,12 +446,6 @@ pub(crate) struct OrderDetail {
     pub(crate) processing_requirements: Option<String>,
 
     pub(crate) remark: Option<String>,
-
-    #[serde(rename = "marketInspectedQuantity")]
-    pub(crate) market_inspected_quantity: Option<Decimal>,
-
-    #[serde(rename = "customerInspectedQuantity")]
-    pub(crate) customer_inspected_quantity: Option<Decimal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
@@ -345,11 +477,12 @@ pub(crate) struct ExchangeAndReturnOrderDetailResponse {
     pub(crate) actual_quantity: Option<Decimal>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow, Validate)]
 pub(crate) struct DeliverQuantity {
     pub(crate) id: i32,
 
     #[serde(rename = "deliveredQuantity")]
+    #[validate(custom(function = "validate_delivered_quantity_positive"))]
     pub(crate) delivered_quantity: Decimal,
 }
 
@@ -358,6 +491,7 @@ pub(crate) struct DeliverToMarketDTO {
     #[serde(rename = "stockedBy")]
     pub(crate) stocked_by: String,
 
+    #[validate(nested)]
     pub(crate) items: Vec<DeliverQuantity>,
 }
 

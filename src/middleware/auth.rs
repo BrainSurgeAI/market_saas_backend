@@ -87,10 +87,6 @@ fn decode_jwt(token: &str) -> Result<Claims, AuthError> {
         warn!("Slow JWT decoding: {:?}", duration);
     }
 
-    debug!(
-        "Successfully decoded JWT for user: {}",
-        claims.claims.username
-    );
     Ok(claims.claims)
 }
 
@@ -171,10 +167,10 @@ pub async fn auth_middleware(
             return Err(StatusCode::FORBIDDEN);
         }
 
-        debug!(
-            "tenant is exists {} for user {} with tenant_hash {}",
-            tenant_exists, claims.username, claims.tenant_hash
-        );
+        // debug!(
+        //     "tenant is exists {} for user {} with tenant_hash {}",
+        //     tenant_exists, claims.username, claims.tenant_hash
+        // );
     }
 
     // Verify access permissions
@@ -206,10 +202,10 @@ pub async fn auth_middleware(
     // 4. Inject claims into request extensions
     req.extensions_mut().insert(claims.clone());
 
-    debug!(
-        "ok, this request is authenticated for user {}",
-        claims.username
-    );
+    // debug!(
+    //     "ok, this request is authenticated for user {}",
+    //     claims.username
+    // );
     Ok(next.run(req).await)
 }
 

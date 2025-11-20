@@ -71,7 +71,7 @@ where
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }
 
-pub(crate) async fn exchange_deliver_to_market<T>(
+pub(crate) async fn deliver_exchange_to_market<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
@@ -103,7 +103,7 @@ pub(crate) async fn update_exchange_item_quantity<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-    Path((_order_code, order_detail_id)): Path<(String, i32)>,
+    Path((order_code, order_detail_id)): Path<(String, i32)>,
     ValidatedJSON(exchange_item_update_dto): ValidatedJSON<ExchangeItemQuantityUpdateRequest>,
 ) -> Result<Json<ApiResponse<()>>, AppError>
 where
@@ -111,8 +111,9 @@ where
 {
     debug!("Update exchange item quantity: {:?} for order detail id {}", exchange_item_update_dto, order_detail_id);
     repo.update_exchange_item_quantity(
+        &order_code,
         order_detail_id,
-        &claims.real_name,
+        &claims,
         &exchange_item_update_dto,
     )
     .await?;

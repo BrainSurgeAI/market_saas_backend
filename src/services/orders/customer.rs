@@ -1,5 +1,7 @@
 use axum::{extract::Path, Extension};
 
+use tracing::debug;
+
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
@@ -21,6 +23,8 @@ pub(crate) async fn create_order<T>(
 where
     T: CustomerOrderRepository + Send + Sync,
 {
+    debug!("Create order: {:?}", order);
+
     let order_code = repo.create_order(&claims, &order).await?;
     Ok(Json(ApiResponse::created(Some(order_code), &context)))
 }
