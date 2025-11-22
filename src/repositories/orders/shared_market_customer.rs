@@ -117,18 +117,6 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         let actual_price = record.actual_price;
 
         match receipt.operation_type {
-            ReceiptOperationType::Sign => {
-                debug!("Process normal sign receipt: {:?}", receipt);
-
-                // 允许部分签收，所以签收数量按前端传入的签收数量进行更新
-                sqlx::query!(
-                    r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty, remarks) VALUES (?, ?, ?, ?)"#,
-                    inspection_id, detail_id, receipt.quantity, receipt.reason
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to insert order inspection item"))?;
-            }
             ReceiptOperationType::Return => {
                 let operation_type_str = String::from(ReceiptOperationType::Return);
 
@@ -190,109 +178,126 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                   .await
                   .map_err(map_db_err!("Failed to create exchange item"))?;
                 }
-
-                sqlx::query!(
-                    r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty) VALUES (?, ?, ?)"#,
-                    inspection_id, detail_id,  receipt.quantity
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to update order inspection item"))?;
             }
+            _=> debug!("Process receipt: {:?}", receipt),
         }
 
-        // 验证订单中所有商品是否已经验收完毕
-        let inspections_result = sqlx::query!(
-            r#"
-            WITH latest_inspection AS (
-    SELECT id, inspection_round, parent_id, inspected_by_type
-    FROM order_inspections
-    WHERE order_id = ?
-    ORDER BY inspection_round DESC
-    LIMIT 1
-),
-order_detail_count AS (
-    SELECT COUNT(*) AS total_details
-    FROM order_details
-    WHERE order_id = ?
-),
-current_inspected_count AS (
-    SELECT COALESCE(COUNT(*),0) AS inspected_count
-    FROM order_inspection_items
-    WHERE inspection_id = (SELECT id FROM latest_inspection)
-),
-
-current_rer_count AS (
-    SELECT 
-        COALESCE(CAST(SUM(CASE WHEN operation_type = 'RETURN' THEN 1 ELSE 0 END) AS SIGNED), 0) AS return_count,
-        COALESCE(CAST(SUM(CASE WHEN operation_type = 'EXCHANGE' THEN 1 ELSE 0 END) AS SIGNED), 0) AS exchange_count
-    FROM return_exchange_records
-    WHERE inspection_id = (SELECT id FROM latest_inspection)
-),
-parent_rer_count AS (
-    SELECT 
-        CASE 
-            WHEN (SELECT parent_id FROM latest_inspection) IS NULL 
-            THEN 0
-            ELSE (
-                SELECT COUNT(*) 
-                FROM return_exchange_records 
-                WHERE inspection_id = (SELECT parent_id FROM latest_inspection)
-            )
-        END AS parent_rer
-),
-required_items AS (
-    SELECT 
-        CASE 
-            WHEN (SELECT parent_id FROM latest_inspection) IS NULL 
-            THEN (SELECT total_details FROM order_detail_count)    -- 市场验收
-            ELSE (SELECT total_details FROM order_detail_count) 
-               - (SELECT parent_rer FROM parent_rer_count)         -- 客户验收
-        END AS required_count
-)
-
-SELECT
-    (SELECT required_count FROM required_items) AS required_items,
-    (SELECT inspected_count FROM current_inspected_count) AS inspected_items,
-    (SELECT return_count FROM current_rer_count) AS current_return_items,
-    (SELECT exchange_count FROM current_rer_count) AS current_exchange_items,
-    (
-        (SELECT inspected_count FROM current_inspected_count)
-        + (SELECT return_count FROM current_rer_count)
-        + (SELECT exchange_count FROM current_rer_count)
-        = (SELECT required_count FROM required_items)
-    ) AS is_all_completed;
-            "#,
-            order_id,
-            order_id,
+        sqlx::query!(
+            r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty, remarks, result) VALUES (?, ?, ?, ?, ?)"#,
+            inspection_id, detail_id, receipt.quantity, receipt.reason, ReceiptOperationType::to_str(receipt.operation_type.clone())
         )
-        .fetch_optional(&mut *tx)
+        .execute(&mut *tx)
         .await
-        .map_err(map_db_err!("Failed to get inspection items"))?
-        .ok_or_else(|| AppError::NotFound(format!("Inspection items not found: {}", inspection_id)))?;
+        .map_err(map_db_err!("Failed to insert order inspection item"))?;
 
-        let mut inspect_status = "PENDING";
-        if inspections_result.is_all_completed == Some(1) {
-            debug!("All inspection items are completed");
-            inspect_status = if inspections_result.current_exchange_items > Some(0) {
+        // 验证订单中所有商品是否已经验收完毕
+        // 算法：
+        // 1.从指定的order_id查看order_details表的记录数是否与order_inspections表当前round对应的order_inspection_items表的记录数一致
+        // 2. 如果不一致，则返回 PENDING
+        // 3. 如果一致,获取order_inspections当前round的order_inspection_items表的 result 字段，通过result字段判断返回
+        //    a.如果result记录中至少一个是EXCHANGE，则返回 EXCHANGE
+        //    b.如果result记录中都是RETURN，则返回 REJECTED
+        //    c.如果result记录中都是SIGN，则返回 PASS
+        //    d.返回PARTIAL
+
+        // 获取当前的最大轮次
+        let current_round = sqlx::query!(
+            r#"SELECT MAX(inspection_round) as max_round FROM order_inspections WHERE order_id = ? AND inspected_by_type = ?"#,
+            order_id, tenant_type
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get current inspection round"))?
+        .max_round
+        .unwrap_or(1);
+
+        // 获取当前用户应该验收的订单详情总数
+        let tenant_type_enum = TenantType::try_from(tenant_type)?;
+        let order_details_count: i64 = match tenant_type_enum {
+            TenantType::Market => {
+                sqlx::query!(
+                    r#"SELECT COUNT(*) as count FROM provider_delivery_items pdi
+                     INNER JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
+                     WHERE pd.assignment_id = ? AND pd.delivery_round = ?"#,
+                    order_id, current_round
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get order details count"))?
+                .count
+            }
+            TenantType::Customer => {
+                sqlx::query!(
+                    r#"SELECT COUNT(*) as count
+                     FROM order_inspections customer_oi
+                     INNER JOIN order_inspections parent_oi ON customer_oi.parent_id = parent_oi.id
+                     INNER JOIN order_inspection_items parent_items ON parent_oi.id = parent_items.inspection_id
+                     WHERE customer_oi.order_id = ?
+                     AND customer_oi.inspected_by_type = 'CUSTOMER'
+                     AND parent_items.result != 'RETURN'"#,
+                    order_id
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get order details count"))?
+                .count
+            }
+            TenantType::Provider => {
+                return Err(AppError::BadRequest(format!("Provider tenant type not supported for this operation")));
+            }
+        };
+
+        // 获取当前轮次的检验项目总数
+        let inspection_items_count = sqlx::query!(
+            r#"SELECT COUNT(*) as count FROM order_inspection_items oii
+               INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+               WHERE oi.order_id = ? AND oi.inspection_round = ? AND oi.inspected_by_type = ?"#,
+            order_id, current_round, tenant_type
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get inspection items count"))?
+        .count;
+
+        let inspect_status = if order_details_count != inspection_items_count {
+            "PENDING"
+        } else {
+            // 获取当前轮次的检验结果
+            let inspection_results = sqlx::query!(
+                r#"SELECT oii.result FROM order_inspection_items oii
+                   INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+                   WHERE oi.order_id = ? AND oi.inspection_round = ?"#,
+                order_id, current_round
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to get inspection results"))?;
+
+            // 分析结果
+            let has_exchange = inspection_results.iter().any(|r| r.result == "EXCHANGE");
+            let all_return = inspection_results.iter().all(|r| r.result == "RETURN");
+            let all_sign = inspection_results.iter().all(|r| r.result == "SIGN");
+
+            if has_exchange {
                 "EXCHANGE"
-            } else if inspections_result.current_return_items == Some(0) {
-                "PASS"
-            } else if inspections_result.current_return_items != inspections_result.required_items {
-                "PARTIAL"
-            } else {
+            } else if all_return {
                 "REJECTED"
-            };
+            } else if all_sign {
+                "PASS"
+            } else {
+                "PARTIAL"
+            }
+        };
 
+        // 更新检验结果到order_inspections表
+        if inspect_status != "PENDING" {
             sqlx::query!(
-                r#"UPDATE order_inspections SET inspection_result = ?, inspected_by_type = ? WHERE id = ?"#,
-                inspect_status,
-                tenant_type,
-                inspection_id
+                r#"UPDATE order_inspections SET inspection_result = ? WHERE order_id = ? AND inspection_round = ?"#,
+                inspect_status, order_id, current_round
             )
             .execute(&mut *tx)
             .await
-            .map_err(map_db_err!("Failed to update order inspection status"))?;
+            .map_err(map_db_err!("Failed to update inspection result"))?;
         }
 
         tx.commit()

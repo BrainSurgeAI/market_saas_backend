@@ -176,6 +176,12 @@ impl From<axum::extract::rejection::JsonRejection> for AppError {
     }
 }
 
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::internal(format!("{}: {}", JSON_PROCESSING_ERROR, err))
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let error_context = self.error_context();

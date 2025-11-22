@@ -8,10 +8,11 @@ use tracing::{debug, info};
 use crate::{
     common::{ApiResponse, AppError},
     dto::order::{
-        ExchangeAndReturnOrderDetailResponse, OrderDetailResponse, OrderQueryParams, OrderResponse,
+        ExchangeAndReturnOrderDetailResponse, MarketOrderDetailResponse, OrderQueryParams, OrderResponse,
     },
     middleware::context::RequestContext,
     models::claims::Claims,
+    models::tenant_type::TenantType,
     repositories::orders::common::CommonOrderRepository,
     utils::validate_json_fmt::Json,
 };
@@ -52,11 +53,20 @@ where
         order_code, claims.tenant_hash
     );
 
-    let order = repo
-        .order_by_order_code(&order_code, &claims)
-        .await?;
-
-    Ok(Json(ApiResponse::new(Some(order), &context)))
+    match TenantType::try_from(claims.tenant_type.as_str())? {
+        TenantType::Provider => {
+            let order = repo.order_by_order_code_for_provider(&order_code, &claims.tenant_hash).await?;
+            return Ok(Json(ApiResponse::new(Some(serde_json::to_value(order)?), &context)));
+        }
+        TenantType::Market => {
+            let order = repo.order_by_order_code_for_market(&order_code, &claims.tenant_hash).await?;
+            return Ok(Json(ApiResponse::new(Some(serde_json::to_value(order)?), &context)));
+        }
+        TenantType::Customer => {
+            let order = repo.order_by_order_code_for_customer(&order_code, &claims.tenant_hash).await?;
+            return Ok(Json(ApiResponse::new(Some(serde_json::to_value(order)?), &context)));
+        }
+    }
 }
 
 pub(crate) async fn get_exchange_and_return_order_details_by_order_code<T>(

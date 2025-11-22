@@ -39,7 +39,7 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
     async fn deliver_to_market(
         &self,
         order_code: &str,
-        provider_hash: &str,
+        claims: &Claims,
         deliver_to_market_dto: &DeliverToMarketDTO,
     ) -> Result<(), AppError>;
 
@@ -240,7 +240,7 @@ impl ProviderOrderRepository for MySqlRepository {
     async fn deliver_to_market(
         &self,
         order_code: &str,
-        provider_hash: &str,
+        claims: &Claims,
         deliver_to_market_dto: &DeliverToMarketDTO,
     ) -> Result<(), AppError> {
         let mut tx = self
@@ -252,7 +252,7 @@ impl ProviderOrderRepository for MySqlRepository {
         // Use the shared helper method to fetch provider's order
         let (order_id, order_status_str, _, delivery_id, _) = self
             .fetch_provider_order(
-                provider_hash,
+                claims.tenant_hash.as_str(),
                 order_code,
                 &format!("订单 {} 没有找到", order_code),
             )
@@ -317,7 +317,7 @@ impl ProviderOrderRepository for MySqlRepository {
             order_id,
             order_status_str.as_str(),
             next,
-            deliver_to_market_dto.stocked_by.as_str(),
+            claims.real_name.as_str(),
             action,
         )
         .await?;

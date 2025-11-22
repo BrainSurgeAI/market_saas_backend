@@ -488,8 +488,8 @@ pub(crate) struct DeliverQuantity {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
 pub(crate) struct DeliverToMarketDTO {
-    #[serde(rename = "stockedBy")]
-    pub(crate) stocked_by: String,
+    // #[serde(rename = "stockedBy")]
+    // pub(crate) stocked_by: String,
 
     #[validate(nested)]
     pub(crate) items: Vec<DeliverQuantity>,
@@ -618,6 +618,16 @@ pub(crate) enum ReceiptOperationType {
     Exchange, // Exchange goods
 }
 
+impl ReceiptOperationType {
+    pub(crate) fn to_str(self) -> &'static str {
+        match self {
+            ReceiptOperationType::Sign => "SIGN",
+            ReceiptOperationType::Return => "RETURN",
+            ReceiptOperationType::Exchange => "EXCHANGE",
+        }
+    }
+}
+
 impl TryFrom<String> for ReceiptOperationType {
     type Error = String;
 
@@ -639,4 +649,338 @@ impl From<ReceiptOperationType> for String {
             ReceiptOperationType::Exchange => "EXCHANGE".to_string(),
         }
     }
+}
+
+/// 供应商订单轮次响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderOrderRound {
+    pub(crate) round: i32,
+
+    #[serde(rename = "deliveryStatus")]
+    pub(crate) delivery_status: String,
+
+    #[serde(rename = "deliveryType")]
+    pub(crate) delivery_type: String,
+
+    pub(crate) items: Vec<ProviderOrderItem>,
+}
+
+/// 供应商订单项响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderOrderItem {
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i32,
+
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "categoryId")]
+    pub(crate) category_id: i32,
+
+    #[serde(rename = "categoryName")]
+    pub(crate) category_name: String,
+
+    #[serde(rename = "needToDeliverQty")]
+    pub(crate) need_to_deliver_qty: Decimal,
+
+    #[serde(rename = "actualQty")]
+    pub(crate) actual_qty: Option<Decimal>,
+
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
+
+    pub(crate) unit: String,
+
+    #[serde(rename = "inspectionStatus")]
+    pub(crate) inspection_status: String,
+
+    #[serde(rename = "acceptedQty")]
+    pub(crate) accepted_qty: Option<Decimal>,
+
+    #[serde(rename = "exchangeQty")]
+    pub(crate) exchange_qty: Option<Decimal>,
+
+    #[serde(rename = "processingRequirements")]
+    pub(crate) processing_requirements: Option<String>,
+
+    pub(crate) remark: Option<ProviderOrderRemark>,
+}
+
+/// 供应商订单备注
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderOrderRemark {
+    #[serde(rename = "evidenceImages")]
+    pub(crate) evidence_images: Option<String>,
+
+    pub(crate) reason: Option<String>,
+}
+
+/// 供应商订单响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderOrderResponse {
+    #[serde(rename = "orderCode")]
+    pub(crate) order_code: String,
+
+    #[serde(rename = "orderStatus")]
+    pub(crate) order_status: String,
+
+    #[serde(rename = "deliveryDate")]
+    pub(crate) delivery_date: Option<DateTime<Utc>>,
+
+    #[serde(rename = "receiverName")]
+    pub(crate) receiver_name: Option<String>,
+
+    #[serde(rename = "customerName")]
+    pub(crate) customer_name: Option<String>,
+
+    #[serde(rename = "orderedAmount")]
+    pub(crate) ordered_amount: Decimal,
+
+    #[serde(rename = "discountAmount")]
+    pub(crate) discount_amount: Decimal,
+
+    #[serde(rename = "netAmount")]
+    pub(crate) net_amount: Decimal,
+
+    #[serde(rename = "receiverPhone")]
+    pub(crate) receiver_phone: Option<String>,
+
+    #[serde(rename = "deliveryAddress")]
+    pub(crate) delivery_address: Option<String>,
+
+    #[serde(rename = "shipperName")]
+    pub(crate) shipper_name: Option<String>,
+
+    #[serde(rename = "shipperPhone")]
+    pub(crate) shipper_phone: Option<String>,
+
+    pub(crate) rounds: Vec<ProviderOrderRound>,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+}
+
+/// MARKET 用户订单详情响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct MarketOrderDetailResponse {
+    #[serde(rename = "orderCode")]
+    pub(crate) order_code: String,
+
+    #[serde(rename = "orderStatus")]
+    pub(crate) order_status: String,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+
+    #[serde(rename = "customerName")]
+    pub(crate) customer_name: Option<String>,
+
+    #[serde(rename = "deliveryAddress")]
+    pub(crate) delivery_address: Option<String>,
+
+    #[serde(rename = "deliveryDate")]
+    pub(crate) delivery_date: Option<DateTime<Utc>>,
+
+    #[serde(rename = "discountAmount")]
+    pub(crate) discount_amount: Decimal,
+
+    #[serde(rename = "netAmount")]
+    pub(crate) net_amount: Decimal,
+
+    #[serde(rename = "orderedAmount")]
+    pub(crate) ordered_amount: Decimal,
+
+    #[serde(rename = "receiverName")]
+    pub(crate) receiver_name: Option<String>,
+
+    #[serde(rename = "receiverPhone")]
+    pub(crate) receiver_phone: Option<String>,
+
+    #[serde(rename = "shipperName")]
+    pub(crate) shipper_name: Option<String>,
+
+    #[serde(rename = "shipperPhone")]
+    pub(crate) shipper_phone: Option<String>,
+
+    pub(crate) details: Vec<OrderDetail>,
+
+    pub(crate) rounds: Vec<MarketOrderRound>,
+}
+
+/// MARKET 订单轮次
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct MarketOrderRound {
+    pub(crate) round: i32,
+
+    #[serde(rename = "deliveryType")]
+    pub(crate) delivery_type: String,
+
+    #[serde(rename = "deliveredAt")]
+    pub(crate) delivered_at: Option<DateTime<Utc>>,
+
+    #[serde(rename = "inspectionResult")]
+    pub(crate) inspection_result: String,
+
+    #[serde(rename = "inspectionAt")]
+    pub(crate) inspection_at: Option<DateTime<Utc>>,
+
+    pub(crate) items: Vec<MarketOrderItem>,
+}
+
+/// MARKET 订单商品项
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct MarketOrderItem {
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i32,
+
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "categoryId")]
+    pub(crate) category_id: i32,
+
+    #[serde(rename = "categoryName")]
+    pub(crate) category_name: String,
+
+    pub(crate) unit: String,
+
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
+
+    #[serde(rename = "orderedQty")]
+    pub(crate) ordered_qty: Decimal,
+
+    #[serde(rename = "needToInspectQty")]
+    pub(crate) need_to_inspect_qty: Decimal,
+
+    #[serde(rename = "acceptedQty")]
+    pub(crate) accepted_qty: Option<Decimal>,
+
+    #[serde(rename = "exchangeQty")]
+    pub(crate) exchange_qty: Option<Decimal>,
+
+    #[serde(rename = "returnQty")]
+    pub(crate) return_qty: Option<Decimal>,
+
+    #[serde(rename = "inspectionStatus")]
+    pub(crate) inspection_status: String,
+
+    #[serde(rename = "processingRequirements")]
+    pub(crate) processing_requirements: Option<String>,
+
+    pub(crate) remark: Option<ProviderOrderRemark>,
+}
+
+/// CUSTOMER 订单详情响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct CustomerOrderDetailResponse {
+    #[serde(rename = "orderCode")]
+    pub(crate) order_code: String,
+
+    #[serde(rename = "orderStatus")]
+    pub(crate) order_status: String,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+
+    #[serde(rename = "customerName")]
+    pub(crate) customer_name: Option<String>,
+
+    #[serde(rename = "deliveryAddress")]
+    pub(crate) delivery_address: Option<String>,
+
+    #[serde(rename = "deliveryDate")]
+    pub(crate) delivery_date: Option<DateTime<Utc>>,
+
+    #[serde(rename = "discountAmount")]
+    pub(crate) discount_amount: Decimal,
+
+    #[serde(rename = "netAmount")]
+    pub(crate) net_amount: Decimal,
+
+    #[serde(rename = "orderedAmount")]
+    pub(crate) ordered_amount: Decimal,
+
+    #[serde(rename = "receiverName")]
+    pub(crate) receiver_name: Option<String>,
+
+    #[serde(rename = "receiverPhone")]
+    pub(crate) receiver_phone: Option<String>,
+
+    #[serde(rename = "shipperName")]
+    pub(crate) shipper_name: Option<String>,
+
+    #[serde(rename = "shipperPhone")]
+    pub(crate) shipper_phone: Option<String>,
+
+    pub(crate) details: Vec<OrderDetail>,
+
+    pub(crate) rounds: Vec<CustomerOrderRound>,
+}
+
+/// CUSTOMER 订单轮次
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct CustomerOrderRound {
+    pub(crate) round: i32,
+
+    #[serde(rename = "inspectionResult")]
+    pub(crate) inspection_result: String,
+
+    #[serde(rename = "inspectionAt")]
+    pub(crate) inspection_at: Option<DateTime<Utc>>,
+
+    pub(crate) items: Vec<CustomerOrderItem>,
+}
+
+/// CUSTOMER 订单商品项
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct CustomerOrderItem {
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i32,
+
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "categoryId")]
+    pub(crate) category_id: i32,
+
+    #[serde(rename = "categoryName")]
+    pub(crate) category_name: String,
+
+    pub(crate) unit: String,
+
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
+
+    #[serde(rename = "orderedQty")]
+    pub(crate) ordered_qty: Decimal,
+
+    #[serde(rename = "needToInspectQty")]
+    pub(crate) need_to_inspect_qty: Option<Decimal>,
+
+    #[serde(rename = "acceptedQty")]
+    pub(crate) accepted_qty: Option<Decimal>,
+
+    #[serde(rename = "exchangeQty")]
+    pub(crate) exchange_qty: Option<Decimal>,
+
+    #[serde(rename = "returnQty")]
+    pub(crate) return_qty: Option<Decimal>,
+
+    #[serde(rename = "inspectionStatus")]
+    pub(crate) inspection_status: String,
+
+    #[serde(rename = "processingRequirements")]
+    pub(crate) processing_requirements: Option<String>,
+
+    pub(crate) remark: Option<ProviderOrderRemark>,
 }

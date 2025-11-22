@@ -66,7 +66,7 @@ where
     T: ProviderOrderRepository + Send + Sync,
 {
     debug!("Deliver to market: {:?}", deliver_to_market_dto);
-    repo.deliver_to_market(&order_code, &claims.tenant_hash, &deliver_to_market_dto)
+    repo.deliver_to_market(&order_code, &claims, &deliver_to_market_dto)
         .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
 }

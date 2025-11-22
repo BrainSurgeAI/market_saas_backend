@@ -110,7 +110,7 @@ CREATE TABLE `exchange_items` (
   PRIMARY KEY (`id`),
   KEY `fk_exchange_items_return_exchange` (`return_exchange_id`),
   CONSTRAINT `fk_exchange_items_return_exchange` FOREIGN KEY (`return_exchange_id`) REFERENCES `return_exchange_records` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='换货商品表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='换货商品表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `menu_config`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -185,12 +185,13 @@ CREATE TABLE `order_inspection_items` (
   `inspected_qty` decimal(10,2) NOT NULL,
   `accepted` tinyint(1) DEFAULT '1',
   `remarks` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `result` enum('SIGN','EXCHANGE','RETURN') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'SIGN' COMMENT '验收结果：SIGN-签收，EXCHANGE-换货，RETURN-退货',
   PRIMARY KEY (`id`),
   KEY `fk_inspection_items` (`inspection_id`),
   KEY `fk_inspection_items_order_detail` (`order_detail_id`),
   CONSTRAINT `fk_inspection_items` FOREIGN KEY (`inspection_id`) REFERENCES `order_inspections` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inspection_items_order_detail` FOREIGN KEY (`order_detail_id`) REFERENCES `order_details` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `order_inspections`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -211,7 +212,7 @@ CREATE TABLE `order_inspections` (
   CONSTRAINT `fk_order_inspections_orders` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_order_inspections_parent` FOREIGN KEY (`parent_id`) REFERENCES `order_inspections` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_order_inspections_users` FOREIGN KEY (`inspected_by_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `order_status_history`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -228,7 +229,7 @@ CREATE TABLE `order_status_history` (
   KEY `idx_order_id` (`order_id`),
   KEY `idx_order_status_time` (`order_id`,`to_status`,`created_at`),
   CONSTRAINT `fk_order_history_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单状态变更历史表';
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单状态变更历史表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `orders`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -589,7 +590,7 @@ CREATE TABLE `return_exchange_records` (
   KEY `fk_rer_inspection` (`inspection_id`),
   CONSTRAINT `fk_rer_inspection` FOREIGN KEY (`inspection_id`) REFERENCES `order_inspections` (`id`),
   CONSTRAINT `fk_return_exchange_order_detail` FOREIGN KEY (`order_detail_id`) REFERENCES `order_details` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='退换货记录表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='退换货记录表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `role_menu`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
