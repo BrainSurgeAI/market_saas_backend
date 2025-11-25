@@ -139,6 +139,20 @@ impl ProviderOrderRepository for MySqlRepository {
             if insert_result.rows_affected() == 0 {
                 return Err(AppError::NotFound(format!("配送员 {} 没有找到", id_card)));
             }
+
+            let provider_delivery_id = insert_result.last_insert_id();
+
+            // insert into order delivery items table
+            sqlx::query!(
+                r#"INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, unit_price, weight_unit) 
+                SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, od.discounted_unit_price, od.unit AS weight_unit
+                FROM order_details od WHERE od.order_id = ?"#,
+                provider_delivery_id,
+                order_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to insert provider delivery item"))?;
         } else {
             // ExchangeRequested state, insert new provider delivery message
             let provider_delivery = sqlx::query!(
@@ -181,6 +195,37 @@ impl ProviderOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to insert next round provider delivery"))?;
 
+            let provider_delivery_id = sqlx::query!("SELECT LAST_INSERT_ID() as id")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get last insert id"))?
+                .id;
+            // insert into order delivery items table
+            // 只插入需要换货的商品（最近一轮验收中标记为EXCHANGE的商品）
+            sqlx::query!(
+                r#"INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, unit_price, weight_unit)
+                SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, od.discounted_unit_price, od.unit AS weight_unit
+                FROM order_details od
+                INNER JOIN order_inspection_items oii ON od.id = oii.order_detail_id
+                WHERE od.order_id = ?
+                  AND oii.inspection_id IN (
+                    SELECT oi.id FROM order_inspections oi
+                    WHERE oi.order_id = ?
+                      AND oi.inspection_round = (
+                        SELECT MAX(inspection_round) FROM order_inspections
+                        WHERE order_id = ? AND inspection_result = 'EXCHANGE'
+                      )
+                      AND oi.inspection_result = 'EXCHANGE'
+                  )
+                  AND oii.result = 'EXCHANGE'"#,
+                provider_delivery_id,
+                order_id,
+                order_id,
+                order_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to insert provider delivery item"))?;
             // If has any return goods, update the return goods status to RETURNED means the return goods request is accepted
             sqlx::query!(
                 r#"UPDATE return_exchange_records 
@@ -279,17 +324,15 @@ impl ProviderOrderRepository for MySqlRepository {
             let delivered_quantity = item.delivered_quantity;
 
             sqlx::query!(r#"
-            INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, actual_qty, unit_price, weight_unit) 
-            SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, ? AS actual_qty, od.discounted_unit_price, od.unit AS weight_unit
-            FROM order_details od WHERE od.id = ?"#,
+             UPDATE provider_delivery_items SET actual_qty = ? WHERE delivery_id = ? AND order_detail_id = ?
+            "#,
+                delivered_quantity,
                 delivery_id,
-                delivered_quantity, 
                 id
             )
             .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to insert provider delivery item"))?;
-        }
+            .await.map_err(map_db_err!("Failed to update provider delivery item"))?;
+        };
 
         // update provider delivery status to DELIVERED and delivered_at to now
         sqlx::query!(
@@ -373,8 +416,8 @@ impl ProviderOrderRepository for MySqlRepository {
             ))
         })?;
         debug!(
-            "Exchange deliver to market for order code {} and delivery id {}",
-            order_code, delivery_id
+            "Exchange deliver to market for order code {} and delivery id {} and next status {}",
+            order_code, delivery_id, next.to_str()
         );
 
         for item in exchange_dto.items.iter() {
@@ -387,15 +430,11 @@ impl ProviderOrderRepository for MySqlRepository {
             );
 
             let insert_result = sqlx::query!(r#"
-              INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, actual_qty, unit_price, weight_unit) 
-              SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, ? AS actual_qty, od.discounted_unit_price, od.unit AS weight_unit
-              FROM order_details od 
-              WHERE od.id = ? AND od.order_id = ?
+              UPDATE provider_delivery_items SET actual_qty = ? WHERE delivery_id = ? AND order_detail_id = ?
             "#,
-                delivery_id,
                 actual_quantity,
-                id,
-                order_id
+                delivery_id,
+                id
             )
             .execute(&mut *tx)
             .await

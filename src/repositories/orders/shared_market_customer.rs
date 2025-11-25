@@ -40,8 +40,7 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
     async fn insert_order_inspection(
         &self,
         order_code: &str,
-        claims: &Claims,
-        action: OrderAction,
+        claims: &Claims
     ) -> Result<OrderStatus, AppError>;
 
     /// 根据订单的签收、退货和换货情况，计算应该返回的 OrderAction
@@ -211,6 +210,8 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .max_round
         .unwrap_or(1);
 
+    debug!("Current inspection round: {}", current_round);
+
         // 获取当前用户应该验收的订单详情总数
         let tenant_type_enum = TenantType::try_from(tenant_type)?;
         let order_details_count: i64 = match tenant_type_enum {
@@ -377,8 +378,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
     async fn insert_order_inspection(
         &self,
         order_code: &str,
-        claims: &Claims,
-        action: OrderAction,
+        claims: &Claims
     ) -> Result<OrderStatus, AppError> {
         let mut tx = self
             .pool
@@ -386,6 +386,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
+        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
         // TODO: check if the order is belongs with the tenant_relationships table by tenant_type
         let order = sqlx::query!(
             r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
@@ -433,6 +434,24 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to create order inspection record"))?;
 
         // Update the order status to MarketInspecting or CustomerInspecting
+        let action = if tenant_type == TenantType::Market {
+            if order.order_status == OrderStatus::SupplierDelivering.to_str() {
+                OrderAction::MarketInspect
+            } else if order.order_status == OrderStatus::ExchangeDelivering.to_str() {
+                OrderAction::MarketInspect
+            } else {
+                return Err(AppError::bad_request(format!("Order status is not correct: {} -> {}", order.order_status, OrderAction::MarketInspect.description())));
+            }
+        } else {
+            // Customer tenant type
+            if order.order_status == OrderStatus::MarketDelivering.to_str() {
+                OrderAction::CustomerInspect
+            } else if order.order_status == OrderStatus::ExchangeNewDelivering.to_str() {
+                OrderAction::CustomerInspect
+            } else {
+                return Err(AppError::bad_request(format!("Order status is not correct: {} -> {}", order.order_status, OrderAction::CustomerInspect.description())));
+            }
+        };
         let next_status = OrderStateMachine::next_state(
             OrderStatus::try_from(order.order_status.as_str())?,
             action,

@@ -85,20 +85,20 @@ where
         &order_code, &claims.tenant_type, &claims.username
     );
 
-    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+    // let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
 
-    let action = match tenant_type {
-        TenantType::Market => OrderAction::MarketInspect,
-        TenantType::Customer => OrderAction::CustomerInspect,
-        _ => {
-            return Err(AppError::Forbidden(format!(
-                "{} 不能执行验收操作",
-                claims.tenant_type
-            )));
-        }
-    };
+    // let action = match tenant_type {
+    //     TenantType::Market => OrderAction::MarketInspect,
+    //     TenantType::Customer => OrderAction::CustomerInspect,
+    //     _ => {
+    //         return Err(AppError::Forbidden(format!(
+    //             "{} 不能执行验收操作",
+    //             claims.tenant_type
+    //         )));
+    //     }
+    // };
 
-    let next_status = repo.insert_order_inspection(&order_code, &claims, action).await?;
+    let next_status = repo.insert_order_inspection(&order_code, &claims).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,

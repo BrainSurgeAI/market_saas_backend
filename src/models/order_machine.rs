@@ -96,11 +96,9 @@ impl OrderStateMachine {
             (OrderStatus::ExchangeInspecting, OrderAction::MarketAccept, TenantType::Market) => {
                 OrderStatus::ExchangeNewDelivering
             }
-            (
-                OrderStatus::ExchangeNewDelivering,
-                OrderAction::DeliverToCustomer,
-                TenantType::Market,
-            ) => OrderStatus::CustomerInspecting,
+            (OrderStatus::ExchangeNewDelivering, OrderAction::CustomerInspect, TenantType::Customer) => {
+                OrderStatus::CustomerInspecting
+            }
 
             // 客户验收异常流程
             // 客户要求换货

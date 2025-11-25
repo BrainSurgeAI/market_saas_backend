@@ -24,10 +24,10 @@ pub(super) fn shared_market_customer_routes() -> Router {
             "/{order_code}/after-sales",
             post(create_after_sales_request::<MySqlRepository>),
         )
-        .route(
-            "/{order_code}/begin-exchange-inspect-order",
-            patch(begin_exchange_inspect_order::<MySqlRepository>),
-        )
+        // .route(
+        //     "/{order_code}/begin-exchange-inspect-order",
+        //     patch(begin_exchange_inspect_order::<MySqlRepository>),
+        // )
         .route(
             "/{order_code}/return",
             patch(return_order::<MySqlRepository>),

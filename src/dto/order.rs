@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, types::Decimal};
 use validator::{Validate, ValidationError};
 
-use crate::{dto::{validate_delivery_date, validate_phone}, repositories::orders::common::OrderBaseInfoResponse};
+use crate::dto::{validate_delivery_date, validate_phone};
 
 fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
     let min = Decimal::new(1, 2); // 0.01
@@ -344,24 +344,6 @@ pub(crate) struct OrderStatusHistory {
     pub(crate) created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub(crate) struct OrderDetailResponse {
-    pub(crate) order: OrderBaseInfoResponse,
-
-    pub(crate) items: Vec<OrderDetail>,
-
-    #[serde(rename = "afterSales")]
-    pub(crate) after_sales: Vec<ReceiptResponse>,
-
-    #[serde(rename = "inspections")]
-    pub(crate) inspections: Vec<OrderInspection>,
-
-    #[serde(rename = "deliveries")]
-    pub(crate) deliveries: Vec<OrderDelivery>,
-
-    #[serde(rename = "statusHistory")]
-    pub(crate) status_history: Vec<OrderStatusHistory>,
-}
 
 /// 收据响应结构体（按 receipt 分组）
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -497,28 +479,17 @@ pub(crate) struct DeliverToMarketDTO {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
 pub(crate) struct ExchangeDTO {
-    #[serde(rename = "operateBy")]
-    pub(crate) operate_by: String,
-
     pub(crate) items: Vec<ExchangeItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct ExchangeItem {
     // order detail id
-    #[serde(rename = "id")]
+    #[serde(rename = "orderDetailId")]
     pub(crate) id: i32,
-
-    #[serde(rename = "productId")]
-    pub(crate) product_code: String,
 
     #[serde(rename = "actualQuantity")]
     pub(crate) actual_quantity: Decimal,
-
-    #[serde(rename = "requestedQuantity")]
-    pub(crate) requested_quantity: Decimal,
-
-    pub(crate) remark: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, FromRow)]
@@ -535,8 +506,6 @@ pub(crate) struct AcceptedOrderResponseDTO {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
 pub(crate) struct OrderReceiptDTO {
-    #[serde(rename = "operateBy")]
-    pub(crate) operate_by: String,
     pub(crate) receipt: OrderReceipt,
 }
 
@@ -654,8 +623,6 @@ impl From<ReceiptOperationType> for String {
 /// 供应商订单轮次响应
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct ProviderOrderRound {
-    pub(crate) round: i32,
-
     #[serde(rename = "deliveryStatus")]
     pub(crate) delivery_status: String,
 
@@ -694,19 +661,10 @@ pub(crate) struct ProviderOrderItem {
 
     pub(crate) unit: String,
 
-    #[serde(rename = "inspectionStatus")]
-    pub(crate) inspection_status: String,
-
-    #[serde(rename = "acceptedQty")]
-    pub(crate) accepted_qty: Option<Decimal>,
-
-    #[serde(rename = "exchangeQty")]
-    pub(crate) exchange_qty: Option<Decimal>,
-
     #[serde(rename = "processingRequirements")]
     pub(crate) processing_requirements: Option<String>,
 
-    pub(crate) remark: Option<ProviderOrderRemark>,
+   // pub(crate) remark: Option<ProviderOrderRemark>,
 }
 
 /// 供应商订单备注
@@ -728,13 +686,13 @@ pub(crate) struct ProviderOrderResponse {
     pub(crate) order_status: String,
 
     #[serde(rename = "deliveryDate")]
-    pub(crate) delivery_date: Option<DateTime<Utc>>,
+    pub(crate) delivery_date: NaiveDate,
 
     #[serde(rename = "receiverName")]
     pub(crate) receiver_name: Option<String>,
 
     #[serde(rename = "customerName")]
-    pub(crate) customer_name: Option<String>,
+    pub(crate) customer_name: String,
 
     #[serde(rename = "orderedAmount")]
     pub(crate) ordered_amount: Decimal,
@@ -749,7 +707,7 @@ pub(crate) struct ProviderOrderResponse {
     pub(crate) receiver_phone: Option<String>,
 
     #[serde(rename = "deliveryAddress")]
-    pub(crate) delivery_address: Option<String>,
+    pub(crate) delivery_address: String,
 
     #[serde(rename = "shipperName")]
     pub(crate) shipper_name: Option<String>,
@@ -757,7 +715,7 @@ pub(crate) struct ProviderOrderResponse {
     #[serde(rename = "shipperPhone")]
     pub(crate) shipper_phone: Option<String>,
 
-    pub(crate) rounds: Vec<ProviderOrderRound>,
+    pub(crate) current: ProviderOrderRound,
 
     #[serde(rename = "createdAt")]
     pub(crate) created_at: DateTime<Utc>,
