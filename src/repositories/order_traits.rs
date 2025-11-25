@@ -88,7 +88,7 @@ pub(crate) trait OrderRepository: Send + Sync {
     //     transaction_id: &str,
     // ) -> Result<(), AppError>;
 
-    async fn fetch_today_product_order_summary_by_provider_hash(
+    async fn fetch_preparation_summary(
         &self,
         provider_hash: &str,
     ) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError>;
@@ -1278,7 +1278,7 @@ impl OrderRepository for MySqlRepository {
         Ok(orders)
     }
 
-    async fn fetch_today_product_order_summary_by_provider_hash(
+    async fn fetch_preparation_summary(
         &self,
         provider_hash: &str,
     ) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError> {

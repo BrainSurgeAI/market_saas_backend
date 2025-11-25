@@ -5,14 +5,6 @@ use validator::{Validate, ValidationError};
 
 use crate::dto::{validate_delivery_date, validate_phone};
 
-fn validate_total_amount_range(value: &Decimal) -> Result<(), ValidationError> {
-    let min = Decimal::new(1, 2); // 0.01
-    let max = Decimal::new(999_999_999_999, 2); // 对应 DECIMAL(12,2) 的最大值 9_999_999_999.99
-    if value < &min || value > &max {
-        return Err(ValidationError::new("range"));
-    }
-    Ok(())
-}
 
 fn validate_delivered_quantity_positive(value: &Decimal) -> Result<(), ValidationError> {
     if value <= &Decimal::ZERO {
@@ -104,8 +96,29 @@ pub(crate) struct OrderResponse {
     #[serde(rename = "createdAt")]
     pub(crate) created_at: Option<DateTime<Utc>>,
 
-    #[serde(rename = "afterSaleAt")]
-    pub(crate) after_sale_at: Option<DateTime<Utc>>,
+    #[serde(rename = "marketName")]
+    pub(crate) market_name: String,
+
+    #[serde(rename = "marketAddress")]
+    pub(crate) market_address: String,
+
+    #[serde(rename = "customerName")]
+    pub(crate) customer_name: String,
+    
+    #[serde(rename = "customerAddress")]
+    pub(crate) customer_address: String,
+
+    #[serde(rename = "contactName")]
+    pub(crate) contact_name: String,
+
+    #[serde(rename = "contactPhone")]
+    pub(crate) contact_phone: String,
+
+    #[serde(rename = "marketContactNumber")]
+    pub(crate) market_contact_number: Option<String>,
+
+    #[serde(rename = "marketContactorName")]
+    pub(crate) market_contactor_name: Option<String>,
 }
 
 /// Query parameters for order listing

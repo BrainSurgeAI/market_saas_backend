@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::repositories::my_sql_repository::MySqlRepository;
-use crate::services::order_services::get_provider_today_product_order_summary;
+use crate::services::order_services::get_provider_preparation_summary;
 use crate::services::orders::provider::{
     deliver_to_market, deliver_exchange_to_market, accept_after_sales_request, start_preparing, update_exchange_item_quantity,
 };
@@ -28,8 +28,8 @@ pub(super) fn provider_routes() -> Router {
             put(deliver_to_market::<MySqlRepository>),
         )
         .route(
-            "/api/v1/providers/{provider_hash}/orders/today-summary",
-            get(get_provider_today_product_order_summary::<MySqlRepository>),
+            "/api/v1/orders/preparation-summary",
+            get(get_provider_preparation_summary::<MySqlRepository>),
         )
         .route(
             "/{order_code}/deliver-exchange-to-market",

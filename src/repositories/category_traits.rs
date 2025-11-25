@@ -7,8 +7,6 @@ use crate::{
 use super::my_sql_repository::MySqlRepository;
 use async_trait::async_trait;
 
-use tracing::error;
-
 #[async_trait]
 pub(crate) trait CategoryRepository: Send + Sync {
     /// List categories with subcategories

@@ -567,8 +567,18 @@ impl CommonOrderRepository for MySqlRepository {
                    o.delivery_date, 
                    o.order_status,
                    o.created_at,
-                   o.after_sale_at
-                   FROM orders o {JOIN_CLAUSE} WHERE 1=1 "#;
+                   mt.name as market_name,
+                   mt.address as market_address,
+                   pt.name as customer_name,
+                   pt.address as customer_address,
+                   o.contact_name,
+                   o.contact_phone,
+                   o.market_contact_number,
+                   o.confirmed_by as market_contactor_name
+                   FROM orders o
+                   INNER JOIN tenants mt ON o.market_id = mt.id
+                   INNER JOIN tenants pt ON o.customer_id = pt.id
+                   {JOIN_CLAUSE} WHERE 1=1 "#;
 
         let mut builder: QueryBuilder<MySql>;
         if tenant_type == TenantType::Provider.to_string() {

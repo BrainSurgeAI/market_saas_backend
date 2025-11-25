@@ -29,8 +29,8 @@ where
     repo.assign_order(
         &order_code,
         dispatch_order_dto.provider_id,
-        &dispatch_order_dto.confirmed_by,
         &claims.username,
+        &claims.real_name,
     )
     .await?;
 

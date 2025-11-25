@@ -18,7 +18,8 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
     /// # Arguments
     /// * `order_code` - The code of the order
     /// * `provider_id` - The id of the provider
-    /// * `confirmed_by` - The username of the user who confirmed the order
+    /// * `assign_username` - The username of the user who assigned the order
+    /// * `assign_by` - The name of the user who assigned the order
     ///
     /// # Returns
     /// A result containing the error if the order is not found or the order is expired
@@ -27,7 +28,7 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
         &self,
         order_code: &str,
         provider_id: i32,
-        confirmed_by: &str,
+        assign_username: &str,
         assign_by: &str,
     ) -> Result<OrderStatus, AppError>;
 
@@ -45,7 +46,7 @@ impl MarketplaceOrderRepository for MySqlRepository {
         &self,
         order_code: &str,
         provider_id: i32,
-        confirmed_by: &str,
+        assign_username: &str,
         assign_by: &str,
     ) -> Result<OrderStatus, AppError> {
         use chrono::Local;
@@ -113,16 +114,15 @@ impl MarketplaceOrderRepository for MySqlRepository {
                 JOIN users AS u ON u.username = ?
                 SET 
                     o.order_status = ?,
-                    o.confirmed_at = NOW(),
-                    o.confirmed_by = ?,
+                    o.assigned_by = ?,
                     o.market_contact_number = u.phone
                 WHERE 
                     o.id = ?
                 AND o.order_status = ?
             "#,
-            assign_by, // for JOIN
+            assign_username, // for JOIN
             next.to_str(),
-            confirmed_by, // confirmed_by field
+            assign_by, // confirmed_by field
             order.id,
             order.order_status.as_str()
         )
@@ -144,7 +144,7 @@ impl MarketplaceOrderRepository for MySqlRepository {
             order.id,
             order.order_status.as_str(),
             next,
-            confirmed_by,
+            assign_by,
             OrderAction::AssignSupplier,
         )
         .await?;
