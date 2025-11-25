@@ -418,6 +418,9 @@ pub(crate) struct OrderDetail {
     #[serde(rename = "category")]
     pub(crate) category_name: String,
 
+    #[serde(rename = "imageUrl")]
+    pub(crate) image_url: Option<String>,
+
     pub(crate) unit: String,
     #[serde(rename = "orderedQty")]
     pub(crate) ordered_qty: Decimal,
@@ -672,6 +675,9 @@ pub(crate) struct ProviderOrderItem {
     #[serde(rename = "unitPrice")]
     pub(crate) unit_price: Decimal,
 
+    #[serde(rename = "imageUrl")]
+    pub(crate) image_url: Option<String>,
+
     pub(crate) unit: String,
 
     #[serde(rename = "processingRequirements")]
@@ -820,6 +826,9 @@ pub(crate) struct MarketOrderItem {
     pub(crate) category_name: String,
 
     pub(crate) unit: String,
+
+    #[serde(rename = "imageUrl")]
+    pub(crate) image_url: Option<String>,
 
     #[serde(rename = "unitPrice")]
     pub(crate) unit_price: Decimal,
