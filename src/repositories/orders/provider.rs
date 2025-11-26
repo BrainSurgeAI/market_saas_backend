@@ -90,6 +90,17 @@ impl ProviderOrderRepository for MySqlRepository {
         claims: &Claims,
         delivery_staff_id: Option<&str>,
     ) -> Result<OrderStatus, AppError> {
+        debug!(
+            "Provider {} starts preparing order for order code {} and delivery staff id {}",
+            claims.real_name,
+            order_code,
+            delivery_staff_id.unwrap_or_default()
+        );
+
+        if delivery_staff_id.is_none() {
+            return Err(AppError::Validation("配送员 ID 不能为空".to_string()));
+        }
+
         let mut tx = self
             .pool
             .begin()
@@ -119,31 +130,39 @@ impl ProviderOrderRepository for MySqlRepository {
                 AppError::Validation(format!("订单 {} 状态错误，不能进行备货", order_code))
             })?;
 
-        if current_status == OrderStatus::Assigned {
-            let id_card = delivery_staff_id
-                .ok_or_else(|| AppError::Validation("配送员 ID 不能为空".to_string()))?;
+        match current_status {
+            OrderStatus::Assigned => {
+                let id_card = delivery_staff_id
+                    .ok_or_else(|| AppError::Validation("配送员 ID 不能为空".to_string()))?;
 
-            // Insert provider delivery basic information
-            let insert_result = sqlx::query!(
-                r#"INSERT INTO provider_deliveries (assignment_id, delivered_by, delivery_contact_number) 
-                   SELECT ? AS assignment_id, name, phone 
-                   FROM delivery_staff 
-                   WHERE id_card = ? AND status = true"#,
+                let delivery_staff = sqlx::query!(
+                        r#"SELECT id, name, phone FROM delivery_staff WHERE id_card = ? AND status = true FOR UPDATE"#,
+                        id_card
+                    )
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(map_db_err!("Failed to get delivery staff by id"))?
+                    .ok_or_else(|| AppError::NotFound(format!("配送员 {} 没有找到", id_card)))?;
+
+                // Insert provider delivery basic information
+                let insert_result = sqlx::query!(
+                r#"INSERT INTO provider_deliveries (assignment_id, delivered_by, delivery_contact_number) VALUES (?, ?, ?)"#,
                 assignment_id,
-                id_card
+                delivery_staff.name,
+                delivery_staff.phone
             )
             .execute(&mut *tx)
             .await
             .map_err(map_db_err!("Failed to insert provider delivery"))?;
 
-            if insert_result.rows_affected() == 0 {
-                return Err(AppError::NotFound(format!("配送员 {} 没有找到", id_card)));
-            }
+                if insert_result.rows_affected() == 0 {
+                    return Err(AppError::NotFound(format!("配送员 {} 没有找到", id_card)));
+                }
 
-            let provider_delivery_id = insert_result.last_insert_id();
+                let provider_delivery_id = insert_result.last_insert_id();
 
-            // insert into order delivery items table
-            sqlx::query!(
+                // Use order details to insert provider delivery items table for normal delivery initialization
+                sqlx::query!(
                 r#"INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, unit_price, weight_unit) 
                 SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, od.discounted_unit_price, od.unit AS weight_unit
                 FROM order_details od WHERE od.order_id = ?"#,
@@ -153,33 +172,45 @@ impl ProviderOrderRepository for MySqlRepository {
             .execute(&mut *tx)
             .await
             .map_err(map_db_err!("Failed to insert provider delivery item"))?;
-        } else {
-            // ExchangeRequested state, insert new provider delivery message
-            let provider_delivery = sqlx::query!(
-                r#"
+
+                // set order confirmed_at and confirmed_by
+                sqlx::query!(
+                r#"UPDATE orders SET confirmed_at = NOW(), confirmed_by = ?, delivery_staff_id = ? WHERE id = ?"#,
+                claims.real_name.as_str(),
+                delivery_staff.id,
+                order_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!("Failed to update order confirmed at and by"))?;
+            }
+            OrderStatus::ExchangeRequested => {
+                // ExchangeRequested state, insert new provider delivery message
+                let provider_delivery = sqlx::query!(
+                    r#"
                 SELECT id, delivered_by, delivery_contact_number, delivery_round
                 FROM provider_deliveries
                 WHERE assignment_id = ?
                 ORDER BY delivery_round DESC
                 LIMIT 1
                 "#,
-                order_id
-            )
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to get provider delivery"))?
-            .ok_or_else(|| {
-                AppError::NotFound(format!(
-                    "Provider delivery not found for assignment id {}",
                     order_id
-                ))
-            })?;
+                )
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get provider delivery"))?
+                .ok_or_else(|| {
+                    AppError::NotFound(format!(
+                        "Provider delivery not found for assignment id {}",
+                        order_id
+                    ))
+                })?;
 
-            // calculate the next delivery round
-            let next_round = provider_delivery.delivery_round + 1;
+                // calculate the next delivery round
+                let next_round = provider_delivery.delivery_round + 1;
 
-            // insert the next delivery record
-            sqlx::query!(
+                // insert the next delivery record
+                sqlx::query!(
                 r#"
                 INSERT INTO provider_deliveries
                 (assignment_id, delivered_by, delivery_contact_number, parent_id, delivery_round, delivery_type)
@@ -195,14 +226,14 @@ impl ProviderOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to insert next round provider delivery"))?;
 
-            let provider_delivery_id = sqlx::query!("SELECT LAST_INSERT_ID() as id")
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to get last insert id"))?
-                .id;
-            // insert into order delivery items table
-            // 只插入需要换货的商品（最近一轮验收中标记为EXCHANGE的商品）
-            sqlx::query!(
+                let provider_delivery_id = sqlx::query!("SELECT LAST_INSERT_ID() as id")
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(map_db_err!("Failed to get last insert id"))?
+                    .id;
+                // insert into order delivery items table
+                // 只插入需要换货的商品（最近一轮验收中标记为EXCHANGE的商品）
+                sqlx::query!(
                 r#"INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, unit_price, weight_unit)
                 SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, od.discounted_unit_price, od.unit AS weight_unit
                 FROM order_details od
@@ -226,20 +257,31 @@ impl ProviderOrderRepository for MySqlRepository {
             .execute(&mut *tx)
             .await
             .map_err(map_db_err!("Failed to insert provider delivery item"))?;
-            // If has any return goods, update the return goods status to RETURNED means the return goods request is accepted
-            sqlx::query!(
-                r#"UPDATE return_exchange_records 
+                // If has any return goods, update the return goods status to RETURNED means the return goods request is accepted
+                sqlx::query!(
+                    r#"UPDATE return_exchange_records 
                    SET status = 'RETURNED', processed_by = ?, processed_at = NOW() 
                    WHERE operation_type = 'RETURN'
                      AND order_detail_id IN (
                        SELECT id FROM order_details WHERE order_id = ?
                    )"#,
-                claims.real_name.as_str(),
-                order_id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update returned items status"))?;
+                    claims.real_name.as_str(),
+                    order_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update returned items status"))?;
+
+                sqlx::query!(
+                    r#"UPDATE orders SET processed_at = NOW(), processed_by = ? WHERE id = ?"#,
+                    claims.real_name.as_str(),
+                    order_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update order processed at and by"))?;
+            }
+            _ => return Err(AppError::Validation(invalid_state_msg)),
         }
 
         // Update order status to SupplierPreparing or ExchangeInProgress
@@ -332,7 +374,7 @@ impl ProviderOrderRepository for MySqlRepository {
             )
             .execute(&mut *tx)
             .await.map_err(map_db_err!("Failed to update provider delivery item"))?;
-        };
+        }
 
         // update provider delivery status to DELIVERED and delivered_at to now
         sqlx::query!(
@@ -417,7 +459,9 @@ impl ProviderOrderRepository for MySqlRepository {
         })?;
         debug!(
             "Exchange deliver to market for order code {} and delivery id {} and next status {}",
-            order_code, delivery_id, next.to_str()
+            order_code,
+            delivery_id,
+            next.to_str()
         );
 
         for item in exchange_dto.items.iter() {
@@ -540,9 +584,8 @@ impl ProviderOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to update exchange item status"))?;
 
-
-    // insert into order delivery items table
-    sqlx::query!(
+        // insert into order delivery items table
+        sqlx::query!(
         r#"INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, actual_qty, unit_price, weight_unit) 
         SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, ? AS actual_qty, od.discounted_unit_price, od.unit AS weight_unit
         FROM order_details od WHERE od.id = ? AND od.order_id = ?"#,
@@ -555,8 +598,8 @@ impl ProviderOrderRepository for MySqlRepository {
     .await
     .map_err(map_db_err!("Failed to insert provider delivery item"))?;
 
-    // update provider delivery status to DELIVERED and delivered_at to now
-    sqlx::query!(
+        // update provider delivery status to DELIVERED and delivered_at to now
+        sqlx::query!(
         r#"UPDATE provider_deliveries SET delivery_status = 'DELIVERED', delivered_at = NOW() WHERE id = ?"#,
         delivery_id
     )
@@ -564,9 +607,9 @@ impl ProviderOrderRepository for MySqlRepository {
     .await
     .map_err(map_db_err!("Failed to update provider delivery status"))?;
 
-    tx.commit()
-        .await
-        .map_err(map_db_err!("Failed to commit transaction"))?;
-    Ok(())
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(())
     }
 }
