@@ -9,7 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error};
+use tracing::debug;
 
 #[async_trait]
 pub(crate) trait ProductRepository: Send + Sync {

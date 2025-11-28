@@ -9,7 +9,7 @@ use async_trait::async_trait;
 
 use rust_decimal::Decimal;
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error};
+use tracing::debug;
 
 #[async_trait]
 pub trait DiscountRepository: Send + Sync {

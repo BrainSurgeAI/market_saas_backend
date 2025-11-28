@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{debug, error};
+use tracing::debug;
 
 #[async_trait]
 pub trait RoleRepository: Send + Sync {

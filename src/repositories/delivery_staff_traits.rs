@@ -2,7 +2,7 @@ use super::my_sql_repository::MySqlRepository;
 use crate::{common::AppError, dto::delivery_staff::DeliveryStaffDTO, map_db_err};
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{debug, error};
+use tracing::debug;
 
 #[async_trait]
 pub trait DeliveryStaffRepository: Send + Sync {

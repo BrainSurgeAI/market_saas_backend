@@ -12,7 +12,7 @@ use crate::{
 use super::my_sql_repository::MySqlRepository;
 use async_trait::async_trait;
 
-use tracing::{error, info};
+use tracing::info;
 
 #[async_trait]
 pub(crate) trait OrderRepository: Send + Sync {

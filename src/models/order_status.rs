@@ -79,6 +79,7 @@ impl OrderStatus {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn description(&self) -> &'static str {
         match self {
             OrderStatus::Pending => "待分配供应商",

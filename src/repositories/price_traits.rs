@@ -11,7 +11,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{Local, NaiveTime};
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error};
+use tracing::debug;
 
 #[async_trait]
 pub(crate) trait PriceRepository: Send + Sync {
