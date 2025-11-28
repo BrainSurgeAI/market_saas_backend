@@ -1,4 +1,4 @@
-use axum::{extract::Path, Extension};
+use axum::{extract::Path, Extension, response::IntoResponse};
 use tracing::{debug, info};
 
 use crate::{
@@ -85,91 +85,25 @@ where
         &order_code, &claims.tenant_type, &claims.username
     );
 
-    // let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
-
-    // let action = match tenant_type {
-    //     TenantType::Market => OrderAction::MarketInspect,
-    //     TenantType::Customer => OrderAction::CustomerInspect,
-    //     _ => {
-    //         return Err(AppError::Forbidden(format!(
-    //             "{} 不能执行验收操作",
-    //             claims.tenant_type
-    //         )));
-    //     }
-    // };
-
-    let next_status = repo.insert_order_inspection(&order_code, &claims).await?;
+    let next_status = repo.init_order_inspection_with_items(&order_code, &claims).await?;
     Ok(Json(ApiResponse::new(
         Some(String::from(next_status.to_str())),
         &context,
     )))
 }
 
-pub(crate) async fn begin_exchange_inspect_order<T>(
+pub(crate) async fn get_order_inspections<T>(
     Extension(repo): Extension<T>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
     Path(order_code): Path<String>,
-) -> Result<Json<ApiResponse<String>>, AppError>
+) -> Result<impl IntoResponse, AppError>
 where
     T: SharedMarketCustomerOrderRepository + Send + Sync,
 {
-    let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
-    let action = match tenant_type {
-        TenantType::Market => OrderAction::MarketInspect,
-        TenantType::Customer => OrderAction::CustomerInspect,
-        _ => {
-            return Err(AppError::Forbidden(format!(
-                "{} 不能执行换货验收操作",
-                claims.tenant_type
-            )));
-        }
-    };
-
-    debug!(
-        "Begin exchange inspect order {} by {} action {}",
-        &order_code, tenant_type, action
-    );
-
-    let next_status = repo.update_order_status(&order_code, action, &claims).await?;
-    Ok(Json(ApiResponse::new(
-        Some(String::from(next_status.to_str())),
-        &context,
-    )))
+    let inspections = repo.get_order_inspections(&order_code, &claims).await?;
+    Ok(Json(ApiResponse::new(Some(inspections), &context)))
 }
-
-/// 市场和客户通过订单验收, 针对主订单
-// pub(crate) async fn accept_order<T>(
-//     Extension(repo): Extension<T>,
-//     Extension(context): Extension<RequestContext>,
-//     Extension(claims): Extension<Claims>,
-//     Path(order_code): Path<String>,
-// ) -> Result<Json<ApiResponse<String>>, AppError>
-// where
-//     T: SharedMarketCustomerOrderRepository + Send + Sync,
-// {
-//     let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
-//     let action = match tenant_type {
-//         TenantType::Market => OrderAction::MarketAccept,
-//         TenantType::Customer => OrderAction::Complete,
-//         _ => {
-//             return Err(AppError::Forbidden(format!(
-//                 "{} 不能执行签收操作",
-//                 claims.tenant_type
-//             )));
-//         }
-//     };
-
-//     debug!(
-//         "Accept order {} by {} action {}",
-//         &order_code, tenant_type, action
-//     );
-//     let next_status = repo.update_order_status(&order_code, action, &claims).await?;
-//     Ok(Json(ApiResponse::new(
-//         Some(String::from(next_status.to_str())),
-//         &context,
-//     )))
-// }
 
 pub(crate) async fn return_order<T>(
     Extension(repo): Extension<T>,

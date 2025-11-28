@@ -3,9 +3,9 @@ use crate::{
     common::AppError,
     dto::order::{
         CustomerOrderDetailResponse, CustomerOrderItem, CustomerOrderRound,
-        ExchangeAndReturnOrderDetailResponse, MarketOrderDetailResponse, MarketOrderItem,
-        MarketOrderRound, OrderDetail, OrderQueryParams, OrderResponse, ProviderOrderItem,
-        ProviderOrderRemark, ProviderOrderResponse, ProviderOrderRound,
+        ExchangeAndReturnOrderDetailResponse, MarketOrderDetailResponse, OrderDetail,
+        OrderQueryParams, OrderResponse, ProviderOrderItem, ProviderOrderRemark,
+        ProviderOrderResponse, ProviderOrderRound,
     },
     map_db_err,
     models::{order_status::OrderStatus, tenant_type::TenantType},
@@ -93,22 +93,22 @@ impl CommonOrderRepository for MySqlRepository {
                     // 从order_details表中获取信息构建ProviderOrderResponse
                     let items = sqlx::query!(
                         r#"
-            SELECT
-                od.id as order_detail_id,
-                od.product_code,
-                od.product_name,
-                od.category_id,
-                od.category_name,
-                od.unit,
-                od.ordered_qty as need_to_deliver_qty,
-                od.unit_price,
-                od.processing_requirements,
-                tiu.temp_url as image_url
-            FROM order_details od
-            LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
-            WHERE od.order_id = ?
-            ORDER BY od.id ASC
-            "#,
+                        SELECT
+                            od.id as order_detail_id,
+                            od.product_code,
+                            od.product_name,
+                            od.category_id,
+                            od.category_name,
+                            od.unit,
+                            od.ordered_qty as need_to_deliver_qty,
+                            od.unit_price,
+                            od.processing_requirements,
+                            tiu.temp_url as image_url
+                        FROM order_details od
+                        LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
+                        WHERE od.order_id = ?
+                        ORDER BY od.id ASC
+                        "#,
                         order_info.order_id
                     )
                     .fetch_all(&self.pool)
@@ -127,191 +127,198 @@ impl CommonOrderRepository for MySqlRepository {
                         unit: row.unit,
                         processing_requirements: row.processing_requirements,
                         image_url: row.image_url,
+                        remark: None
                     })
                     .collect();
                     (items, "NORMAL".to_string())
                 }
-                OrderStatus::ExchangeRequested => {
+                OrderStatus::ExchangeRequested | OrderStatus::ExchangeInProgress => {
                     // 从return_exchange_records表中获取信息构建ProviderOrderResponse
 
                     let items = sqlx::query!(
-            r#"
-            SELECT
-              rer.order_detail_id,
-              od.product_code,
-              od.product_name,
-              od.category_id,
-              od.category_name,
-              od.unit,
-              od.unit_price,
-              rer.quantity as need_to_deliver_qty,
-              od.processing_requirements,
-              tiu.temp_url as image_url
-            FROM return_exchange_records rer
-            INNER JOIN order_details od ON rer.order_detail_id = od.id
-            LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
-            WHERE rer.order_detail_id IN (SELECT order_detail_id FROM provider_deliveries WHERE order_id = ?)
-              AND rer.inspection_id IN (
-                SELECT oi.id FROM order_inspections oi
-                WHERE oi.order_id = ?
-                  AND oi.inspection_round = (
-                    SELECT MAX(inspection_round) FROM order_inspections
-                    WHERE order_id = ? AND inspection_result = 'EXCHANGE'
-                  )
-                  AND oi.inspection_result = 'EXCHANGE'
-              )
-            ORDER BY rer.order_detail_id ASC
-            "#,
-            order_info.order_id,
-            order_info.order_id,
-            order_info.order_id,
-          )
-          .fetch_all(&self.pool)
-          .await
-          .map_err(map_db_err!("Failed to get return exchange records"))?
-          .into_iter()
-          .map(|row| ProviderOrderItem {
-            order_detail_id: row.order_detail_id,
-            product_code: row.product_code,
-            product_name: row.product_name,
-            category_id: row.category_id,
-            category_name: row.category_name,
-            need_to_deliver_qty: row.need_to_deliver_qty,
-            actual_qty: None, // 总是None，因为还没有发货
-            unit_price: row.unit_price,
-            unit: row.unit,
-            processing_requirements: row.processing_requirements,
-            image_url: row.image_url,
-          })
-          .collect();
+                        r#"
+                        SELECT
+                        rer.order_detail_id,
+                        od.product_code,
+                        od.product_name,
+                        od.category_id,
+                        od.category_name,
+                        od.unit,
+                        od.unit_price,
+                        rer.quantity as need_to_deliver_qty,
+                        od.processing_requirements,
+                        rer.operation_type as last_inspection_result,
+                        tiu.temp_url as image_url
+                        FROM return_exchange_records rer
+                        INNER JOIN order_details od ON rer.order_detail_id = od.id
+                        LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
+                        WHERE rer.order_detail_id IN (SELECT order_detail_id FROM provider_deliveries WHERE order_id = ?)
+                        AND rer.operation_type = 'EXCHANGE'
+                        AND rer.inspection_id IN (
+                            SELECT oi.id FROM order_inspections oi
+                            WHERE oi.order_id = ?
+                            AND oi.inspection_round = (
+                                SELECT MAX(inspection_round) FROM order_inspections
+                                WHERE order_id = ? AND inspection_result = 'EXCHANGE'
+                            )
+                            AND oi.inspection_result = 'EXCHANGE'
+                        )
+                        ORDER BY rer.order_detail_id ASC
+                        "#,
+                        order_info.order_id,
+                        order_info.order_id,
+                        order_info.order_id,
+                    )
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(map_db_err!("Failed to get return exchange records"))?
+                    .into_iter()
+                    .map(|row| ProviderOrderItem {
+                        order_detail_id: row.order_detail_id,
+                        product_code: row.product_code,
+                        product_name: row.product_name,
+                        category_id: row.category_id,
+                        category_name: row.category_name,
+                        need_to_deliver_qty: row.need_to_deliver_qty,
+                        actual_qty: None, // 总是None，因为还没有发货
+                        unit_price: row.unit_price,
+                        unit: row.unit,
+                        processing_requirements: row.processing_requirements,
+                        image_url: row.image_url,
+                        remark: None
+                    })
+                    .collect();
                     (items, "EXCHANGE".to_string())
                 }
                 _ => {
                     // 获取最新一轮的发货信息
-                    debug!("get latest delivery------------------");
-                    let latest_delivery = sqlx::query!(
-                        r#"
-              SELECT pd.id as delivery_id, pd.delivery_status, pd.delivery_type, pd.delivery_round
-              FROM provider_deliveries pd
-              INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
-              WHERE poa.order_id = ?
-              ORDER BY pd.delivery_round DESC
-              LIMIT 1
-              "#,
-                        order_info.order_id
-                    )
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(map_db_err!("Failed to get latest delivery"))?;
+                    // debug!("get latest delivery------------------");
+                    // let latest_delivery = sqlx::query!(
+                    //     r#"
+                    //     SELECT pd.id as delivery_id, pd.delivery_status, pd.delivery_type, pd.delivery_round
+                    //     FROM provider_deliveries pd
+                    //     INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
+                    //     WHERE poa.order_id = ?
+                    //     ORDER BY pd.delivery_round DESC
+                    //     LIMIT 1
+                    //     "#,
+                    //     order_info.order_id
+                    // )
+                    // .fetch_optional(&self.pool)
+                    // .await
+                    // .map_err(map_db_err!("Failed to get latest delivery"))?;
 
-                    match latest_delivery {
-                        Some(delivery) => {
-                            let delivery_type = delivery.delivery_type.clone();
-                            debug!("delivery_type: {}", delivery_type);
-                            if delivery.delivery_type == "NORMAL" {
-                                // NORMAL类型：need_to_deliver_qty = ordered_qty, actual_qty = provider_delivery_items.actual_qty
-                                let items = sqlx::query!(
-                                    r#"
-                    SELECT
-                       od.id as order_detail_id,
-                       od.product_code,
-                       od.product_name,
-                       od.category_id,
-                       od.category_name,
-                       od.unit,
-                       od.unit_price,
-                       od.processing_requirements,
-                       od.ordered_qty as need_to_deliver_qty,
-                       pdi.actual_qty as actual_qty,
-                       tiu.temp_url as image_url
-                    FROM provider_delivery_items pdi
-                    INNER JOIN order_details od ON pdi.order_detail_id = od.id
-                    LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
-                    WHERE pdi.delivery_id = ?
-                    "#,
-                                    delivery.delivery_id
-                                )
-                                .fetch_all(&self.pool)
-                                .await
-                                .map_err(map_db_err!("Failed to get normal delivery items"))?
-                                .into_iter()
-                                .map(|row| ProviderOrderItem {
-                                    order_detail_id: row.order_detail_id,
-                                    product_code: row.product_code,
-                                    product_name: row.product_name,
-                                    category_id: row.category_id,
-                                    category_name: row.category_name,
-                                    need_to_deliver_qty: row.need_to_deliver_qty,
-                                    actual_qty: Some(row.actual_qty),
-                                    unit_price: row.unit_price,
-                                    unit: row.unit,
-                                    processing_requirements: row.processing_requirements,
-                                    image_url: row.image_url,
-                                })
-                                .collect();
-                                (items, delivery_type)
-                            } else {
-                                // EXCHANGE类型：need_to_deliver_qty = return_exchange_records.quantity
-                                let items = sqlx::query!(
-                                    r#"
-                    SELECT
-                       od.id as order_detail_id,
-                       od.product_code,
-                       od.product_name,
-                       od.category_id,
-                       od.category_name,
-                       od.unit,
-                       od.unit_price,
-                       od.processing_requirements,
-                       rer.quantity as need_to_deliver_qty,
-                       pdi.actual_qty as actual_qty,
-                       tiu.temp_url as image_url
-                    FROM provider_delivery_items pdi
-                    INNER JOIN order_details od ON pdi.order_detail_id = od.id
-                    LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
-                    LEFT JOIN return_exchange_records rer ON rer.order_detail_id = od.id
-                      AND rer.inspection_id IN (
-                        SELECT oi.id FROM order_inspections oi
-                        WHERE oi.order_id = ?
-                        AND oi.inspection_round = (
-                          SELECT MAX(inspection_round) FROM order_inspections
-                          WHERE order_id = ?
-                        )
+                    // match latest_delivery {
+                    //     Some(delivery) => {
+                    //         let delivery_type = delivery.delivery_type.clone();
+                    //         debug!("delivery_type: {}", delivery_type);
+                    //         if delivery.delivery_type == "NORMAL" {
+                    //             // NORMAL类型：need_to_deliver_qty = ordered_qty, actual_qty = provider_delivery_items.actual_qty
+                    //             let items = sqlx::query!(
+                    //                 r#"
+                    //                 SELECT
+                    //                 od.id as order_detail_id,
+                    //                 od.product_code,
+                    //                 od.product_name,
+                    //                 od.category_id,
+                    //                 od.category_name,
+                    //                 od.unit,
+                    //                 od.unit_price,
+                    //                 od.processing_requirements,
+                    //                 od.ordered_qty as need_to_deliver_qty,
+                    //                 pdi.actual_qty as actual_qty,
+                    //                 tiu.temp_url as image_url
+                    //                 FROM provider_delivery_items pdi
+                    //                 INNER JOIN order_details od ON pdi.order_detail_id = od.id
+                    //                 LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
+                    //                 WHERE pdi.delivery_id = ?
+                    //                 "#,
+                    //                 delivery.delivery_id
+                    //             )
+                    //             .fetch_all(&self.pool)
+                    //             .await
+                    //             .map_err(map_db_err!("Failed to get normal delivery items"))?
+                    //             .into_iter()
+                    //             .map(|row| ProviderOrderItem {
+                    //                 order_detail_id: row.order_detail_id,
+                    //                 product_code: row.product_code,
+                    //                 product_name: row.product_name,
+                    //                 category_id: row.category_id,
+                    //                 category_name: row.category_name,
+                    //                 need_to_deliver_qty: row.need_to_deliver_qty,
+                    //                 actual_qty: Some(row.actual_qty),
+                    //                 unit_price: row.unit_price,
+                    //                 unit: row.unit,
+                    //                 processing_requirements: row.processing_requirements,
+                    //                 image_url: row.image_url,
+                    //                 remark: None, // TODO: 从数据库或其他地方获取备注
+                    //             })
+                    //             .collect();
+                    //             (items, delivery_type)
+                    //         } else {
+                    //             // EXCHANGE类型：need_to_deliver_qty = return_exchange_records.quantity
+                    //             let items = sqlx::query!(
+                    //                 r#"
+                    // SELECT
+                    //    od.id as order_detail_id,
+                    //    od.product_code,
+                    //    od.product_name,
+                    //    od.category_id,
+                    //    od.category_name,
+                    //    od.unit,
+                    //    od.unit_price,
+                    //    od.processing_requirements,
+                    //    rer.quantity as need_to_deliver_qty,
+                    //    pdi.actual_qty as actual_qty,
+                    //    tiu.temp_url as image_url
+                    // FROM provider_delivery_items pdi
+                    // INNER JOIN order_details od ON pdi.order_detail_id = od.id
+                    // LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
+                    // LEFT JOIN return_exchange_records rer ON rer.order_detail_id = od.id
+                    //   AND rer.inspection_id IN (
+                    //     SELECT oi.id FROM order_inspections oi
+                    //     WHERE oi.order_id = ?
+                    //     AND oi.inspection_round = (
+                    //       SELECT MAX(inspection_round) FROM order_inspections
+                    //       WHERE order_id = ?
+                    //     )
                        
-                      )
-                      AND rer.operation_type = 'EXCHANGE'
-                    WHERE pdi.delivery_id = ?
-                      AND rer.quantity IS NOT NULL
-                    "#,
-                                    order_info.order_id,
-                                    order_info.order_id,
-                                    delivery.delivery_id
-                                )
-                                .fetch_all(&self.pool)
-                                .await
-                                .map_err(map_db_err!("Failed to get exchange delivery items"))?
-                                .into_iter()
-                                .map(|row| ProviderOrderItem {
-                                    order_detail_id: row.order_detail_id,
-                                    product_code: row.product_code,
-                                    product_name: row.product_name,
-                                    category_id: row.category_id,
-                                    category_name: row.category_name,
-                                    need_to_deliver_qty: row
-                                        .need_to_deliver_qty
-                                        .unwrap_or_default(),
-                                    actual_qty: Some(row.actual_qty),
-                                    unit_price: row.unit_price,
-                                    unit: row.unit,
-                                    processing_requirements: row.processing_requirements,
-                                    image_url: row.image_url,
-                                })
-                                .collect();
-                                (items, delivery_type)
-                            }
-                        }
-                        None => (Vec::new(), "NORMAL".to_string()),
-                    }
+                    //   )
+                    //   AND rer.operation_type = 'EXCHANGE'
+                    // WHERE pdi.delivery_id = ?
+                    //   AND rer.quantity IS NOT NULL
+                    // "#,
+                    //                 order_info.order_id,
+                    //                 order_info.order_id,
+                    //                 delivery.delivery_id
+                    //             )
+                    //             .fetch_all(&self.pool)
+                    //             .await
+                    //             .map_err(map_db_err!("Failed to get exchange delivery items"))?
+                    //             .into_iter()
+                    //             .map(|row| ProviderOrderItem {
+                    //                 order_detail_id: row.order_detail_id,
+                    //                 product_code: row.product_code,
+                    //                 product_name: row.product_name,
+                    //                 category_id: row.category_id,
+                    //                 category_name: row.category_name,
+                    //                 need_to_deliver_qty: row
+                    //                     .need_to_deliver_qty
+                    //                     .unwrap_or_default(),
+                    //                 actual_qty: Some(row.actual_qty),
+                    //                 unit_price: row.unit_price,
+                    //                 unit: row.unit,
+                    //                 processing_requirements: row.processing_requirements,
+                    //                 image_url: row.image_url,
+                    //                 remark: None, // TODO: 从数据库或其他地方获取备注
+                    //             })
+                    //             .collect();
+                    //             (items, delivery_type)
+                    //         }
+                    //     }
+                    //     None => (Vec::new(), "NORMAL".to_string()),
+                    // }
+                    (Vec::new(), "NORMAL".to_string())
                 }
             };
 
@@ -363,159 +370,10 @@ impl CommonOrderRepository for MySqlRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get order basic info"))?;
+        .map_err(map_db_err!("Failed to get order basic info"))?
+        .ok_or_else(|| AppError::not_found(format!("Order not found: {}", order_code)))?;
 
-        let order_info = match order_info {
-            Some(info) => info,
-            None => return Ok(None),
-        };
-
-        // 获取所有轮次的发货信息，只关注配送数据
-        let delivery_rounds = sqlx::query!(
-            r#"
-            SELECT pd.delivery_round, pd.delivery_type, pd.delivery_status,
-                   pd.delivered_at, pd.id as delivery_id
-            FROM provider_deliveries pd
-            INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
-            INNER JOIN orders o ON poa.order_id = o.id
-            WHERE o.order_code = ?
-            ORDER BY pd.delivery_round ASC
-            "#,
-            order_code
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get delivery rounds"))?;
-
-        let mut rounds_response = Vec::new();
-
-        for delivery_info in delivery_rounds {
-            // 获取该轮次的验收信息（如果有的话）
-            let inspection_info = sqlx::query!(
-                r#"
-                SELECT oi.inspection_result, oi.inspected_at
-                FROM order_inspections oi
-                WHERE oi.order_id = ? AND oi.inspection_round = ? AND oi.inspected_by_type = 'MARKET'
-                "#,
-                order_info.order_id,
-                delivery_info.delivery_round
-            )
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get inspection info"))?;
-
-            // 获取该轮配送的所有商品
-            let round_items = sqlx::query!(
-                r#"
-                SELECT od.id as order_detail_id, od.product_code, od.product_name,
-                       od.category_id, od.category_name, od.unit, od.discounted_unit_price as unit_price,
-                       od.ordered_qty, pdi.actual_qty as need_to_inspect_qty,
-                       tiu.temp_url as image_url,
-                       oii.inspected_qty as accepted_qty,
-                       CASE
-                           WHEN oii.result = 'SIGN' THEN oii.inspected_qty
-                           ELSE 0
-                       END as accepted_qty_calc,
-                       CASE
-                           WHEN oii.result = 'EXCHANGE' THEN oii.inspected_qty
-                           ELSE NULL
-                       END as exchange_qty,
-                       CASE
-                           WHEN oii.result = 'RETURN' THEN oii.inspected_qty
-                           ELSE NULL
-                       END as return_qty,
-                       CASE
-                           WHEN oii.result = 'SIGN' THEN 'SIGN'
-                           WHEN oii.result = 'EXCHANGE' THEN 'EXCHANGE'
-                           WHEN oii.result = 'RETURN' THEN 'RETURN'
-                           ELSE 'PENDING'
-                       END as inspection_status,
-                       od.processing_requirements,
-                       CASE
-                           WHEN oii.result IN ('EXCHANGE', 'RETURN') THEN oii.remarks
-                           ELSE NULL
-                       END as remarks
-                FROM provider_delivery_items pdi
-                INNER JOIN order_details od ON pdi.order_detail_id = od.id
-                INNER JOIN orders o ON od.order_id = o.id
-                LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
-                LEFT JOIN order_inspection_items oii ON od.id = oii.order_detail_id
-                    AND oii.inspection_id IN (
-                        SELECT oi.id FROM order_inspections oi
-                        WHERE oi.order_id = o.id AND oi.inspection_round = ?
-                        AND oi.inspected_by_type = 'MARKET'
-                    )
-                WHERE pdi.delivery_id = ?
-                "#,
-                delivery_info.delivery_round,
-                delivery_info.delivery_id
-            )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get round items"))?;
-
-            let mut items_response = Vec::new();
-
-            for item in round_items {
-                let remark = if item.remarks.is_some() {
-                    Some(ProviderOrderRemark {
-                        evidence_images: None, // TODO: 如果需要添加证据图片字段，需要修改数据库结构
-                        reason: item.remarks,
-                    })
-                } else {
-                    None
-                };
-
-                let market_item = MarketOrderItem {
-                    order_detail_id: item.order_detail_id as i32,
-                    product_code: item.product_code,
-                    product_name: item.product_name,
-                    category_id: item.category_id,
-                    category_name: item.category_name,
-                    unit: item.unit,
-                    unit_price: item.unit_price,
-                    ordered_qty: item.ordered_qty,
-                    need_to_inspect_qty: item.need_to_inspect_qty,
-                    accepted_qty: item.accepted_qty,
-                    exchange_qty: if item.exchange_qty > Some(Decimal::ZERO) {
-                        item.exchange_qty
-                    } else {
-                        None
-                    },
-                    return_qty: if item.return_qty > Some(Decimal::ZERO) {
-                        item.return_qty
-                    } else {
-                        None
-                    },
-                    inspection_status: item.inspection_status,
-                    processing_requirements: item.processing_requirements,
-                    remark,
-                    image_url: item.image_url,
-                };
-
-                items_response.push(market_item);
-            }
-
-            let (inspection_result, inspection_at) = inspection_info
-                .map(|info| (info.inspection_result, info.inspected_at))
-                .unwrap_or_else(|| ("PENDING".to_string(), None));
-
-            let market_round = MarketOrderRound {
-                round: delivery_info.delivery_round,
-                delivery_type: delivery_info.delivery_type,
-                delivered_at: delivery_info
-                    .delivered_at
-                    .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
-                inspection_result,
-                inspection_at: inspection_at
-                    .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
-                items: items_response,
-            };
-
-            rounds_response.push(market_round);
-        }
-
-        // 获取订单的商品基本信息
+        // 获取订单明细信息
         let order_details = sqlx::query_as!(
             OrderDetail,
             r#"
@@ -552,10 +410,7 @@ impl CommonOrderRepository for MySqlRepository {
             created_at: order_info.created_at,
             customer_name: Some(order_info.market_name),
             delivery_address: Some(order_info.delivery_address),
-            delivery_date: Some(DateTime::<Utc>::from_naive_utc_and_offset(
-                order_info.delivery_date.into(),
-                Utc,
-            )),
+            delivery_date: None, // TODO: 从数据库获取实际的交付日期
             discount_amount: order_info.discount_amount,
             net_amount: order_info.net_amount,
             ordered_amount: order_info.ordered_amount,
@@ -564,7 +419,7 @@ impl CommonOrderRepository for MySqlRepository {
             shipper_name: order_info.shipper_name,
             shipper_phone: order_info.shipper_phone,
             details: order_details,
-            rounds: rounds_response,
+            rounds: vec![], // TODO: 实现轮次信息
         };
 
         Ok(Some(response))

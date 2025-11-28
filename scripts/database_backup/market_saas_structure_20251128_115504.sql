@@ -110,7 +110,7 @@ CREATE TABLE `exchange_items` (
   PRIMARY KEY (`id`),
   KEY `fk_exchange_items_return_exchange` (`return_exchange_id`),
   CONSTRAINT `fk_exchange_items_return_exchange` FOREIGN KEY (`return_exchange_id`) REFERENCES `return_exchange_records` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='换货商品表';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='换货商品表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `menu_config`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -173,7 +173,7 @@ CREATE TABLE `order_details` (
   KEY `fk_order_details_category` (`category_id`),
   CONSTRAINT `fk_order_details_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`),
   CONSTRAINT `fk_order_details_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单明细表';
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单明细表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `order_inspection_items`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -182,16 +182,18 @@ CREATE TABLE `order_inspection_items` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `inspection_id` int unsigned NOT NULL,
   `order_detail_id` int NOT NULL,
-  `inspected_qty` decimal(10,2) NOT NULL,
-  `accepted` tinyint(1) DEFAULT '1',
+  `inspected_qty` decimal(10,2) NOT NULL DEFAULT '0.00',
+  `accepted` tinyint(1) DEFAULT '0',
   `remarks` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `result` enum('SIGN','EXCHANGE','RETURN') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'SIGN' COMMENT '验收结果：SIGN-签收，EXCHANGE-换货，RETURN-退货',
+  `result` enum('PENDING','SIGN','EXCHANGE','RETURN') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING' COMMENT '验收结果：SIGN-签收，EXCHANGE-换货，RETURN-退货',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `need_to_inspection` decimal(10,2) NOT NULL,
   PRIMARY KEY (`id`),
   KEY `fk_inspection_items` (`inspection_id`),
   KEY `fk_inspection_items_order_detail` (`order_detail_id`),
   CONSTRAINT `fk_inspection_items` FOREIGN KEY (`inspection_id`) REFERENCES `order_inspections` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_inspection_items_order_detail` FOREIGN KEY (`order_detail_id`) REFERENCES `order_details` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `order_inspections`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -212,7 +214,7 @@ CREATE TABLE `order_inspections` (
   CONSTRAINT `fk_order_inspections_orders` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_order_inspections_parent` FOREIGN KEY (`parent_id`) REFERENCES `order_inspections` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_order_inspections_users` FOREIGN KEY (`inspected_by_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `order_status_history`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -229,7 +231,7 @@ CREATE TABLE `order_status_history` (
   KEY `idx_order_id` (`order_id`),
   KEY `idx_order_status_time` (`order_id`,`to_status`,`created_at`),
   CONSTRAINT `fk_order_history_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单状态变更历史表';
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单状态变更历史表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `orders`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -249,7 +251,7 @@ CREATE TABLE `orders` (
   `contact_phone` varchar(16) NOT NULL COMMENT '联系人电话',
   `remark` varchar(255) DEFAULT NULL COMMENT '订单备注',
   `created_by` varchar(32) NOT NULL COMMENT '下单人',
-  `confirmed_by` varchar(32) DEFAULT NULL COMMENT '确认人',
+  `confirmed_by` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '供应商订单确认人NORMAL流程',
   `confirmed_at` timestamp NULL DEFAULT NULL COMMENT '确认时间',
   `stocked_by` varchar(32) DEFAULT NULL COMMENT '备货人',
   `stocked_at` timestamp NULL DEFAULT NULL COMMENT '备货时间',
@@ -269,6 +271,8 @@ CREATE TABLE `orders` (
   `delivery_staff_id` int DEFAULT NULL COMMENT '配送员ID',
   `after_sale_at` timestamp NULL DEFAULT NULL,
   `market_contact_number` varchar(11) DEFAULT NULL,
+  `assigned_by` varchar(32) DEFAULT NULL,
+  `assigned_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_code` (`order_code`),
   KEY `idx_customer_status` (`customer_id`,`order_status`),
@@ -281,7 +285,7 @@ CREATE TABLE `orders` (
   CONSTRAINT `fk_orders_customer` FOREIGN KEY (`customer_id`) REFERENCES `tenants` (`id`),
   CONSTRAINT `fk_orders_delivery_staff` FOREIGN KEY (`delivery_staff_id`) REFERENCES `delivery_staff` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_orders_market` FOREIGN KEY (`market_id`) REFERENCES `tenants` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单主表';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单主表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `permissions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -296,7 +300,7 @@ CREATE TABLE `permissions` (
   `self_only` tinyint DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_name` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=75 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=77 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `product_prices`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -414,7 +418,7 @@ CREATE TABLE `provider_deliveries` (
   KEY `fk_provider_deliveries_parent` (`parent_id`),
   CONSTRAINT `fk_deliveries_assignment` FOREIGN KEY (`assignment_id`) REFERENCES `provider_orders_assignments` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_provider_deliveries_parent` FOREIGN KEY (`parent_id`) REFERENCES `provider_deliveries` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='供应商发货记录表（关联订单分配表）';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='供应商发货记录表（关联订单分配表）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `provider_delivery_items`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -436,7 +440,7 @@ CREATE TABLE `provider_delivery_items` (
   KEY `fk_delivery_items_product` (`product_code`),
   CONSTRAINT `fk_delivery_items_delivery` FOREIGN KEY (`delivery_id`) REFERENCES `provider_deliveries` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_delivery_items_product` FOREIGN KEY (`product_code`) REFERENCES `products` (`product_code`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='供应商发货明细表（商品维度）';
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='供应商发货明细表（商品维度）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `provider_financial_profiles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -467,7 +471,7 @@ CREATE TABLE `provider_orders_assignments` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_provider_order` (`provider_id`,`order_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `reconciliation_statement_details`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -564,7 +568,7 @@ CREATE TABLE `refund_records` (
   PRIMARY KEY (`id`),
   KEY `fk_refund_return_exchange` (`return_exchange_id`),
   CONSTRAINT `fk_refund_return_exchange` FOREIGN KEY (`return_exchange_id`) REFERENCES `return_exchange_records` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='退款记录表';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='退款记录表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `return_exchange_records`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -590,7 +594,7 @@ CREATE TABLE `return_exchange_records` (
   KEY `fk_rer_inspection` (`inspection_id`),
   CONSTRAINT `fk_rer_inspection` FOREIGN KEY (`inspection_id`) REFERENCES `order_inspections` (`id`),
   CONSTRAINT `fk_return_exchange_order_detail` FOREIGN KEY (`order_detail_id`) REFERENCES `order_details` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='退换货记录表';
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='退换货记录表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `role_menu`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -644,7 +648,7 @@ CREATE TABLE `temp_image_urls` (
   UNIQUE KEY `object_key` (`object_key`),
   UNIQUE KEY `product_code` (`product_code`),
   KEY `idx_bucket_name` (`bucket_name`)
-) ENGINE=InnoDB AUTO_INCREMENT=33286 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=44382 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `tenant_relationships`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

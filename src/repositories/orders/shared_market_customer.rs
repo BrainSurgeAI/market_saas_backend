@@ -1,7 +1,7 @@
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
-    dto::order::{OrderReceipt, ReceiptOperationType},
+    dto::order::{DeliveryInfo, NeedToInspection, NeedToInspectionItem, OrderDeliveryHistoryItem, OrderDeliveryHistoryItemDetail, OrderDeliveryHistoryResponse, OrderReceipt, ReceiptOperationType},
     map_db_err,
     models::{
         claims::Claims, order_action::OrderAction, order_machine::OrderStateMachine,
@@ -11,6 +11,8 @@ use crate::{
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use tracing::{debug, error};
+
+use chrono::{DateTime, Utc};
 
 #[async_trait]
 pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
@@ -37,18 +39,24 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         tenant_type: TenantType,
     ) -> Result<OrderStatus, AppError>;
 
-    async fn insert_order_inspection(
+    async fn init_order_inspection_with_items(
         &self,
         order_code: &str,
-        claims: &Claims
+        claims: &Claims,
     ) -> Result<OrderStatus, AppError>;
 
-    /// 根据订单的签收、退货和换货情况，计算应该返回的 OrderAction
-    ///
-    /// 逻辑：
-    /// - 如果有一个商品是换货，返回 MarketExchange 或 CustomerExchange（根据租户类型）
-    /// - 如果都是退货，返回 MarketReturn 或 CustomerReturn（根据租户类型）
-    /// - 其他情况返回 MarketAccept（客户没有 Accept，返回 MarketAccept）
+    async fn get_order_inspections(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+    ) -> Result<NeedToInspection, AppError>;
+
+    // async fn get_order_delivery_history(
+    //     &self,
+    //     order_code: &str,
+    //     claims: &Claims,
+    // ) -> Result<OrderDeliveryHistoryResponse, AppError>;
+
     async fn determine_order_action_by_inspection_result(
         &self,
         order_code: &str,
@@ -93,7 +101,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             INNER JOIN order_details od ON o.id = od.order_id
             INNER JOIN order_inspections oi ON o.id = oi.order_id
             INNER JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
-            WHERE o.order_code = ? AND od.id = ? AND oi.inspected_by_type = ? ORDER BY oi.inspection_round DESC LIMIT 1 FOR UPDATE"#,
+            WHERE o.order_code = ? AND pdi.id = ? AND oi.inspected_by_type = ? ORDER BY oi.inspection_round DESC LIMIT 1 FOR UPDATE"#,
             receipt.order_code,
             receipt.order_detail_id,
             tenant_type
@@ -110,13 +118,13 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             ))
         })?;
 
-        let order_id = record.id;
         let detail_id = record.detail_id;
         let inspection_id = record.inspection_id;
         let actual_price = record.actual_price;
 
         match receipt.operation_type {
             ReceiptOperationType::Return => {
+                debug!("Return operation type");
                 let operation_type_str = String::from(ReceiptOperationType::Return);
 
                 // 退货只能全部退货，所以退货按实际发货量全部退货，不从前端拿退货数量
@@ -141,6 +149,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 .map_err(map_db_err!("Failed to create refund record"))?;
             }
             ReceiptOperationType::Exchange => {
+                debug!("Exchange operation type");
                 let ordered_qty_record = sqlx::query!(
                     r#"SELECT ordered_qty FROM order_details WHERE id = ?"#,
                     detail_id
@@ -178,136 +187,91 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                   .map_err(map_db_err!("Failed to create exchange item"))?;
                 }
             }
-            _=> debug!("Process receipt: {:?}", receipt),
+            _ => debug!("Process receipt: {:?}", receipt),
         }
 
         sqlx::query!(
-            r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty, remarks, result) VALUES (?, ?, ?, ?, ?)"#,
-            inspection_id, detail_id, receipt.quantity, receipt.reason, ReceiptOperationType::to_str(receipt.operation_type.clone())
+            r#"UPDATE order_inspection_items SET inspected_qty = ?, remarks = ?, result = ? WHERE id = ?"#,
+            receipt.quantity, receipt.reason, ReceiptOperationType::to_str(receipt.operation_type.clone()), receipt.order_detail_id
         )
         .execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to insert order inspection item"))?;
 
-        // 验证订单中所有商品是否已经验收完毕
-        // 算法：
-        // 1.从指定的order_id查看order_details表的记录数是否与order_inspections表当前round对应的order_inspection_items表的记录数一致
-        // 2. 如果不一致，则返回 PENDING
-        // 3. 如果一致,获取order_inspections当前round的order_inspection_items表的 result 字段，通过result字段判断返回
-        //    a.如果result记录中至少一个是EXCHANGE，则返回 EXCHANGE
-        //    b.如果result记录中都是RETURN，则返回 REJECTED
-        //    c.如果result记录中都是SIGN，则返回 PASS
-        //    d.返回PARTIAL
-
-        // 获取当前的最大轮次
-        let current_round = sqlx::query!(
-            r#"SELECT MAX(inspection_round) as max_round FROM order_inspections WHERE order_id = ? AND inspected_by_type = ?"#,
-            order_id, tenant_type
+        // 检查 order_inspection_items 表中是否还有未检验的商品
+        let uninspected_count: i64 = sqlx::query!(
+            r#"SELECT COUNT(*) as count FROM order_inspection_items WHERE inspection_id = ? AND result = 'PENDING'"#,
+            inspection_id
         )
         .fetch_one(&mut *tx)
         .await
-        .map_err(map_db_err!("Failed to get current inspection round"))?
-        .max_round
-        .unwrap_or(1);
-
-    debug!("Current inspection round: {}", current_round);
-
-        // 获取当前用户应该验收的订单详情总数
-        let tenant_type_enum = TenantType::try_from(tenant_type)?;
-        let order_details_count: i64 = match tenant_type_enum {
-            TenantType::Market => {
-                sqlx::query!(
-                    r#"SELECT COUNT(*) as count FROM provider_delivery_items pdi
-                     INNER JOIN provider_deliveries pd ON pdi.delivery_id = pd.id
-                     WHERE pd.assignment_id = ? AND pd.delivery_round = ?"#,
-                    order_id, current_round
-                )
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to get order details count"))?
-                .count
-            }
-            TenantType::Customer => {
-                sqlx::query!(
-                    r#"SELECT COUNT(*) as count
-                     FROM order_inspections customer_oi
-                     INNER JOIN order_inspections parent_oi ON customer_oi.parent_id = parent_oi.id
-                     INNER JOIN order_inspection_items parent_items ON parent_oi.id = parent_items.inspection_id
-                     WHERE customer_oi.order_id = ?
-                     AND customer_oi.inspected_by_type = 'CUSTOMER'
-                     AND parent_items.result != 'RETURN'"#,
-                    order_id
-                )
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_db_err!("Failed to get order details count"))?
-                .count
-            }
-            TenantType::Provider => {
-                return Err(AppError::BadRequest(format!("Provider tenant type not supported for this operation")));
-            }
-        };
-
-        // 获取当前轮次的检验项目总数
-        let inspection_items_count = sqlx::query!(
-            r#"SELECT COUNT(*) as count FROM order_inspection_items oii
-               INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-               WHERE oi.order_id = ? AND oi.inspection_round = ? AND oi.inspected_by_type = ?"#,
-            order_id, current_round, tenant_type
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to get inspection items count"))?
+        .map_err(map_db_err!("Failed to get uninspected items"))?
         .count;
 
-        let inspect_status = if order_details_count != inspection_items_count {
-            "PENDING"
-        } else {
-            // 获取当前轮次的检验结果
+        let inspection_result = if uninspected_count == 0 {
             let inspection_results = sqlx::query!(
-                r#"SELECT oii.result FROM order_inspection_items oii
-                   INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
-                   WHERE oi.order_id = ? AND oi.inspection_round = ?"#,
-                order_id, current_round
+                r#"SELECT result FROM order_inspection_items WHERE inspection_id = ?"#,
+                inspection_id
             )
             .fetch_all(&mut *tx)
             .await
             .map_err(map_db_err!("Failed to get inspection results"))?;
 
-            // 分析结果
             let has_exchange = inspection_results.iter().any(|r| r.result == "EXCHANGE");
-            let all_return = inspection_results.iter().all(|r| r.result == "RETURN");
-            let all_sign = inspection_results.iter().all(|r| r.result == "SIGN");
+            let has_sign = inspection_results.iter().any(|r| r.result == "SIGN");
+            let has_return = inspection_results.iter().any(|r| r.result == "RETURN");
 
             if has_exchange {
-                "EXCHANGE"
-            } else if all_return {
-                "REJECTED"
-            } else if all_sign {
-                "PASS"
-            } else {
-                "PARTIAL"
-            }
-        };
+                sqlx::query!(
+                    r#"UPDATE order_inspections SET inspection_result = 'EXCHANGE' WHERE id = ?"#,
+                    inspection_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update inspection result"))?;
 
-        // 更新检验结果到order_inspections表
-        if inspect_status != "PENDING" {
-            sqlx::query!(
-                r#"UPDATE order_inspections SET inspection_result = ? WHERE order_id = ? AND inspection_round = ?"#,
-                inspect_status, order_id, current_round
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to update inspection result"))?;
-        }
+                "EXCHANGE"
+            } else if has_sign {
+                if has_return {
+                    sqlx::query!(
+                        r#"UPDATE order_inspections SET inspection_result = 'PARTIAL' WHERE id = ?"#,
+                        inspection_id
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_db_err!("Failed to update inspection result"))?;
+                    "PARTIAL"
+                } else {
+                    sqlx::query!(
+                        r#"UPDATE order_inspections SET inspection_result = 'PASS' WHERE id = ?"#,
+                        inspection_id
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_db_err!("Failed to update inspection result"))?;
+                    "PASS"
+                }
+            } else {
+                sqlx::query!(
+                    r#"UPDATE order_inspections SET inspection_result = 'REJECTED' WHERE id = ?"#,
+                    inspection_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update inspection result"))?;
+                "REJECTED"
+            }
+        } else {
+            "PENDING"
+        };
 
         tx.commit()
             .await
             .map_err(map_db_err!("Failed to commit transaction"))?;
 
-        debug!("Inspection status: {}", inspect_status);
+        // debug!("Inspection status: {}", inspect_status);
 
-        Ok(inspect_status.to_string())
+        Ok(inspection_result.to_string())
     }
 
     async fn update_order_status(
@@ -375,18 +339,19 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         Ok(next_status)
     }
 
-    async fn insert_order_inspection(
+    async fn init_order_inspection_with_items(
         &self,
         order_code: &str,
-        claims: &Claims
+        claims: &Claims,
     ) -> Result<OrderStatus, AppError> {
+        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
         // TODO: check if the order is belongs with the tenant_relationships table by tenant_type
         let order = sqlx::query!(
             r#"SELECT id, order_status FROM orders WHERE order_code = ? FOR UPDATE"#,
@@ -397,61 +362,38 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .map_err(map_db_err!("Failed to get order"))?
         .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
 
-        let user_record = sqlx::query!(
-            r#"SELECT id FROM users WHERE username = ?"#,
-            claims.username
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to get user"))?
-        .ok_or_else(|| AppError::NotFound(format!("User not found: {}", claims.username)))?;
-
-        // Before create a new order inspection record, check if order inspections table has a record with the same order_id
-        // get the inspection_round from the order inspections table
-        let inspection = sqlx::query!(
-            r#"SELECT id, inspection_round FROM order_inspections WHERE order_id = ? ORDER BY inspection_round DESC LIMIT 1"#,
-            order.id
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to get inspection round"))?;
-
-        let (parent_id, inspection_round) = if let Some(inspection_record) = inspection {
-            (
-                Some(inspection_record.id),
-                inspection_record.inspection_round + 1,
-            )
-        } else {
-            (None, 1)
-        };
         // Create a new order inspection record
-        sqlx::query!(
-            r#"INSERT INTO order_inspections (order_id, inspected_by_type, inspected_by_id, inspection_round, parent_id) VALUES (?, ?, ?, ?, ?)"#,
-            order.id, claims.tenant_type, user_record.id, inspection_round, parent_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to create order inspection record"))?;
+        self.create_order_inspection_record(&mut tx, order.id, claims)
+            .await?;
 
         // Update the order status to MarketInspecting or CustomerInspecting
         let action = if tenant_type == TenantType::Market {
-            if order.order_status == OrderStatus::SupplierDelivering.to_str() {
-                OrderAction::MarketInspect
-            } else if order.order_status == OrderStatus::ExchangeDelivering.to_str() {
+            if order.order_status == OrderStatus::SupplierDelivering.to_str()
+                || order.order_status == OrderStatus::ExchangeDelivering.to_str()
+            {
                 OrderAction::MarketInspect
             } else {
-                return Err(AppError::bad_request(format!("Order status is not correct: {} -> {}", order.order_status, OrderAction::MarketInspect.description())));
+                return Err(AppError::bad_request(format!(
+                    "Order status is not correct: {} -> {}",
+                    order.order_status,
+                    OrderAction::MarketInspect.description()
+                )));
             }
         } else {
             // Customer tenant type
-            if order.order_status == OrderStatus::MarketDelivering.to_str() {
-                OrderAction::CustomerInspect
-            } else if order.order_status == OrderStatus::ExchangeNewDelivering.to_str() {
+            if order.order_status == OrderStatus::MarketDelivering.to_str()
+                || order.order_status == OrderStatus::ExchangeNewDelivering.to_str()
+            {
                 OrderAction::CustomerInspect
             } else {
-                return Err(AppError::bad_request(format!("Order status is not correct: {} -> {}", order.order_status, OrderAction::CustomerInspect.description())));
+                return Err(AppError::bad_request(format!(
+                    "Order status is not correct: {} -> {}",
+                    order.order_status,
+                    OrderAction::CustomerInspect.description()
+                )));
             }
         };
+
         let next_status = OrderStateMachine::next_state(
             OrderStatus::try_from(order.order_status.as_str())?,
             action,
@@ -523,11 +465,11 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         let current_status = OrderStatus::try_from(order.order_status.as_str())?;
 
         let action = if order.inspection_result == "EXCHANGE" {
-           if tenant_type == TenantType::Market {
-            OrderAction::MarketExchange
-           } else {
-            OrderAction::CustomerExchange
-           }
+            if tenant_type == TenantType::Market {
+                OrderAction::MarketExchange
+            } else {
+                OrderAction::CustomerExchange
+            }
         } else if order.inspection_result == "PASS" || order.inspection_result == "PARTIAL" {
             if tenant_type == TenantType::Market {
                 OrderAction::MarketAccept
@@ -624,4 +566,197 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to commit transaction"))?;
         Ok(next_status)
     }
+
+    // Only for Market tenant type
+    async fn get_order_inspections(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+    ) -> Result<NeedToInspection, AppError> {
+            // 获取供应商最近一次配送信息
+           let latest_delivery = sqlx::query!(
+            r#"
+            SELECT pd.delivery_type, pd.delivered_at 
+            FROM provider_deliveries pd
+            INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
+            INNER JOIN orders o ON poa.order_id = o.id
+            WHERE o.order_code = ? AND pd.delivery_status = 'DELIVERED'
+            ORDER BY pd.delivery_round DESC LIMIT 1
+            "#,
+            order_code
+           )
+           .fetch_optional(&self.pool)
+           .await
+           .map_err(map_db_err!("Failed to get latest delivery"))?.ok_or_else(|| AppError::NotFound(format!("Latest delivery not found: {}", order_code)))?;
+
+            let delivery_type = latest_delivery.delivery_type;
+            let delivered_at = latest_delivery.delivered_at.map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+
+            let delivery_staff = None; // TODO: 需要从 delivery_staff 表查询
+
+            // 市场用户的需要验收的商品信息，从order_inspection_items表中获取
+            let market_inspection = sqlx::query!(
+                r#"
+                SELECT oi.id as inspection_id, oi.inspection_round, oi.inspection_result, oi.inspected_at
+                FROM order_inspections oi
+                INNER JOIN orders o ON oi.order_id = o.id
+                WHERE o.order_code = ? AND oi.inspected_by_type = 'MARKET'
+                ORDER BY inspection_round DESC LIMIT 1
+                "#,
+                order_code
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get market inspection"))?
+            .ok_or_else(|| AppError::NotFound(format!("Market inspection not found: {}", order_code)))?;
+
+            // 获取市场用户的需要验收的商品信息，从order_inspection_items表中获取
+            let market_inspection_items = sqlx::query_as!(
+                NeedToInspectionItem,
+                r#"
+                SELECT oii.id AS inspection_item_id, od.product_code, od.product_name, od.category_id,
+                       od.category_name, od.unit, od.discount_rate, od.unit_price, od.ordered_qty,
+                       oii.need_to_inspection AS need_to_inspect_qty, oii.inspected_qty,
+                       oii.result as inspection_status, od.processing_requirements
+                FROM order_inspection_items oii
+                INNER JOIN order_details od ON oii.order_detail_id = od.id
+                WHERE oii.inspection_id = ?
+                ORDER BY oii.order_detail_id ASC
+                "#,
+                market_inspection.inspection_id
+            ).fetch_all(&self.pool).await.map_err(map_db_err!("Failed to get market inspection items"))?;
+
+            let response = NeedToInspection {
+                    round: market_inspection.inspection_round,
+                    delivery_type: delivery_type,
+                    delivered_at: delivered_at,
+                    inspection_result: market_inspection.inspection_result,
+                    inspection_at: market_inspection.inspected_at.map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
+                    delivery_staff,
+                    items: market_inspection_items,
+                };
+        Ok(response)
+    }
+
+    // async fn get_order_delivery_history(
+    //     &self,
+    //     order_code: &str,
+    //     claims: &Claims,
+    // ) -> Result<OrderDeliveryHistoryResponse, AppError> {
+    //     // 获取订单信息
+    //     let order_info = sqlx::query!(
+    //         r#"
+    //         SELECT o.id as order_id, o.order_code
+    //         FROM orders o
+    //         WHERE o.order_code = ?
+    //         "#,
+    //         order_code
+    //     )
+    //     .fetch_optional(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order info"))?
+    //     .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+
+    //     // 获取所有交付轮次（按 delivery_round 分组）
+    //     let deliveries = sqlx::query!(
+    //         r#"
+    //         SELECT pd.delivery_round, pd.delivery_type, pd.delivered_at,
+    //                pd.delivered_by, ds.name as staff_name, ds.phone as staff_phone
+    //         FROM provider_deliveries pd
+    //         INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
+    //         INNER JOIN orders o ON poa.order_id = o.id
+    //         LEFT JOIN delivery_staff ds ON pd.delivered_by = ds.id
+    //         WHERE o.order_code = ? AND pd.delivery_status = 'DELIVERED'
+    //         ORDER BY pd.delivery_round ASC
+    //         "#,
+    //         order_code
+    //     )
+    //     .fetch_all(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get deliveries"))?;
+
+    //     let mut history = Vec::new();
+
+    //     for delivery in deliveries {
+    //         // 获取该轮次的检查信息
+    //         let inspection = sqlx::query!(
+    //             r#"
+    //             SELECT oi.inspection_result, oi.inspected_at
+    //             FROM order_inspections oi
+    //             WHERE oi.order_id = ? AND oi.inspection_round = ?
+    //             ORDER BY oi.inspected_at DESC LIMIT 1
+    //             "#,
+    //             order_info.order_id, delivery.delivery_round
+    //         )
+    //         .fetch_optional(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get inspection"))?;
+
+    //         // 获取该轮次的商品详情
+    //         let items = sqlx::query!(
+    //             r#"
+    //             SELECT od.id as order_detail_id, od.product_code, od.product_name,
+    //                    od.category_id, od.category_name, od.unit, od.unit_price,
+    //                    od.ordered_qty, pdi.actual_qty,
+    //                    oii.result as last_inspection_result,
+    //                    oii.created_at as inspection_at,
+    //                    oii.remarks as remark
+    //             FROM order_details od
+    //             INNER JOIN provider_delivery_items pdi ON pdi.order_detail_id = od.id
+    //             INNER JOIN provider_deliveries pd ON pdi.delivery_id = pd.id AND pd.delivery_round = ?
+    //             LEFT JOIN order_inspection_items oii ON oii.order_detail_id = od.id
+    //                 AND oii.inspection_id IN (
+    //                     SELECT id FROM order_inspections
+    //                     WHERE order_id = ? AND inspection_round = ?
+    //                 )
+    //             WHERE od.order_id = ?
+    //             ORDER BY od.id ASC
+    //             "#,
+    //             delivery.delivery_round, order_info.order_id, delivery.delivery_round, order_info.order_id
+    //         )
+    //         .fetch_all(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get delivery items"))?
+    //         .into_iter()
+    //         .map(|item| OrderDeliveryHistoryItemDetail {
+    //             order_detail_id: item.order_detail_id,
+    //             product_code: item.product_code,
+    //             product_name: item.product_name,
+    //             category_id: item.category_id,
+    //             category_name: item.category_name,
+    //             unit: item.unit,
+    //             unit_price: item.unit_price,
+    //             ordered_qty: item.ordered_qty,
+    //             need_to_deliver_qty: item.ordered_qty, // 暂时使用 ordered_qty
+    //             actual_qty: Some(item.actual_qty),
+    //             last_inspection_result: Some(item.last_inspection_result.unwrap_or_else(|| "PENDING".to_string())),
+    //             inspection_at: item.inspection_at,
+    //             remark: item.remark,
+    //         })
+    //         .collect();
+
+
+    //         let history_item = OrderDeliveryHistoryItem {
+    //             round: delivery.delivery_round,
+    //             delivery_type: delivery.delivery_type,
+    //             delivery_status: "DELIVERED".to_string(),
+    //             inspection_status: inspection.as_ref()
+    //                 .map(|i| i.inspection_result.clone())
+    //                 .unwrap_or_else(|| "COMPLETED".to_string()),
+    //             delivered_at: delivery.delivered_at.map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)).unwrap_or_default(),
+    //             inspected_at: inspection.as_ref()
+    //                 .and_then(|i| i.inspected_at)
+    //                 .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
+    //             delivery_staff: None, // TODO: 需要从 delivery_staff 表查询
+    //             items,
+    //         };
+
+    //         history.push(history_item);
+    //     }
+
+    //     Ok(OrderDeliveryHistoryResponse {
+    //         order_code: order_code.to_string(),
+    //         history,
+    //     })
+    // }
 }

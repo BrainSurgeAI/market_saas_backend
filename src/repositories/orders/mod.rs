@@ -1,18 +1,19 @@
 pub(crate) mod customer;
 pub(crate) mod provider;
 
+pub(crate) mod common;
 pub(crate) mod marketplace;
 pub(crate) mod shared_market_customer;
-pub(crate) mod common;
 
 use crate::{
     common::AppError,
     map_db_err,
     models::{
-        order_action::OrderAction, order_machine::OrderStateMachine, order_status::OrderStatus,
-        tenant_type::TenantType,
+        claims::Claims, order_action::OrderAction, order_machine::OrderStateMachine,
+        order_status::OrderStatus, tenant_type::TenantType,
     },
 };
+use std::collections::HashMap;
 
 use super::my_sql_repository::MySqlRepository;
 
@@ -20,7 +21,6 @@ use rust_decimal::Decimal;
 use tracing::{debug, error};
 
 impl MySqlRepository {
-   
     /// Helper method to validate and transition order state using OrderStateMachine
     /// This method encapsulates the logic for:
     /// 1. Converting current status string to OrderStatus enum
@@ -89,7 +89,13 @@ impl MySqlRepository {
             AppError::not_found(error_msg.to_string())
         })?;
 
-        Ok((order.id, order.order_status, order.assignment_id, order.delivery_id, order.delivery_round))
+        Ok((
+            order.id,
+            order.order_status,
+            order.assignment_id,
+            order.delivery_id,
+            order.delivery_round,
+        ))
     }
 
     // help function to get tenant id by tenant hash and tenant type
@@ -115,16 +121,16 @@ impl MySqlRepository {
     }
 
     /// 获取产品的折扣价格
-    /// 
+    ///
     /// 根据产品代码、市场ID、分类ID和客户ID，查询产品中间价和客户分类折扣率，
     /// 计算并返回客户下单时该产品的折扣价
-    /// 
+    ///
     /// # 参数
     /// * `product_code` - 产品代码
     /// * `market_id` - 市场ID
     /// * `category_level_1_id` - 一级分类ID
     /// * `customer_id` - 客户ID（tenant_id）
-    /// 
+    ///
     /// # 返回
     /// 返回计算后的折扣价格，如果产品价格不存在则返回错误
     async fn get_product_price_with_discount_rate(
@@ -193,7 +199,7 @@ impl MySqlRepository {
         let avg_price = price_result;
 
         // 3. 查询 customer_category_discounts 表获取折扣率
-        // 根据 tenant_id (customer_id), category_id (category_level_1_id), 
+        // 根据 tenant_id (customer_id), category_id (category_level_1_id),
         // 当前日期在 start_date 和 end_date 之间，status = true
         let discount_result = sqlx::query!(
             r#"
@@ -223,7 +229,7 @@ impl MySqlRepository {
     }
 
     /// help function to insert into order_status_history table
-    /// 
+    ///
     /// # Arguments
     /// * `tx` - The transaction to insert the order status history
     /// * `order_id` i32 - The id of the order
@@ -250,6 +256,164 @@ impl MySqlRepository {
             .execute(&mut **tx)
             .await
             .map_err(map_db_err!("Failed to insert order status history"))?;
+        Ok(())
+    }
+
+    async fn create_order_inspection_record(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        order_id: i32,
+        claims: &Claims,
+    ) -> Result<u64, AppError> {
+        let user_record = sqlx::query!(
+            r#"SELECT id FROM users WHERE username = ?"#,
+            claims.username
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(map_db_err!("Failed to get user"))?
+        .ok_or_else(|| AppError::NotFound(format!("User not found: {}", claims.username)))?;
+
+        // Before create a new order inspection record, check if order inspections table has a record with the same order_id
+        // get the inspection_round from the order inspections table
+        let last_inspection = sqlx::query!(
+            r#"SELECT id, inspection_round, inspected_by_type FROM order_inspections WHERE order_id = ? ORDER BY inspection_round DESC LIMIT 1"#,
+            order_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(map_db_err!("Failed to get inspection round"))?;
+
+        let last_inspection_id = last_inspection.as_ref().map(|r| r.id as u64);
+
+        let (parent_id, inspection_round) = if let Some(inspection_record) = last_inspection {
+            (
+                Some(inspection_record.id),
+                inspection_record.inspection_round + 1,
+            )
+        } else {
+            (None, 1)
+        };
+
+        // Create a new order inspection record
+        let current_inspection_id = sqlx::query!(
+            r#"INSERT INTO order_inspections (order_id, inspected_by_type, inspected_by_id, inspection_round, parent_id) VALUES (?, ?, ?, ?, ?)"#,
+            order_id, claims.tenant_type, user_record.id, inspection_round, parent_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(map_db_err!("Failed to create order inspection record"))?
+        .last_insert_id();
+
+        if current_inspection_id == 0 {
+            return Err(AppError::Internal(format!(
+                "Failed to create order inspection record"
+            )));
+        }
+
+        match TenantType::try_from(claims.tenant_type.as_str())? {
+            TenantType::Market => {
+                self.insert_order_inspection_items_from_provider_delivery(
+                    tx,
+                    order_id,
+                    current_inspection_id,
+                )
+                .await?
+            }
+            TenantType::Customer => {
+                self.insert_order_inspection_items_from_last_market_inspection(
+                    tx,
+                    current_inspection_id,
+                    last_inspection_id.unwrap(),
+                )
+                .await?
+            }
+            TenantType::Provider => {
+                return Err(AppError::BadRequest(format!(
+                    "Provider tenant type not supported for this operation"
+                )))
+            }
+        }
+
+        Ok(current_inspection_id)
+    }
+
+    async fn insert_order_inspection_items_from_provider_delivery(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        order_id: i32,
+        current_inspection_id: u64,
+    ) -> Result<(), AppError> {
+        let current_delivery = sqlx::query!(
+            r#"SELECT id as delivery_id, delivery_type FROM provider_deliveries 
+               WHERE assignment_id = ? ORDER BY delivery_round DESC LIMIT 1"#,
+            order_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(map_db_err!("Failed to get max round"))?
+        .ok_or_else(|| AppError::NotFound(format!("Max round not found: {}", order_id)))?;
+
+        let provider_delivery_items = sqlx::query!(
+            r#"INSERT INTO order_inspection_items (inspection_id, order_detail_id, need_to_inspection) 
+               SELECT ? AS inspection_id, pdi.order_detail_id, pdi.actual_qty FROM provider_delivery_items pdi WHERE pdi.delivery_id = ?"#, 
+               current_inspection_id, current_delivery.delivery_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(map_db_err!("Failed to insert order inspection items"))?
+            .rows_affected();
+
+        if provider_delivery_items == 0 {
+            return Err(AppError::Internal(format!(
+                "initialize order inspection items failed: {}",
+                current_delivery.delivery_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn insert_order_inspection_items_from_last_market_inspection(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+        current_inspection_id: u64,
+        last_inspection_id: u64,
+    ) -> Result<(), AppError> {
+        let last_inspection_items = sqlx::query!(
+            r#"SELECT order_detail_id, inspected_qty FROM order_inspection_items WHERE inspection_id = ?
+            "#, last_inspection_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(map_db_err!("Failed to get last inspection items"))?;
+
+        // 根据 order_detail_id 聚合 inspected_qty
+        let inspected_qty_map = last_inspection_items
+            .into_iter()
+            .map(|item| (item.order_detail_id, item.inspected_qty))
+            .collect::<HashMap<i32, Option<Decimal>>>();
+
+        if !inspected_qty_map.is_empty() {
+            // 使用批量插入优化性能
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty)"
+            );
+
+            query_builder.push_values(
+                inspected_qty_map,
+                |mut b, (order_detail_id, inspected_qty)| {
+                    b.push_bind(current_inspection_id)
+                        .push_bind(order_detail_id)
+                        .push_bind(inspected_qty.unwrap_or(Decimal::new(0, 2)));
+                },
+            );
+
+            let query = query_builder.build();
+            query
+                .execute(&mut **tx)
+                .await
+                .map_err(map_db_err!("Failed to batch insert order inspection items"))?;
+        }
+
         Ok(())
     }
 }

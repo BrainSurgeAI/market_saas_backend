@@ -5,9 +5,8 @@ use axum::{
 
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::services::order_services::get_after_sale_orders_by_provider;
-use crate::services::orders::shared_market_customer::{
- begin_exchange_inspect_order, cancel_order, create_after_sales_request, inspect_sub_orders,
-    return_order, start_order_inspection,
+use crate::services::orders::shared_market_customer::{cancel_order, create_after_sales_request, inspect_sub_orders,
+    return_order, start_order_inspection, get_order_inspections,
 };
 
 pub(super) fn shared_market_customer_routes() -> Router {
@@ -28,6 +27,10 @@ pub(super) fn shared_market_customer_routes() -> Router {
         //     "/{order_code}/begin-exchange-inspect-order",
         //     patch(begin_exchange_inspect_order::<MySqlRepository>),
         // )
+        .route(
+            "/{order_code}/inspections",
+            get(get_order_inspections::<MySqlRepository>),
+        )
         .route(
             "/{order_code}/return",
             patch(return_order::<MySqlRepository>),

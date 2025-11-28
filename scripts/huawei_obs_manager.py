@@ -113,14 +113,14 @@ class OBSManager:
                 logger.error(f"检查OBS对象失败 {object_key}: {e}")
                 return False
 
-    def generate_temp_url(self, bucket_name: str, object_key: str, expires_in: int = 7200) -> Optional[str]:
+    def generate_temp_url(self, bucket_name: str, object_key: str, expires_in: int = 28800) -> Optional[str]:
         """
         生成OBS对象的临时URL
 
         Args:
             bucket_name: OBS桶名
             object_key: 对象键
-            expires_in: 过期时间（秒），默认1小时
+            expires_in: 过期时间（秒），默认8小时
 
         Returns:
             临时URL字符串
@@ -179,7 +179,7 @@ class OBSManager:
             raise
 
     def save_temp_url_to_database(self, bucket_name: str, product_code: str,
-                                 object_key: str, temp_url: str, expires_in: int = 3600):
+                                 object_key: str, temp_url: str, expires_in: int = 28800):
         """
         保存临时URL到数据库
 
@@ -223,14 +223,14 @@ class OBSManager:
             raise
 
     def process_product_images(self, bucket_name: str, prefix: str = "products/",
-                             expires_in: int = 3600, clear_existing: bool = True):
+                             expires_in: int = 28800, clear_existing: bool = True):
         """
         处理产品图片，生成临时URL
 
         Args:
             bucket_name: OBS桶名
             prefix: 对象前缀，默认为"products/"
-            expires_in: 过期时间（秒），默认1小时
+            expires_in: 过期时间（秒），默认8小时
             clear_existing: 是否清空现有记录，默认True
         """
         logger.info(f"开始处理产品图片，桶名: {bucket_name}, 前缀: {prefix}")
@@ -279,7 +279,7 @@ class OBSManager:
         logger.info(f"产品图片处理完成! 成功: {success_count}, 失败: {failure_count}")
 
     def refresh_expired_urls(self, bucket_name: str, prefix: str = "products/",
-                           expires_in: int = 3600):
+                           expires_in: int = 28800):
         """
         刷新过期的临时URL
 
@@ -392,7 +392,7 @@ def main():
     # OBS配置
     bucket_name = os.getenv('OBS_BUCKET_NAME', 'your-bucket-name')
     prefix = 'products/'
-    expires_in = int(os.getenv('URL_EXPIRES_IN', 36000))  # 10小时
+    expires_in = int(os.getenv('URL_EXPIRES_IN', 28800))  # 8小时
 
     # 解析命令行参数
     if len(sys.argv) > 1:

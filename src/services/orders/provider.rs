@@ -5,7 +5,7 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::{
         delivery_staff::DeliveryStaffIdDTO,
-        order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest},
+        order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest, OrderDeliveryHistoryResponse},
         ValidatedJSON,
     },
     middleware::context::RequestContext,
@@ -33,6 +33,22 @@ where
         .await?;
     Ok(Json(ApiResponse::new(
         Some(next_status.to_str().to_string()),
+        &context,
+    )))
+}
+
+pub(crate) async fn get_order_delivery_history<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+) -> Result<Json<ApiResponse<OrderDeliveryHistoryResponse>>, AppError>
+where
+    T: ProviderOrderRepository + Send + Sync,
+{
+    let delivery_history = repo.get_order_delivery_history(&order_code, &claims).await?;
+    Ok(Json(ApiResponse::new(
+        Some(delivery_history),
         &context,
     )))
 }

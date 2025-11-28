@@ -683,7 +683,7 @@ pub(crate) struct ProviderOrderItem {
     #[serde(rename = "processingRequirements")]
     pub(crate) processing_requirements: Option<String>,
 
-   // pub(crate) remark: Option<ProviderOrderRemark>,
+    pub(crate) remark: Option<ProviderOrderRemark>,
 }
 
 /// 供应商订单备注
@@ -963,4 +963,158 @@ pub(crate) struct CustomerOrderItem {
     pub(crate) processing_requirements: Option<String>,
 
     pub(crate) remark: Option<ProviderOrderRemark>,
+}
+
+/// 订单交付历史响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderDeliveryHistoryResponse {
+    #[serde(rename = "orderCode")]
+    pub(crate) order_code: String,
+
+    pub(crate) history: Vec<OrderDeliveryHistoryItem>,
+}
+
+/// 订单交付历史项
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderDeliveryHistoryItem {
+    pub(crate) round: i32,
+
+    #[serde(rename = "deliveryType")]
+    pub(crate) delivery_type: String,
+
+    #[serde(rename = "deliveryStatus")]
+    pub(crate) delivery_status: String,
+
+    #[serde(rename = "inspectionStatus")]
+    pub(crate) inspection_status: String,
+
+    #[serde(rename = "deliveredAt")]
+    pub(crate) delivered_at: DateTime<Utc>,
+
+    #[serde(rename = "inspectedAt")]
+    pub(crate) inspected_at: Option<DateTime<Utc>>,
+
+    #[serde(rename = "deliveryStaff")]
+    pub(crate) delivery_staff: Option<DeliveryStaffInfo>,
+
+    pub(crate) items: Vec<OrderDeliveryHistoryItemDetail>,
+}
+
+/// 交付人员信息
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct DeliveryStaffInfo {
+    pub(crate) id: String,
+
+    pub(crate) name: String,
+
+    pub(crate) phone: String,
+}
+
+/// 订单交付历史商品详情
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct OrderDeliveryHistoryItemDetail {
+    #[serde(rename = "orderDetailId")]
+    pub(crate) order_detail_id: i32,
+
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "categoryId")]
+    pub(crate) category_id: i32,
+
+    #[serde(rename = "categoryName")]
+    pub(crate) category_name: String,
+
+    pub(crate) unit: String,
+
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
+
+    #[serde(rename = "orderedQty")]
+    pub(crate) ordered_qty: Decimal,
+
+    #[serde(rename = "needToDeliverQty")]
+    pub(crate) need_to_deliver_qty: Decimal,
+
+    #[serde(rename = "actualQty")]
+    pub(crate) actual_qty: Option<Decimal>,
+
+    #[serde(rename = "inspectedQty")]
+    pub(crate) inspected_qty: Option<Decimal>,
+
+    #[serde(rename = "lastInspectionResult")]
+    pub(crate) last_inspection_result: Option<String>,
+
+    #[serde(rename = "inspectionAt")]
+    pub(crate) inspection_at: Option<DateTime<Utc>>,
+
+    pub(crate) remark: Option<String>,
+}
+
+/// 订单检查商品项
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct NeedToInspectionItem {
+    #[serde(rename = "inspectionItemId")]
+    pub(crate) inspection_item_id: u64,
+
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "categoryId")]
+    pub(crate) category_id: i32,
+
+    #[serde(rename = "categoryName")]
+    pub(crate) category_name: String,
+
+    pub(crate) unit: String,
+
+    #[serde(rename = "unitPrice")]
+    pub(crate) unit_price: Decimal,
+
+    #[serde(rename = "orderedQty")]
+    pub(crate) ordered_qty: Decimal,
+
+    #[serde(rename = "needToInspectQty")]
+    pub(crate) need_to_inspect_qty: Decimal,
+
+    #[serde(rename = "inspectedQty")]
+    pub(crate) inspected_qty: Option<Decimal>,
+
+    #[serde(rename = "inspectionStatus")]
+    pub(crate) inspection_status: String,
+
+    #[serde(rename = "processingRequirements")]
+    pub(crate) processing_requirements: Option<String>,
+
+    #[serde(rename = "discountRate")]
+    pub(crate) discount_rate: Decimal,
+}
+
+/// 订单检查信息响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct NeedToInspection {
+    pub(crate) round: i32,
+
+    #[serde(rename = "deliveryType")]
+    pub(crate) delivery_type: String,
+
+    #[serde(rename = "deliveredAt")]
+    pub(crate) delivered_at: Option<DateTime<Utc>>,
+
+    #[serde(rename = "inspectionAt")]
+    pub(crate) inspection_at: Option<DateTime<Utc>>,
+
+    #[serde(rename = "inspectionResult")]
+    pub(crate) inspection_result: String,
+
+    #[serde(rename = "deliveryStaff")]
+    pub(crate) delivery_staff: Option<DeliveryStaffInfo>,
+
+    pub(crate) items: Vec<NeedToInspectionItem>,
 }
