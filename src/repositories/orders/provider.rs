@@ -582,7 +582,7 @@ impl ProviderOrderRepository for MySqlRepository {
     async fn get_order_delivery_history(
         &self,
         order_code: &str,
-        claims: &Claims,
+        _claims: &Claims,
     ) -> Result<OrderDeliveryHistoryResponse, AppError> {
         // 获取订单信息
         let order_info = sqlx::query!(

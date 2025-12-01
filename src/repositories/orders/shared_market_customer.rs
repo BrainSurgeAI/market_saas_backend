@@ -10,6 +10,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use rust_decimal::Decimal;
+use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
 
 use chrono::{DateTime, Utc};
@@ -93,17 +94,19 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             .await
             .map_err(map_db_err!("Failed to begin transaction"))?;
 
-        // 验证订单存在且状态正确
-        let record = sqlx::query!(r#"
-            SELECT o.id, od.id as detail_id, o.order_status, oi.id as inspection_id, 
-                pdi.actual_qty as actual_quantity, pdi.subtotal as total_amount, od.discounted_unit_price as actual_price
-            FROM orders o 
-            INNER JOIN order_details od ON o.id = od.order_id
-            INNER JOIN order_inspections oi ON o.id = oi.order_id
-            INNER JOIN provider_delivery_items pdi ON od.id = pdi.order_detail_id
-            WHERE o.order_code = ? AND pdi.id = ? AND oi.inspected_by_type = ? ORDER BY oi.inspection_round DESC LIMIT 1 FOR UPDATE"#,
+        //let tenant_type_enum = TenantType::try_from(tenant_type)?;
+
+        let record = sqlx::query!(
+            r#"
+        SELECT oii.order_detail_id as detail_id, oi.id as inspection_id,
+            oii.need_to_inspection  as actual_quantity, od.discounted_unit_price as actual_price
+        FROM order_inspection_items oii
+        INNER JOIN order_inspections oi ON oii.inspection_id = oi.id
+        INNER JOIN orders o ON oi.order_id = o.id
+        INNER JOIN order_details od ON oii.order_detail_id = od.id
+        WHERE o.order_code = ? AND oii.id = ? AND oi.inspected_by_type = ? FOR UPDATE"#,
             receipt.order_code,
-            receipt.order_detail_id,
+            receipt.order_inspection_id,
             tenant_type
         )
         .fetch_optional(&self.pool)
@@ -114,13 +117,15 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         .ok_or_else(|| {
             AppError::NotFound(format!(
                 "Order {} with order detail id {} not found",
-                receipt.order_code, receipt.order_detail_id
+                receipt.order_code, receipt.order_inspection_id
             ))
         })?;
 
         let detail_id = record.detail_id;
         let inspection_id = record.inspection_id;
+        let actual_quantity = record.actual_quantity;
         let actual_price = record.actual_price;
+        let total_amount = record.actual_quantity * record.actual_price;
 
         match receipt.operation_type {
             ReceiptOperationType::Return => {
@@ -132,7 +137,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                     r#"INSERT INTO return_exchange_records 
                       (order_detail_id, operation_type, quantity, reason, reason_description, created_by, evidence_images, inspection_id)
                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
-                    detail_id, operation_type_str, record.actual_quantity, receipt.reason, receipt.reason, operator, evidence_json, inspection_id
+                    detail_id, operation_type_str, actual_quantity, receipt.reason, receipt.reason, operator, evidence_json, inspection_id
                 )
                 .execute(&mut *tx)
                 .await
@@ -142,7 +147,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 sqlx::query!(
                     r#"INSERT INTO refund_records (return_exchange_id, amount, method, transaction_id)
                       VALUES (?, ?, ?, ?)"#,
-                    return_exchange_id, record.total_amount, "ORIGINAL", transaction_id
+                    return_exchange_id, total_amount, "ORIGINAL", transaction_id
                 )
                 .execute(&mut *tx)
                 .await
@@ -150,6 +155,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             }
             ReceiptOperationType::Exchange => {
                 debug!("Exchange operation type");
+
                 let ordered_qty_record = sqlx::query!(
                     r#"SELECT ordered_qty FROM order_details WHERE id = ?"#,
                     detail_id
@@ -162,6 +168,10 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                 })?;
 
                 let exchange_quantity = ordered_qty_record.ordered_qty - receipt.quantity;
+                debug!(
+                    "ordered_qty: {},  receipt quantity: {}, exchange_quantity: {}",
+                    ordered_qty_record.ordered_qty, receipt.quantity, exchange_quantity
+                );
 
                 // if the exchange quantity is greater than 0, create the exchange record
                 if exchange_quantity >= Decimal::ZERO {
@@ -190,9 +200,14 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             _ => debug!("Process receipt: {:?}", receipt),
         }
 
+        let is_accepted = match receipt.operation_type {
+            ReceiptOperationType::Return => false,
+            ReceiptOperationType::Exchange => true,
+            _ => true,
+        };
         sqlx::query!(
-            r#"UPDATE order_inspection_items SET inspected_qty = ?, remarks = ?, result = ? WHERE id = ?"#,
-            receipt.quantity, receipt.reason, ReceiptOperationType::to_str(receipt.operation_type.clone()), receipt.order_detail_id
+            r#"UPDATE order_inspection_items SET inspected_qty = ?, remarks = ?, result = ?, accepted = ? WHERE id = ?"#,
+            receipt.quantity, receipt.reason, ReceiptOperationType::to_str(receipt.operation_type.clone()), is_accepted, receipt.order_inspection_id
         )
         .execute(&mut *tx)
         .await
@@ -450,7 +465,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
         // TODO: check if the order is belongs with the tenant_relationships table by tenant_type
         let order = sqlx::query!(
-            r#"SELECT o.id, o.order_status, oi.inspection_result
+            r#"SELECT o.id, o.order_status, oi.inspection_result, oi.id as inspection_id
                FROM orders o
                INNER JOIN order_inspections oi ON o.id = oi.order_id
                WHERE o.order_code = ? AND oi.inspected_by_type = ? ORDER BY oi.inspection_round DESC LIMIT 1 FOR UPDATE"#,
@@ -474,6 +489,77 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
             if tenant_type == TenantType::Market {
                 OrderAction::MarketAccept
             } else {
+                // 从order_inspection_items表中获取所有accepted为1的order_detail_id和inspected_qty, 关联order_details表,
+                // 用order_details表对应的discounted_unit_price和inspected_qty计算net_amount, 然后更新order_details表的net_amount和orders表的net_amount
+                // 使用GROUP BY聚合相同order_detail_id的inspected_qty
+                let order_details = sqlx::query!(
+                    r#"select oii.order_detail_id, SUM(oii.inspected_qty) as total_inspected_qty, od.discounted_unit_price 
+                    from order_inspection_items oii 
+                    inner join order_inspections oi on oi.id = oii.inspection_id 
+                    inner join order_details od on od.id = oii.order_detail_id 
+                    where oi.order_id = ? and oi.inspected_by_type = 'CUSTOMER' and oii.accepted = 1
+                    group by oii.order_detail_id, od.discounted_unit_price"#,
+                    order.id
+                )
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to get order details"))?;
+
+                if order_details.is_empty() {
+                    return Err(AppError::internal(
+                        "No order details found for inspection",
+                    ));
+                }
+
+                debug!("Order details: {:?}", order_details);
+
+                // 使用批量更新提升性能
+                let mut order_net_amount = Decimal::ZERO;
+                let mut update_values: Vec<(i32, Decimal)> = Vec::new();
+
+                for order_detail in order_details {
+                    let inspected_qty = order_detail.total_inspected_qty.unwrap_or(Decimal::ZERO);
+                    let net_amount = order_detail.discounted_unit_price * inspected_qty;
+                    update_values.push((order_detail.order_detail_id, net_amount));
+                    order_net_amount += net_amount;
+                    debug!("order_net_amount: {:?}", order_net_amount);
+                }
+
+                // 使用CASE WHEN进行批量更新，使用QueryBuilder避免SQL注入
+                if !update_values.is_empty() {
+                    let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                        "UPDATE order_details SET net_amount = CASE id ",
+                    );
+                    
+                    for (id, net_amount) in &update_values {
+                        builder.push("WHEN ").push_bind(id).push(" THEN ").push_bind(net_amount).push(" ");
+                    }
+                    
+                    builder.push("END WHERE id IN (");
+                    let mut separated = builder.separated(", ");
+                    for (id, _) in &update_values {
+                        separated.push_bind(id);
+                    }
+                    separated.push_unseparated(")");
+
+                    let sql = builder.sql();
+                    debug!("Batch update SQL: {}", sql);
+
+                    builder
+                        .build()
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(map_db_err!("Failed to batch update order detail net amount"))?;
+                }
+
+                sqlx::query!(
+                    r#"UPDATE orders SET net_amount = ? WHERE id = ?"#,
+                    order_net_amount,
+                    order.id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to update order net amount"))?;
                 OrderAction::Complete
             }
         } else {
@@ -573,68 +659,128 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         order_code: &str,
         claims: &Claims,
     ) -> Result<NeedToInspection, AppError> {
-            // 获取供应商最近一次配送信息
-           let latest_delivery = sqlx::query!(
-            r#"
-            SELECT pd.delivery_type, pd.delivered_at 
-            FROM provider_deliveries pd
-            INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
-            INNER JOIN orders o ON poa.order_id = o.id
-            WHERE o.order_code = ? AND pd.delivery_status = 'DELIVERED'
-            ORDER BY pd.delivery_round DESC LIMIT 1
-            "#,
-            order_code
-           )
-           .fetch_optional(&self.pool)
-           .await
-           .map_err(map_db_err!("Failed to get latest delivery"))?.ok_or_else(|| AppError::NotFound(format!("Latest delivery not found: {}", order_code)))?;
+        let tenant_type = TenantType::try_from(claims.tenant_type.as_str())?;
+        let response = match tenant_type {
+            TenantType::Market => {
+                // 获取供应商最近一次配送信息
+                let latest_delivery = sqlx::query!(
+                    r#"
+                    SELECT pd.delivery_type, pd.delivered_at 
+                    FROM provider_deliveries pd
+                    INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
+                    INNER JOIN orders o ON poa.order_id = o.id
+                    WHERE o.order_code = ? AND pd.delivery_status = 'DELIVERED'
+                    ORDER BY pd.delivery_round DESC LIMIT 1
+                    "#,
+                    order_code
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get latest delivery"))?
+                .ok_or_else(|| {
+                    AppError::NotFound(format!("Latest delivery not found: {}", order_code))
+                })?;
 
-            let delivery_type = latest_delivery.delivery_type;
-            let delivered_at = latest_delivery.delivered_at.map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+                let delivery_type = latest_delivery.delivery_type;
+                let delivered_at = latest_delivery
+                    .delivered_at
+                    .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
-            let delivery_staff = None; // TODO: 需要从 delivery_staff 表查询
+                let delivery_staff = None; // TODO: 需要从 delivery_staff 表查询
 
-            // 市场用户的需要验收的商品信息，从order_inspection_items表中获取
-            let market_inspection = sqlx::query!(
-                r#"
-                SELECT oi.id as inspection_id, oi.inspection_round, oi.inspection_result, oi.inspected_at
-                FROM order_inspections oi
-                INNER JOIN orders o ON oi.order_id = o.id
-                WHERE o.order_code = ? AND oi.inspected_by_type = 'MARKET'
-                ORDER BY inspection_round DESC LIMIT 1
-                "#,
-                order_code
-            )
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get market inspection"))?
-            .ok_or_else(|| AppError::NotFound(format!("Market inspection not found: {}", order_code)))?;
+                // 市场用户的需要验收的商品信息，从order_inspection_items表中获取
+                let market_inspection = sqlx::query!(
+                    r#"
+                    SELECT oi.id as inspection_id, oi.inspection_round, oi.inspection_result, oi.inspected_at
+                    FROM order_inspections oi
+                    INNER JOIN orders o ON oi.order_id = o.id
+                    WHERE o.order_code = ? AND oi.inspected_by_type = ?
+                    ORDER BY inspection_round DESC LIMIT 1
+                    "#,
+                order_code, claims.tenant_type)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get market inspection"))?
+                .ok_or_else(|| AppError::NotFound(format!("Market inspection not found: {}", order_code)))?;
 
-            // 获取市场用户的需要验收的商品信息，从order_inspection_items表中获取
-            let market_inspection_items = sqlx::query_as!(
+                // 获取市场用户的需要验收的商品信息，从order_inspection_items表中获取
+                let market_inspection_items = sqlx::query_as!(
                 NeedToInspectionItem,
                 r#"
-                SELECT oii.id AS inspection_item_id, od.product_code, od.product_name, od.category_id,
-                       od.category_name, od.unit, od.discount_rate, od.unit_price, od.ordered_qty,
-                       oii.need_to_inspection AS need_to_inspect_qty, oii.inspected_qty,
-                       oii.result as inspection_status, od.processing_requirements
-                FROM order_inspection_items oii
-                INNER JOIN order_details od ON oii.order_detail_id = od.id
-                WHERE oii.inspection_id = ?
-                ORDER BY oii.order_detail_id ASC
+                    SELECT oii.id AS inspection_item_id, od.product_code, od.product_name, od.category_id,
+                        od.category_name, od.unit, od.discount_rate, od.unit_price, od.ordered_qty,
+                        oii.need_to_inspection AS need_to_inspect_qty, oii.inspected_qty,
+                        oii.result as inspection_status, od.processing_requirements
+                    FROM order_inspection_items oii
+                    INNER JOIN order_details od ON oii.order_detail_id = od.id
+                    WHERE oii.inspection_id = ?
+                    ORDER BY oii.order_detail_id ASC
                 "#,
-                market_inspection.inspection_id
-            ).fetch_all(&self.pool).await.map_err(map_db_err!("Failed to get market inspection items"))?;
+                market_inspection.inspection_id)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get market inspection items"))?;
 
-            let response = NeedToInspection {
+                NeedToInspection {
                     round: market_inspection.inspection_round,
                     delivery_type: delivery_type,
                     delivered_at: delivered_at,
                     inspection_result: market_inspection.inspection_result,
-                    inspection_at: market_inspection.inspected_at.map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
+                    inspection_at: market_inspection
+                        .inspected_at
+                        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
                     delivery_staff,
                     items: market_inspection_items,
-                };
+                }
+            }
+            TenantType::Customer => {
+                let customer_inspection = sqlx::query!(
+                    r#"
+                    SELECT oi.id as inspection_id, oi.inspection_round, oi.inspection_result, oi.inspected_at
+                    FROM order_inspections oi
+                    INNER JOIN orders o ON oi.order_id = o.id
+                    WHERE o.order_code = ? AND oi.inspected_by_type = ?
+                    ORDER BY inspection_round DESC LIMIT 1
+                "#, order_code, claims.tenant_type)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_db_err!("Failed to get customer inspection"))?
+                .ok_or_else(|| AppError::NotFound(format!("Customer inspection not found: {}", order_code)))?;
+
+                let customer_inspection_items = sqlx::query_as!(
+                    NeedToInspectionItem,
+                    r#"
+                    SELECT oii.id AS inspection_item_id, od.product_code, od.product_name, od.category_id,
+                           od.category_name, od.unit, od.discount_rate, od.unit_price, od.ordered_qty,
+                           oii.need_to_inspection AS need_to_inspect_qty, oii.inspected_qty,
+                           oii.result as inspection_status, od.processing_requirements
+                    FROM order_inspection_items oii
+                    INNER JOIN order_details od ON oii.order_detail_id = od.id
+                    WHERE oii.inspection_id = ?
+                    ORDER BY oii.order_detail_id ASC
+                    "#,
+                    customer_inspection.inspection_id
+                ).fetch_all(&self.pool).await.map_err(map_db_err!("Failed to get customer inspection items"))?;
+
+                NeedToInspection {
+                    round: customer_inspection.inspection_round,
+                    delivery_type: "".to_string(),
+                    delivered_at: None,
+                    inspection_result: customer_inspection.inspection_result,
+                    inspection_at: customer_inspection
+                        .inspected_at
+                        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
+                    delivery_staff: None,
+                    items: customer_inspection_items,
+                }
+            }
+            TenantType::Provider => {
+                return Err(AppError::NotFound(format!(
+                    "Provider tenant type not supported: {}",
+                    claims.tenant_type
+                )));
+            }
+        };
         Ok(response)
     }
 
@@ -735,10 +881,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
     //         })
     //         .collect();
 
-
-    //         let history_item = OrderDeliveryHistoryItem {
-    //             round: delivery.delivery_round,
-    //             delivery_type: delivery.delivery_type,
+    //         let history_item = OrderD    delivery_type: delivery.delivery_type,
     //             delivery_status: "DELIVERED".to_string(),
     //             inspection_status: inspection.as_ref()
     //                 .map(|i| i.inspection_result.clone())
@@ -758,5 +901,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
     //         order_code: order_code.to_string(),
     //         history,
     //     })
-    // }
+    // }eliveryHistoryItem {
+    //             round: delivery.delivery_round,
+    //
 }

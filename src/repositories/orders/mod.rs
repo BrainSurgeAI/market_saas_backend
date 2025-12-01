@@ -323,8 +323,9 @@ impl MySqlRepository {
             TenantType::Customer => {
                 self.insert_order_inspection_items_from_last_market_inspection(
                     tx,
-                    current_inspection_id,
+                    order_id,
                     last_inspection_id.unwrap(),
+                    current_inspection_id,
                 )
                 .await?
             }
@@ -376,42 +377,85 @@ impl MySqlRepository {
     async fn insert_order_inspection_items_from_last_market_inspection(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
-        current_inspection_id: u64,
+        order_id: i32,
         last_inspection_id: u64,
+        current_inspection_id: u64,
     ) -> Result<(), AppError> {
-        let last_inspection_items = sqlx::query!(
-            r#"SELECT order_detail_id, inspected_qty FROM order_inspection_items WHERE inspection_id = ?
-            "#, last_inspection_id)
-        .fetch_all(&mut **tx)
+        // 获取CUSTOMER最近一次的验收记录
+        let customer_last_inspection = sqlx::query!(
+            r#"
+               SELECT count(*) as count 
+               FROM order_inspections 
+               WHERE order_id = ? AND inspected_by_type = 'CUSTOMER'"#,
+            order_id
+        )
+        .fetch_one(&mut **tx)
         .await
-        .map_err(map_db_err!("Failed to get last inspection items"))?;
+        .map_err(map_db_err!("Failed to get last inspection"))?;
 
-        // 根据 order_detail_id 聚合 inspected_qty
-        let inspected_qty_map = last_inspection_items
-            .into_iter()
-            .map(|item| (item.order_detail_id, item.inspected_qty))
-            .collect::<HashMap<i32, Option<Decimal>>>();
+        // 如果CUSTOMER只有一个验收记录，则说明是刚创建的，即CUSTOMER还没有验收过
+        if customer_last_inspection.count == 1 {
+            let last_inspection_items = sqlx::query!(r#"
+               select order_detail_id, inspected_qty from order_inspection_items oii 
+               inner join order_inspections oi on oi.id = oii.inspection_id 
+               inner join orders o on o.id = oi.order_id 
+                where o.id = ? and oii.result != 'RETURN' AND oi.inspected_by_type = 'MARKET'
+            "#, 
+            order_id)
+           .fetch_all(&mut **tx)
+           .await
+           .map_err(map_db_err!("Failed to get last inspection items"))?;
 
-        if !inspected_qty_map.is_empty() {
-            // 使用批量插入优化性能
-            let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT INTO order_inspection_items (inspection_id, order_detail_id, inspected_qty)"
+            // 根据 order_detail_id 聚合 need_to_inspection
+            let mut need_to_inspect_map = HashMap::new();
+            for item in last_inspection_items {
+                let entry = need_to_inspect_map
+                    .entry(item.order_detail_id)
+                    .or_insert(Decimal::ZERO);
+                *entry = *entry + item.inspected_qty.unwrap_or(Decimal::ZERO);
+            }
+
+            if !need_to_inspect_map.is_empty() {
+                // 使用批量插入优化性能，只插入 need_to_inspection，不插入 inspected_qty（因为还没有开始验收）
+                let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO order_inspection_items (inspection_id, order_detail_id, need_to_inspection)"
             );
 
-            query_builder.push_values(
-                inspected_qty_map,
-                |mut b, (order_detail_id, inspected_qty)| {
-                    b.push_bind(current_inspection_id)
-                        .push_bind(order_detail_id)
-                        .push_bind(inspected_qty.unwrap_or(Decimal::new(0, 2)));
-                },
-            );
+                query_builder.push_values(
+                    need_to_inspect_map,
+                    |mut b, (order_detail_id, need_to_inspection)| {
+                        b.push_bind(current_inspection_id)
+                            .push_bind(order_detail_id)
+                            .push_bind(need_to_inspection);
+                    },
+                );
 
-            let query = query_builder.build();
-            query
-                .execute(&mut **tx)
-                .await
-                .map_err(map_db_err!("Failed to batch insert order inspection items"))?;
+                let query = query_builder.build();
+                query
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(map_db_err!("Failed to batch insert order inspection items"))?;
+            }
+        } else {
+            // 直接从上一轮的验收记录SELECT并插入
+            sqlx::query!(
+                r#"
+                INSERT INTO order_inspection_items (
+                    inspection_id,
+                    order_detail_id,
+                    need_to_inspection
+                )
+                SELECT 
+                    ?, order_detail_id, inspected_qty
+                FROM order_inspection_items
+                WHERE inspection_id = ? AND accepted = 1
+                "#,
+                current_inspection_id,
+                last_inspection_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(map_db_err!("Failed to insert order inspection items"))?;
         }
 
         Ok(())

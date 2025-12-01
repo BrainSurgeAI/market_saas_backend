@@ -551,7 +551,7 @@ pub(crate) struct ProductsSummaryWithOrdersDTO {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct OrderReceipt {
     #[serde(rename = "id")]
-    pub(crate) order_detail_id: i32,
+    pub(crate) order_inspection_id: i32,
 
     #[serde(rename = "orderId")]
     pub(crate) order_code: String,
