@@ -1,7 +1,10 @@
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
-    dto::order::{NeedToInspection, NeedToInspectionItem, OrderReceipt, ReceiptOperationType},
+    dto::order::{
+        NeedToInspection, NeedToInspectionItem, OrderInspection, OrderInspectionItem,
+        OrderReceipt, ReceiptOperationType,
+    },
     map_db_err,
     models::{
         claims::Claims, order_action::OrderAction, order_machine::OrderStateMachine,
@@ -52,11 +55,11 @@ pub(crate) trait SharedMarketCustomerOrderRepository: Send + Sync {
         claims: &Claims,
     ) -> Result<NeedToInspection, AppError>;
 
-    // async fn get_order_delivery_history(
-    //     &self,
-    //     order_code: &str,
-    //     claims: &Claims,
-    // ) -> Result<OrderDeliveryHistoryResponse, AppError>;
+    async fn get_order_inspection_history(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+    ) -> Result<Vec<OrderInspection>, AppError>;
 
     async fn determine_order_action_by_inspection_result(
         &self,
@@ -784,124 +787,101 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
         Ok(response)
     }
 
-    // async fn get_order_delivery_history(
-    //     &self,
-    //     order_code: &str,
-    //     claims: &Claims,
-    // ) -> Result<OrderDeliveryHistoryResponse, AppError> {
-    //     // 获取订单信息
-    //     let order_info = sqlx::query!(
-    //         r#"
-    //         SELECT o.id as order_id, o.order_code
-    //         FROM orders o
-    //         WHERE o.order_code = ?
-    //         "#,
-    //         order_code
-    //     )
-    //     .fetch_optional(&self.pool)
-    //     .await
-    //     .map_err(map_db_err!("Failed to get order info"))?
-    //     .ok_or_else(|| AppError::NotFound(format!("Order not found: {}", order_code)))?;
+    async fn get_order_inspection_history(
+        &self,
+        order_code: &str,
+        claims: &Claims,
+    ) -> Result<Vec<OrderInspection>, AppError> {
+        // 查询所有验收记录，按验收轮次排序
+        let inspections = sqlx::query!(
+            r#"
+            SELECT oi.id as inspection_id, oi.parent_id, oi.inspection_round, 
+                   oi.inspected_by_type, oi.inspected_by_id, oi.inspection_result, oi.inspected_at
+            FROM order_inspections oi
+            INNER JOIN orders o ON oi.order_id = o.id
+            WHERE o.order_code = ? AND oi.inspected_by_type = ?
+            ORDER BY oi.inspection_round ASC
+            "#,
+            order_code,
+            claims.tenant_type
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get inspection history"))?;
 
-    //     // 获取所有交付轮次（按 delivery_round 分组）
-    //     let deliveries = sqlx::query!(
-    //         r#"
-    //         SELECT pd.delivery_round, pd.delivery_type, pd.delivered_at,
-    //                pd.delivered_by, ds.name as staff_name, ds.phone as staff_phone
-    //         FROM provider_deliveries pd
-    //         INNER JOIN provider_orders_assignments poa ON pd.assignment_id = poa.id
-    //         INNER JOIN orders o ON poa.order_id = o.id
-    //         LEFT JOIN delivery_staff ds ON pd.delivered_by = ds.id
-    //         WHERE o.order_code = ? AND pd.delivery_status = 'DELIVERED'
-    //         ORDER BY pd.delivery_round ASC
-    //         "#,
-    //         order_code
-    //     )
-    //     .fetch_all(&self.pool)
-    //     .await
-    //     .map_err(map_db_err!("Failed to get deliveries"))?;
+        if inspections.is_empty() {
+            return Ok(Vec::new());
+        }
 
-    //     let mut history = Vec::new();
+        // 批量查询所有验收项，关联订单明细表获取产品信息
+        let inspection_items = sqlx::query!(
+            r#"
+            SELECT oii.inspection_id, oii.order_detail_id, oii.inspected_qty, oii.remarks,
+                   oii.result, oii.need_to_inspection,
+                   od.product_code, od.product_name, od.category_name
+            FROM order_inspection_items oii
+            INNER JOIN order_details od ON oii.order_detail_id = od.id
+            WHERE oii.inspection_id IN (
+                SELECT oi.id FROM order_inspections oi
+                INNER JOIN orders o ON oi.order_id = o.id
+                WHERE o.order_code = ? AND oi.inspected_by_type = ?
+            )
+            ORDER BY oii.inspection_id ASC, oii.order_detail_id ASC
+            "#,
+            order_code,
+            claims.tenant_type
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get inspection items"))?;
 
-    //     for delivery in deliveries {
-    //         // 获取该轮次的检查信息
-    //         let inspection = sqlx::query!(
-    //             r#"
-    //             SELECT oi.inspection_result, oi.inspected_at
-    //             FROM order_inspections oi
-    //             WHERE oi.order_id = ? AND oi.inspection_round = ?
-    //             ORDER BY oi.inspected_at DESC LIMIT 1
-    //             "#,
-    //             order_info.order_id, delivery.delivery_round
-    //         )
-    //         .fetch_optional(&self.pool)
-    //         .await
-    //         .map_err(map_db_err!("Failed to get inspection"))?;
+        // 将验收项按 inspection_id 分组
+        use std::collections::HashMap;
+        let mut items_by_inspection: HashMap<i32, Vec<OrderInspectionItem>> = HashMap::new();
+        
+        for item in inspection_items {
+            let inspection_id = item.inspection_id as i32;
+            let inspected_qty = item.inspected_qty.unwrap_or(Decimal::ZERO);
+            let inspection_item = OrderInspectionItem {
+                order_detail_id: item.order_detail_id,
+                product_code: item.product_code,
+                product_name: item.product_name,
+                category_name: item.category_name,
+                result: item.result,
+                need_to_inspection: item.need_to_inspection,
+                inspected_qty: Some(inspected_qty),
+                quantity: Some(inspected_qty),
+                remark: item.remarks,
+            };
+            items_by_inspection
+                .entry(inspection_id)
+                .or_insert_with(Vec::new)
+                .push(inspection_item);
+        }
 
-    //         // 获取该轮次的商品详情
-    //         let items = sqlx::query!(
-    //             r#"
-    //             SELECT od.id as order_detail_id, od.product_code, od.product_name,
-    //                    od.category_id, od.category_name, od.unit, od.unit_price,
-    //                    od.ordered_qty, pdi.actual_qty,
-    //                    oii.result as last_inspection_result,
-    //                    oii.created_at as inspection_at,
-    //                    oii.remarks as remark
-    //             FROM order_details od
-    //             INNER JOIN provider_delivery_items pdi ON pdi.order_detail_id = od.id
-    //             INNER JOIN provider_deliveries pd ON pdi.delivery_id = pd.id AND pd.delivery_round = ?
-    //             LEFT JOIN order_inspection_items oii ON oii.order_detail_id = od.id
-    //                 AND oii.inspection_id IN (
-    //                     SELECT id FROM order_inspections
-    //                     WHERE order_id = ? AND inspection_round = ?
-    //                 )
-    //             WHERE od.order_id = ?
-    //             ORDER BY od.id ASC
-    //             "#,
-    //             delivery.delivery_round, order_info.order_id, delivery.delivery_round, order_info.order_id
-    //         )
-    //         .fetch_all(&self.pool)
-    //         .await
-    //         .map_err(map_db_err!("Failed to get delivery items"))?
-    //         .into_iter()
-    //         .map(|item| OrderDeliveryHistoryItemDetail {
-    //             order_detail_id: item.order_detail_id,
-    //             product_code: item.product_code,
-    //             product_name: item.product_name,
-    //             category_id: item.category_id,
-    //             category_name: item.category_name,
-    //             unit: item.unit,
-    //             unit_price: item.unit_price,
-    //             ordered_qty: item.ordered_qty,
-    //             need_to_deliver_qty: item.ordered_qty, // 暂时使用 ordered_qty
-    //             actual_qty: Some(item.actual_qty),
-    //             last_inspection_result: Some(item.last_inspection_result.unwrap_or_else(|| "PENDING".to_string())),
-    //             inspection_at: item.inspection_at,
-    //             remark: item.remark,
-    //         })
-    //         .collect();
+        // 构建验收历史记录列表
+        let mut inspection_history: Vec<OrderInspection> = Vec::new();
+        
+        for inspection in inspections {
+            let items = items_by_inspection
+                .remove(&(inspection.inspection_id as i32))
+                .unwrap_or_default();
 
-    //         let history_item = OrderD    delivery_type: delivery.delivery_type,
-    //             delivery_status: "DELIVERED".to_string(),
-    //             inspection_status: inspection.as_ref()
-    //                 .map(|i| i.inspection_result.clone())
-    //                 .unwrap_or_else(|| "COMPLETED".to_string()),
-    //             delivered_at: delivery.delivered_at.map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)).unwrap_or_default(),
-    //             inspected_at: inspection.as_ref()
-    //                 .and_then(|i| i.inspected_at)
-    //                 .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
-    //             delivery_staff: None, // TODO: 需要从 delivery_staff 表查询
-    //             items,
-    //         };
+            let inspection_record = OrderInspection {
+                inspection_id: inspection.inspection_id as i32,
+                parent_id: inspection.parent_id.map(|p| p as i32),
+                inspection_round: inspection.inspection_round,
+                inspected_by_type: inspection.inspected_by_type,
+                inspected_by_id: inspection.inspected_by_id,
+                result: inspection.inspection_result,
+                inspected_at: inspection
+                    .inspected_at
+                    .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc)),
+                items,
+            };
+            inspection_history.push(inspection_record);
+        }
 
-    //         history.push(history_item);
-    //     }
-
-    //     Ok(OrderDeliveryHistoryResponse {
-    //         order_code: order_code.to_string(),
-    //         history,
-    //     })
-    // }eliveryHistoryItem {
-    //             round: delivery.delivery_round,
-    //
+        Ok(inspection_history)
+    }
 }

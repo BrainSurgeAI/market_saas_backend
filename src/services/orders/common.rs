@@ -8,7 +8,7 @@ use tracing::{debug, info};
 use crate::{
     common::{ApiResponse, AppError},
     dto::order::{
-        ExchangeAndReturnOrderDetailResponse, MarketOrderDetailResponse, OrderQueryParams, OrderResponse,
+        ExchangeAndReturnOrderDetailResponse, OrderQueryParams, OrderResponse,
     },
     middleware::context::RequestContext,
     models::claims::Claims,

@@ -175,3 +175,16 @@ where
         &context,
     )))
 }
+
+pub(crate) async fn get_order_inspection_history<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Path(order_code): Path<String>,
+) -> Result<impl IntoResponse, AppError>
+where
+    T: SharedMarketCustomerOrderRepository + Send + Sync,
+{
+    let inspection_history = repo.get_order_inspection_history(&order_code, &claims).await?;
+    Ok(Json(ApiResponse::new(Some(serde_json::to_value(inspection_history)?), &context)))
+}

@@ -9,7 +9,6 @@ use crate::{
     repositories::my_sql_repository::MySqlRepository,
 };
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use tracing::{debug, error};
 
 #[async_trait]

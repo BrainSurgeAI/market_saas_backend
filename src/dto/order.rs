@@ -229,6 +229,21 @@ pub(crate) struct OrderInspectionItem {
     #[serde(rename = "orderDetailId")]
     pub(crate) order_detail_id: i32,
 
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "categoryName")]
+    pub(crate) category_name: String,
+
+    #[serde(rename = "result")]
+    pub(crate) result: String,
+
+    #[serde(rename = "needToInspection")]
+    pub(crate) need_to_inspection: Decimal,
+
     #[serde(rename = "inspectedQty", skip_serializing_if = "Option::is_none")]
     pub(crate) inspected_qty: Option<Decimal>,
 
