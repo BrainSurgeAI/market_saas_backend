@@ -2,7 +2,9 @@ use axum::{extract::Path, Extension};
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::order::{AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO},
+    dto::order::{
+        AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO, ProviderDashboardStatsDTO,
+    },
     middleware::context::RequestContext,
     models::{claims::Claims, tenant_type::TenantType},
     repositories::order_traits::OrderRepository,
@@ -42,4 +44,21 @@ where
         .await?;
     debug!("Preparation summary result count: {}", summary.len());
     Ok(Json(ApiResponse::new(Some(summary), &context)))
+}
+
+pub async fn get_provider_dashboard_stats<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<ApiResponse<ProviderDashboardStatsDTO>>, AppError>
+where
+    T: OrderRepository + Send + Sync,
+{
+    use tracing::debug;
+    debug!("Getting dashboard stats for tenant_hash: {}", claims.tenant_hash);
+    let stats = repo
+        .get_provider_dashboard_stats(&claims.tenant_hash)
+        .await?;
+    debug!("Dashboard stats retrieved successfully");
+    Ok(Json(ApiResponse::new(Some(stats), &context)))
 }

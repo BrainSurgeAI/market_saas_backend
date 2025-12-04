@@ -572,6 +572,25 @@ pub(crate) struct ProductsSummaryWithOrdersDTO {
     pub(crate) remark: Option<String>,
 }
 
+/// 供应商 Dashboard 统计数据
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderDashboardStatsDTO {
+    #[serde(rename = "pendingDeliveryOrders")]
+    pub(crate) pending_delivery_orders: i64,
+
+    #[serde(rename = "deliveringOrders")]
+    pub(crate) delivering_orders: i64,
+
+    #[serde(rename = "completedOrders")]
+    pub(crate) completed_orders: i64,
+
+    #[serde(rename = "returnExchangeTasks")]
+    pub(crate) return_exchange_tasks: i64,
+
+    #[serde(rename = "pendingStockSkus")]
+    pub(crate) pending_stock_skus: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub(crate) struct OrderReceipt {
     #[serde(rename = "id")]
