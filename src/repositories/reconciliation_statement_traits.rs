@@ -165,12 +165,12 @@ impl ReconciliationStatementRepository for MySqlRepository {
     // 为单个组合创建对账单（使用独立事务）
     async fn create_statement_for_combination(
         &self,
-        start_date: &NaiveDate,
-        end_date: &NaiveDate,
-        customer_id: i32,
-        market_id: i32,
-        provider_id: i32,
-        statement_code: &str,
+        _start_date: &NaiveDate,
+        _end_date: &NaiveDate,
+        _customer_id: i32,
+        _market_id: i32,
+        _provider_id: i32,
+        _statement_code: &str,
     ) -> Result<i32, AppError> {
         // let mut tx = self
         //     .pool

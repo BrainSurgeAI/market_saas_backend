@@ -1,7 +1,7 @@
 use crate::{
     common::AppError,
     dto::order::{
-        AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO, ProviderDashboardStatsDTO,
+        AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO,
     },
     map_db_err,
     models::{
@@ -27,10 +27,6 @@ pub(crate) trait OrderRepository: Send + Sync {
         provider_hash: &str,
     ) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError>;
 
-    async fn get_provider_dashboard_stats(
-        &self,
-        provider_hash: &str,
-    ) -> Result<ProviderDashboardStatsDTO, AppError>;
 }
 
 #[async_trait]
@@ -179,127 +175,4 @@ impl OrderRepository for MySqlRepository {
         Ok(orders)
     }
 
-    async fn get_provider_dashboard_stats(
-        &self,
-        provider_hash: &str,
-    ) -> Result<ProviderDashboardStatsDTO, AppError> {
-        use tracing::debug;
-        debug!("Fetching dashboard stats for provider_hash: {}", provider_hash);
-
-        // 查询待配送订单总数（ASSIGNED 或 SUPPLIER_PREPARING）
-        let pending_delivery = sqlx::query!(
-            r#"
-            SELECT COUNT(DISTINCT o.id) as count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            WHERE t.name_hash = ?
-                AND t.tenant_type = 'PROVIDER'
-                AND t.deleted_at IS NULL
-                AND o.order_status IN ('ASSIGNED', 'SUPPLIER_PREPARING')
-                AND o.deleted_at IS NULL
-            "#,
-            provider_hash
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get pending delivery orders count"))?
-        .count;
-
-        // 查询配送中订单总数（SUPPLIER_DELIVERING）
-        let delivering = sqlx::query!(
-            r#"
-            SELECT COUNT(DISTINCT o.id) as count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            WHERE t.name_hash = ?
-                AND t.tenant_type = 'PROVIDER'
-                AND t.deleted_at IS NULL
-                AND o.order_status = 'SUPPLIER_DELIVERING' OR o.order_status = 'EXCHANGE_DELIVERING'
-                AND o.deleted_at IS NULL
-            "#,
-            provider_hash
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get delivering orders count"))?
-        .count;
-
-        // 查询已完成配送订单总数（COMPLETED）
-        let completed = sqlx::query!(
-            r#"
-            SELECT COUNT(DISTINCT o.id) as count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            WHERE t.name_hash = ?
-                AND t.tenant_type = 'PROVIDER'
-                AND t.deleted_at IS NULL
-                AND o.order_status = 'COMPLETED'
-                AND o.deleted_at IS NULL
-            "#,
-            provider_hash
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get completed orders count"))?
-        .count;
-
-        // 查询退换货任务总数（return_exchange_records 表中 status = 'PENDING'）
-        let return_exchange_tasks = sqlx::query!(
-            r#"
-            SELECT COUNT(DISTINCT rer.id) as count
-            FROM return_exchange_records rer
-            JOIN order_details od ON rer.order_detail_id = od.id
-            JOIN orders o ON od.order_id = o.id
-            JOIN provider_orders_assignments poa ON o.id = poa.order_id
-            JOIN tenants t ON poa.provider_id = t.id
-            WHERE t.name_hash = ?
-                AND t.tenant_type = 'PROVIDER'
-                AND t.deleted_at IS NULL
-                AND rer.status = 'PENDING'
-                AND o.deleted_at IS NULL
-            "#,
-            provider_hash
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get return exchange tasks count"))?
-        .count;
-
-        // 查询待备货 SKU 总数（订单状态为 ASSIGNED 的订单的 product_code 去重）
-        let pending_stock_skus = sqlx::query!(
-            r#"
-            SELECT COUNT(DISTINCT od.product_code) as count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            JOIN order_details od ON o.id = od.order_id
-            WHERE t.name_hash = ?
-                AND t.tenant_type = 'PROVIDER'
-                AND t.deleted_at IS NULL
-                AND o.order_status = 'ASSIGNED'
-                AND o.deleted_at IS NULL
-            "#,
-            provider_hash
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get pending stock SKUs count"))?
-        .count;
-
-        debug!(
-            "Dashboard stats - pending_delivery: {}, delivering: {}, completed: {}, return_exchange: {}, pending_stock: {}",
-            pending_delivery, delivering, completed, return_exchange_tasks, pending_stock_skus
-        );
-
-        Ok(ProviderDashboardStatsDTO {
-            pending_delivery_orders: pending_delivery as i64,
-            delivering_orders: delivering as i64,
-            completed_orders: completed as i64,
-            return_exchange_tasks: return_exchange_tasks as i64,
-            pending_stock_skus: pending_stock_skus as i64,
-        })
-    }
 }

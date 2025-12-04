@@ -3,7 +3,7 @@ use axum::{
     Extension,
     response::IntoResponse,
 };
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     common::{ApiResponse, AppError},
