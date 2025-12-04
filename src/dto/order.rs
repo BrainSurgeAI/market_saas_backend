@@ -125,6 +125,12 @@ pub(crate) struct OrderResponse {
 
     #[serde(rename = "shipperPhone")]
     pub(crate) shipper_phone: Option<String>,
+
+    #[serde(rename = "skuCount")]
+    pub(crate) sku_count: Option<i64>,
+
+    #[serde(rename = "urgent")]
+    pub(crate) urgent: bool,
 }
 
 /// Query parameters for order listing

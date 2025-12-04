@@ -329,8 +329,12 @@ impl CommonOrderRepository for MySqlRepository {
                    o.contact_phone,
                    o.market_contact_number,
                    o.assigned_by as market_contactor_name,
+                   o.urgent,
                    ds.name as shipper_name,
-                   ds.phone as shipper_phone
+                   ds.phone as shipper_phone,
+                   (SELECT COUNT(DISTINCT od.product_code) 
+                    FROM order_details od 
+                    WHERE od.order_id = o.id) as sku_count
                    FROM orders o
                    INNER JOIN tenants mt ON o.market_id = mt.id
                    INNER JOIN tenants pt ON o.customer_id = pt.id
