@@ -35,7 +35,6 @@ where
         .get_orders_by_tenant(&claims.tenant_hash, &claims.tenant_type, &query_params)
         .await?;
 
-    debug!("Found {} orders", orders.len());
     Ok(Json(ApiResponse::new(Some(orders), &context)))
 }
 

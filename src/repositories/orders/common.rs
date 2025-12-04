@@ -265,6 +265,7 @@ impl CommonOrderRepository for MySqlRepository {
                 od.ordered_amount,
                 od.processing_requirements,
                 od.remark,
+                od.accepted_qty,
                 tiu.temp_url as image_url
             FROM order_details od
             LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
@@ -283,7 +284,7 @@ impl CommonOrderRepository for MySqlRepository {
             created_at: order_info.created_at,
             customer_name: Some(order_info.market_name),
             delivery_address: Some(order_info.delivery_address),
-            delivery_date: None, // TODO: 从数据库获取实际的交付日期
+            delivery_date: Some(order_info.delivery_date.into()),
             discount_amount: order_info.discount_amount,
             net_amount: order_info.net_amount,
             ordered_amount: order_info.ordered_amount,
@@ -327,10 +328,13 @@ impl CommonOrderRepository for MySqlRepository {
                    o.contact_name,
                    o.contact_phone,
                    o.market_contact_number,
-                   o.confirmed_by as market_contactor_name
+                   o.assigned_by as market_contactor_name,
+                   ds.name as shipper_name,
+                   ds.phone as shipper_phone
                    FROM orders o
                    INNER JOIN tenants mt ON o.market_id = mt.id
                    INNER JOIN tenants pt ON o.customer_id = pt.id
+                   LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id
                    {JOIN_CLAUSE} WHERE 1=1 "#;
 
         let mut builder: QueryBuilder<MySql>;
@@ -614,6 +618,7 @@ impl CommonOrderRepository for MySqlRepository {
                 od.ordered_amount,
                 od.processing_requirements,
                 od.remark,
+                od.accepted_qty,
                 tiu.temp_url as image_url
             FROM order_details od
             LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code

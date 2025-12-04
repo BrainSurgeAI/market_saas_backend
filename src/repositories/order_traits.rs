@@ -1282,6 +1282,9 @@ impl OrderRepository for MySqlRepository {
         &self,
         provider_hash: &str,
     ) -> Result<Vec<ProductsSummaryWithOrdersDTO>, AppError> {
+        use tracing::debug;
+        debug!("Fetching preparation summary for provider_hash: {}", provider_hash);
+        
         let orders = sqlx::query_as!(
             ProductsSummaryWithOrdersDTO,
             r#"SELECT
@@ -1303,10 +1306,10 @@ impl OrderRepository for MySqlRepository {
             JOIN
                 tenants c ON o.customer_id = c.id
             WHERE
-                t.name_hash = ? -- provider_hash
+                t.name_hash = ?
                 AND t.tenant_type = 'PROVIDER'
                 AND t.deleted_at IS NULL
-                AND o.order_status IN ('CONFIRMED', 'PROCESSING')
+                AND o.order_status IN ('ASSIGNED', 'SUPPLIER_PREPARING')
                 AND o.deleted_at IS NULL
                 AND o.created_at >= CURDATE()
             GROUP BY
@@ -1317,7 +1320,12 @@ impl OrderRepository for MySqlRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get product summaries with orders"))?;
+        .map_err(|e| {
+            debug!("Error fetching preparation summary: {:?}", e);
+            map_db_err!("Failed to get product summaries with orders")(e)
+        })?;
+        
+        debug!("Fetched {} preparation summary records", orders.len());
         Ok(orders)
     }
 

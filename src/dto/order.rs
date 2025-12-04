@@ -119,6 +119,12 @@ pub(crate) struct OrderResponse {
 
     #[serde(rename = "marketContactorName")]
     pub(crate) market_contactor_name: Option<String>,
+
+    #[serde(rename = "shipperName")]
+    pub(crate) shipper_name: Option<String>,
+
+    #[serde(rename = "shipperPhone")]
+    pub(crate) shipper_phone: Option<String>,
 }
 
 /// Query parameters for order listing
@@ -439,6 +445,9 @@ pub(crate) struct OrderDetail {
     pub(crate) unit: String,
     #[serde(rename = "orderedQty")]
     pub(crate) ordered_qty: Decimal,
+
+    #[serde(rename = "acceptedQty")]
+    pub(crate) accepted_qty: Option<Decimal>,
 
     #[serde(rename = "unitPrice")]
     pub(crate) unit_price: Decimal,
@@ -774,7 +783,7 @@ pub(crate) struct MarketOrderDetailResponse {
     pub(crate) delivery_address: Option<String>,
 
     #[serde(rename = "deliveryDate")]
-    pub(crate) delivery_date: Option<DateTime<Utc>>,
+    pub(crate) delivery_date: Option<NaiveDate>,
 
     #[serde(rename = "discountAmount")]
     pub(crate) discount_amount: Decimal,

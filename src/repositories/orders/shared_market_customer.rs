@@ -518,29 +518,39 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
 
                 // 使用批量更新提升性能
                 let mut order_net_amount = Decimal::ZERO;
-                let mut update_values: Vec<(i32, Decimal)> = Vec::new();
+                let mut update_values: Vec<(i32, Decimal, Decimal)> = Vec::new();
 
                 for order_detail in order_details {
                     let inspected_qty = order_detail.total_inspected_qty.unwrap_or(Decimal::ZERO);
                     let net_amount = order_detail.discounted_unit_price * inspected_qty;
-                    update_values.push((order_detail.order_detail_id, net_amount));
+                    update_values.push((order_detail.order_detail_id, net_amount, inspected_qty));
                     order_net_amount += net_amount;
                     debug!("order_net_amount: {:?}", order_net_amount);
                 }
 
-                // 使用CASE WHEN进行批量更新，使用QueryBuilder避免SQL注入
+                // 使用CASE WHEN进行批量更新，同时更新net_amount和accepted_qty，使用QueryBuilder避免SQL注入
                 if !update_values.is_empty() {
                     let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
                         "UPDATE order_details SET net_amount = CASE id ",
                     );
                     
-                    for (id, net_amount) in &update_values {
+                    // 构建第一个 CASE WHEN (net_amount)
+                    for (id, net_amount, _) in &update_values {
                         builder.push("WHEN ").push_bind(id).push(" THEN ").push_bind(net_amount).push(" ");
+                    }
+                    
+                    builder.push("END, accepted_qty = CASE id ");
+                    
+                    // 构建第二个 CASE WHEN (accepted_qty)
+                    // 注意：由于 SQL 语法要求先完成第一个 CASE WHEN，再开始第二个，所以需要两次遍历
+                    // 这是 SQL 结构决定的，无法合并成一个循环
+                    for (id, _, accepted_qty) in &update_values {
+                        builder.push("WHEN ").push_bind(id).push(" THEN ").push_bind(accepted_qty).push(" ");
                     }
                     
                     builder.push("END WHERE id IN (");
                     let mut separated = builder.separated(", ");
-                    for (id, _) in &update_values {
+                    for (id, _, _) in &update_values {
                         separated.push_bind(id);
                     }
                     separated.push_unseparated(")");
@@ -552,7 +562,7 @@ impl SharedMarketCustomerOrderRepository for MySqlRepository {
                         .build()
                         .execute(&mut *tx)
                         .await
-                        .map_err(map_db_err!("Failed to batch update order detail net amount"))?;
+                        .map_err(map_db_err!("Failed to batch update order detail net amount and accepted_qty"))?;
                 }
 
                 sqlx::query!(

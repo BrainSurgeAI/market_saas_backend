@@ -29,7 +29,7 @@ pub(super) fn provider_routes() -> Router {
             put(deliver_to_market::<MySqlRepository>),
         )
         .route(
-            "/api/v1/orders/preparation-summary",
+            "/preparation-summary",
             get(get_provider_preparation_summary::<MySqlRepository>),
         )
         .route(

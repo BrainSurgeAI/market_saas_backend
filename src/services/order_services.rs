@@ -35,8 +35,11 @@ pub async fn get_provider_preparation_summary<T>(
 where
     T: OrderRepository + Send + Sync,
 {
+    use tracing::debug;
+    debug!("Getting preparation summary for tenant_hash: {}", claims.tenant_hash);
     let summary = repo
         .fetch_preparation_summary(&claims.tenant_hash)
         .await?;
+    debug!("Preparation summary result count: {}", summary.len());
     Ok(Json(ApiResponse::new(Some(summary), &context)))
 }

@@ -2,7 +2,7 @@ use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
     map_db_err,
-    models::claims::Claims,
+   // models::claims::Claims,
     models::{
         order_action::OrderAction, order_machine::OrderStateMachine, order_status::OrderStatus,
         tenant_type::TenantType,
@@ -32,12 +32,12 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
         assign_by: &str,
     ) -> Result<OrderStatus, AppError>;
 
-    async fn deliver_to_customer(
-        &self,
-        order_code: &str,
-        claims: &Claims,
-        action: OrderAction,
-    ) -> Result<OrderStatus, AppError>;
+    // async fn deliver_to_customer(
+    //     &self,
+    //     order_code: &str,
+    //     claims: &Claims,
+    //     action: OrderAction,
+    // ) -> Result<OrderStatus, AppError>;
 }
 
 #[async_trait]
@@ -156,66 +156,66 @@ impl MarketplaceOrderRepository for MySqlRepository {
         Ok(next)
     }
 
-    async fn deliver_to_customer(
-        &self,
-        order_code: &str,
-        claims: &Claims,
-        action: OrderAction,
-    ) -> Result<OrderStatus, AppError> {
-        let mut tx = self.pool.begin().await.map_err(map_db_err!(
-            "Failed to begin transaction to deliver to customer"
-        ))?;
+    // async fn deliver_to_customer(
+    //     &self,
+    //     order_code: &str,
+    //     claims: &Claims,
+    //     action: OrderAction,
+    // ) -> Result<OrderStatus, AppError> {
+    //     let mut tx = self.pool.begin().await.map_err(map_db_err!(
+    //         "Failed to begin transaction to deliver to customer"
+    //     ))?;
 
-        let order_opt = sqlx::query!(
-            r#"
-            SELECT o.id, o.order_status 
-            FROM orders o 
-            INNER JOIN tenants t ON t.id = o.market_id 
-            WHERE o.order_code = ? AND t.name_hash = ? AND t.tenant_type = ? FOR UPDATE"#,
-            order_code,
-            claims.tenant_hash,
-            claims.tenant_type
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to lock order for update"))?;
+    //     let order_opt = sqlx::query!(
+    //         r#"
+    //         SELECT o.id, o.order_status 
+    //         FROM orders o 
+    //         INNER JOIN tenants t ON t.id = o.market_id 
+    //         WHERE o.order_code = ? AND t.name_hash = ? AND t.tenant_type = ? FOR UPDATE"#,
+    //         order_code,
+    //         claims.tenant_hash,
+    //         claims.tenant_type
+    //     )
+    //     .fetch_optional(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to lock order for update"))?;
 
-        let order =
-            order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
+    //     let order =
+    //         order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
 
-        let next = OrderStateMachine::next_state(
-            OrderStatus::try_from(order.order_status.as_str())?,
-            action,
-            TenantType::try_from(claims.tenant_type.as_str())?,
-        )
-        .map_err(|e| {
-            error!("状态流转错误: {}", e);
-            AppError::Validation("Invalid transition".to_string())
-        })?;
+    //     let next = OrderStateMachine::next_state(
+    //         OrderStatus::try_from(order.order_status.as_str())?,
+    //         action,
+    //         TenantType::try_from(claims.tenant_type.as_str())?,
+    //     )
+    //     .map_err(|e| {
+    //         error!("状态流转错误: {}", e);
+    //         AppError::Validation("Invalid transition".to_string())
+    //     })?;
 
-        sqlx::query!(
-            r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
-            next.to_str(),
-            order.id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db_err!("Failed to update order status"))?;
+    //     sqlx::query!(
+    //         r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
+    //         next.to_str(),
+    //         order.id
+    //     )
+    //     .execute(&mut *tx)
+    //     .await
+    //     .map_err(map_db_err!("Failed to update order status"))?;
 
-        self.insert_order_status_history(
-            &mut tx,
-            order.id,
-            order.order_status.as_str(),
-            next,
-            claims.real_name.as_str(),
-            action,
-        )
-        .await?;
+    //     self.insert_order_status_history(
+    //         &mut tx,
+    //         order.id,
+    //         order.order_status.as_str(),
+    //         next,
+    //         claims.real_name.as_str(),
+    //         action,
+    //     )
+    //     .await?;
 
-        tx.commit()
-            .await
-            .map_err(map_db_err!("Failed to commit transaction"))?;
+    //     tx.commit()
+    //         .await
+    //         .map_err(map_db_err!("Failed to commit transaction"))?;
 
-        Ok(next)
-    }
+    //     Ok(next)
+    // }
 }
