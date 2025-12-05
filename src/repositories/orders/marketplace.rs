@@ -31,13 +31,6 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
         assign_username: &str,
         assign_by: &str,
     ) -> Result<OrderStatus, AppError>;
-
-    // async fn deliver_to_customer(
-    //     &self,
-    //     order_code: &str,
-    //     claims: &Claims,
-    //     action: OrderAction,
-    // ) -> Result<OrderStatus, AppError>;
 }
 
 #[async_trait]
@@ -138,6 +131,44 @@ impl MarketplaceOrderRepository for MySqlRepository {
             )));
         }
 
+        // 根据订单id查询provider_orders_assignments表的id,并根据id查询该tenant对应的所有用户的id
+        let user_ids = sqlx::query!(
+            r#"
+            SELECT u.id
+            FROM users u
+            INNER JOIN provider_orders_assignments poa ON u.tenant_id = poa.provider_id
+            WHERE poa.order_id = ?
+            "#,
+            order.id
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to get user ids"))?
+        .into_iter()
+        .map(|row| row.id)
+        .collect::<Vec<i32>>();
+
+        // 批量插入messages表，category为'新订单',title为'新订单分配', content为'您有新的订单{order_code}需要处理'
+        if !user_ids.is_empty() {
+            let content = format!("您有新的订单 {} 需要处理", order_code);
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO messages (user_id, category, title, content) "
+            );
+            
+            query_builder.push_values(user_ids.iter(), |mut b, user_id| {
+                b.push_bind(user_id)
+                    .push_bind("新订单")
+                    .push_bind("新订单分配")
+                    .push_bind(&content);
+            });
+            
+            query_builder
+                .build()
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!("Failed to batch insert messages"))?;
+        }
+
         // insert order status history
         self.insert_order_status_history(
             &mut tx,
@@ -155,67 +186,4 @@ impl MarketplaceOrderRepository for MySqlRepository {
 
         Ok(next)
     }
-
-    // async fn deliver_to_customer(
-    //     &self,
-    //     order_code: &str,
-    //     claims: &Claims,
-    //     action: OrderAction,
-    // ) -> Result<OrderStatus, AppError> {
-    //     let mut tx = self.pool.begin().await.map_err(map_db_err!(
-    //         "Failed to begin transaction to deliver to customer"
-    //     ))?;
-
-    //     let order_opt = sqlx::query!(
-    //         r#"
-    //         SELECT o.id, o.order_status 
-    //         FROM orders o 
-    //         INNER JOIN tenants t ON t.id = o.market_id 
-    //         WHERE o.order_code = ? AND t.name_hash = ? AND t.tenant_type = ? FOR UPDATE"#,
-    //         order_code,
-    //         claims.tenant_hash,
-    //         claims.tenant_type
-    //     )
-    //     .fetch_optional(&mut *tx)
-    //     .await
-    //     .map_err(map_db_err!("Failed to lock order for update"))?;
-
-    //     let order =
-    //         order_opt.ok_or_else(|| AppError::NotFound(format!("订单 {} 不存在", order_code)))?;
-
-    //     let next = OrderStateMachine::next_state(
-    //         OrderStatus::try_from(order.order_status.as_str())?,
-    //         action,
-    //         TenantType::try_from(claims.tenant_type.as_str())?,
-    //     )
-    //     .map_err(|e| {
-    //         error!("状态流转错误: {}", e);
-    //         AppError::Validation("Invalid transition".to_string())
-    //     })?;
-
-    //     sqlx::query!(
-    //         r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
-    //         next.to_str(),
-    //         order.id
-    //     )
-    //     .execute(&mut *tx)
-    //     .await
-    //     .map_err(map_db_err!("Failed to update order status"))?;
-
-    //     self.insert_order_status_history(
-    //         &mut tx,
-    //         order.id,
-    //         order.order_status.as_str(),
-    //         next,
-    //         claims.real_name.as_str(),
-    //         action,
-    //     )
-    //     .await?;
-
-    //     tx.commit()
-    //         .await
-    //         .map_err(map_db_err!("Failed to commit transaction"))?;
-
-    //     Ok(next)
-    // }
 }

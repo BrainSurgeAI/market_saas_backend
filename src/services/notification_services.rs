@@ -1,16 +1,17 @@
 use crate::common::{ApiResponse, AppError};
 use crate::middleware::context::RequestContext;
 use crate::models::claims::Claims;
-use crate::services::message::MessageDto;
-use axum::{extract::Path, Extension, Json};
+use crate::services::message::{MessageDto, MessageQueryParams, PaginatedMessages};
+use axum::{extract::Query, extract::Path, Extension, Json};
 use sqlx::MySqlPool;
 
 pub(crate) async fn list_notifications(
     Extension(pool): Extension<MySqlPool>,
     Extension(context): Extension<RequestContext>,
     Extension(claims): Extension<Claims>,
-) -> Result<Json<ApiResponse<Vec<MessageDto>>>, AppError> {
-    let messages = MessageDto::get_unread_messages(&pool, &claims.username).await?;
+    Query(params): Query<MessageQueryParams>,
+) -> Result<Json<ApiResponse<PaginatedMessages>>, AppError> {
+    let messages = MessageDto::get_notifications(&pool, &claims.username, Some(&params)).await?;
     Ok(Json(ApiResponse::new(Some(messages), &context)))
 }
 
