@@ -1,6 +1,7 @@
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
+    dto::order::MarketOrderStatisticsResponse,
     map_db_err,
    // models::claims::Claims,
     models::{
@@ -9,6 +10,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use chrono::Local;
 use tracing::{debug, error};
 
 #[async_trait]
@@ -31,6 +33,18 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
         assign_username: &str,
         assign_by: &str,
     ) -> Result<OrderStatus, AppError>;
+
+    /// Get market order statistics
+    ///
+    /// # Arguments
+    /// * `tenant_hash` - The hash of the market tenant
+    ///
+    /// # Returns
+    /// A result containing the market order statistics
+    async fn get_market_order_statistics(
+        &self,
+        tenant_hash: &str,
+    ) -> Result<MarketOrderStatisticsResponse, AppError>;
 }
 
 #[async_trait]
@@ -185,5 +199,255 @@ impl MarketplaceOrderRepository for MySqlRepository {
             .map_err(map_db_err!("Failed to commit transaction"))?;
 
         Ok(next)
+    }
+
+    async fn get_market_order_statistics(
+        &self,
+        tenant_hash: &str,
+    ) -> Result<MarketOrderStatisticsResponse, AppError> {
+        use crate::dto::order::{
+            Metadata, PendingAssignmentMetadata, TrendItem, Trends,
+        };
+
+        // Get market tenant id
+        let market_id = self
+            .get_tenant_id_by_tenant_hash_and_tenant_type(tenant_hash, "MARKET")
+            .await?;
+
+        let today = Local::now().date_naive();
+        let yesterday = today
+            .pred_opt()
+            .ok_or_else(|| AppError::Internal("无法计算昨天的日期".to_string()))?;
+
+        // Query today's new orders (PENDING status)
+        let new_orders_today: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE market_id = ?
+            AND order_status = 'PENDING'
+            AND DATE(created_at) = ?
+            AND deleted_at IS NULL
+            "#,
+            market_id,
+            today
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get today's new orders"))?;
+
+        // Query yesterday's total orders (all statuses) for newOrders trend
+        let yesterday_total_orders: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE market_id = ?
+            AND DATE(created_at) = ?
+            AND deleted_at IS NULL
+            "#,
+            market_id,
+            yesterday
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get yesterday's total orders"))?;
+
+        // Calculate newOrders trend
+        let new_orders_trend = if yesterday_total_orders > 0 {
+            let diff = new_orders_today as f64 - yesterday_total_orders as f64;
+            let percentage = (diff / yesterday_total_orders as f64) * 100.0;
+            let value = if percentage >= 0.0 {
+                format!("+{:.1}%", percentage)
+            } else {
+                format!("{:.1}%", percentage)
+            };
+            Some(TrendItem {
+                value,
+                up: percentage >= 0.0,
+            })
+        } else {
+            Some(TrendItem {
+                value: format!("+{}", new_orders_today),
+                up: true,
+            })
+        };
+
+        // Query today's pending assignment (PENDING status) - same as newOrders
+        let pending_assignment: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE market_id = ?
+            AND order_status = 'PENDING'
+            AND DATE(created_at) = ?
+            AND deleted_at IS NULL
+            "#,
+            market_id,
+            today
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get pending assignment"))?;
+
+        // Query today's pending inspection (ASSIGNED status)
+        let pending_inspection: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE market_id = ?
+            AND order_status = 'ASSIGNED'
+            AND DATE(created_at) = ?
+            AND deleted_at IS NULL
+            "#,
+            market_id,
+            today
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get pending inspection"))?;
+
+        // Query today's exceptions (from return_exchange_records)
+        let exceptions_today: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(DISTINCT o.id) as count
+            FROM return_exchange_records rer
+            INNER JOIN order_details od ON rer.order_detail_id = od.id
+            INNER JOIN orders o ON od.order_id = o.id
+            WHERE o.market_id = ?
+            AND DATE(rer.created_at) = ?
+            AND o.deleted_at IS NULL
+            "#,
+            market_id,
+            today
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get today's exceptions"))?;
+
+        // Query yesterday's exceptions for trend
+        let exceptions_yesterday: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(DISTINCT o.id) as count
+            FROM return_exchange_records rer
+            INNER JOIN order_details od ON rer.order_detail_id = od.id
+            INNER JOIN orders o ON od.order_id = o.id
+            WHERE o.market_id = ?
+            AND DATE(rer.created_at) = ?
+            AND o.deleted_at IS NULL
+            "#,
+            market_id,
+            yesterday
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get yesterday's exceptions"))?;
+
+        // Calculate exceptions trend
+        let exceptions_trend = if exceptions_yesterday > 0 {
+            let diff = exceptions_today as f64 - exceptions_yesterday as f64;
+            let percentage = (diff / exceptions_yesterday as f64) * 100.0;
+            let value = if percentage >= 0.0 {
+                format!("+{:.1}%", percentage)
+            } else {
+                format!("{:.1}%", percentage)
+            };
+            Some(TrendItem {
+                value,
+                up: percentage >= 0.0,
+            })
+        } else if exceptions_today > 0 {
+            Some(TrendItem {
+                value: format!("+{}", exceptions_today),
+                up: true,
+            })
+        } else {
+            let diff = exceptions_today - exceptions_yesterday;
+            Some(TrendItem {
+                value: if diff >= 0 {
+                    format!("+{}", diff)
+                } else {
+                    format!("{}", diff)
+                },
+                up: diff >= 0,
+            })
+        };
+
+        // Query today's completed orders
+        let completed_today: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE market_id = ?
+            AND order_status = 'COMPLETED'
+            AND DATE(created_at) = ?
+            AND deleted_at IS NULL
+            "#,
+            market_id,
+            today
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get today's completed orders"))?;
+
+        // Query yesterday's completed orders for trend
+        let completed_yesterday: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM orders
+            WHERE market_id = ?
+            AND order_status = 'COMPLETED'
+            AND DATE(created_at) = ?
+            AND deleted_at IS NULL
+            "#,
+            market_id,
+            yesterday
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get yesterday's completed orders"))?;
+
+        // Calculate completed trend
+        let completed_trend = if completed_yesterday > 0 {
+            let diff = completed_today as f64 - completed_yesterday as f64;
+            let percentage = (diff / completed_yesterday as f64) * 100.0;
+            let value = if percentage >= 0.0 {
+                format!("+{:.1}%", percentage)
+            } else {
+                format!("{:.1}%", percentage)
+            };
+            Some(TrendItem {
+                value,
+                up: percentage >= 0.0,
+            })
+        } else if completed_today > 0 {
+            Some(TrendItem {
+                value: format!("+{}", completed_today),
+                up: true,
+            })
+        } else {
+            Some(TrendItem {
+                value: "+0%".to_string(),
+                up: true,
+            })
+        };
+
+        Ok(MarketOrderStatisticsResponse {
+            new_orders: new_orders_today,
+            pending_assignment,
+            pending_inspection,
+            exceptions: exceptions_today,
+            completed: completed_today,
+            trends: Trends {
+                new_orders: new_orders_trend,
+                exceptions: exceptions_trend,
+                completed: completed_trend,
+            },
+            metadata: Metadata {
+                pending_assignment: PendingAssignmentMetadata {
+                    subtitle: "急需处理".to_string(),
+                    active: true,
+                },
+            },
+        })
     }
 }

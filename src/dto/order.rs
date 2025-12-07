@@ -1008,10 +1008,63 @@ pub(crate) struct ProviderReturnExchangeItem {
     pub(crate) status: String,
 
     #[serde(rename = "deliveredQty")]
-    pub(crate) delivered_qty: Option<Decimal>,
+    pub(crate) delivered_qty: Decimal,
 
     pub(crate) reason: String,
 
     #[serde(rename = "evidenceImages")]
     pub(crate) evidence_images: Option<String>,
+}
+
+/// Market order statistics response DTO
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MarketOrderStatisticsResponse {
+    #[serde(rename = "newOrders")]
+    pub(crate) new_orders: i64,
+
+    #[serde(rename = "pendingAssignment")]
+    pub(crate) pending_assignment: i64,
+
+    #[serde(rename = "pendingInspection")]
+    pub(crate) pending_inspection: i64,
+
+    pub(crate) exceptions: i64,
+
+    pub(crate) completed: i64,
+
+    pub(crate) trends: Trends,
+
+    pub(crate) metadata: Metadata,
+}
+
+/// Trends information
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Trends {
+    #[serde(rename = "newOrders")]
+    pub(crate) new_orders: Option<TrendItem>,
+
+    pub(crate) exceptions: Option<TrendItem>,
+
+    pub(crate) completed: Option<TrendItem>,
+}
+
+/// Trend item
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TrendItem {
+    pub(crate) value: String,
+    pub(crate) up: bool,
+}
+
+/// Metadata information
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Metadata {
+    #[serde(rename = "pendingAssignment")]
+    pub(crate) pending_assignment: PendingAssignmentMetadata,
+}
+
+/// Pending assignment metadata
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PendingAssignmentMetadata {
+    pub(crate) subtitle: String,
+    pub(crate) active: bool,
 }
