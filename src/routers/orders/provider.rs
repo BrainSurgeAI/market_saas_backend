@@ -11,6 +11,7 @@ use crate::services::order_services::{
 use crate::services::orders::provider::{
     deliver_to_market, deliver_exchange_to_market, accept_after_sales_request, 
     start_preparing, update_exchange_item_quantity, get_order_delivery_history,
+    get_provider_return_exchange_orders,
 };
 
 pub(super) fn provider_routes() -> Router {
@@ -50,5 +51,9 @@ pub(super) fn provider_routes() -> Router {
         .route(
             "/{order_code}/delivery-history",
             get(get_order_delivery_history::<MySqlRepository>),
+        )
+        .route(
+            "/return-exchange-orders",
+            get(get_provider_return_exchange_orders::<MySqlRepository>),
         )
 }

@@ -5,7 +5,8 @@ use crate::{
         CustomerOrderDetailResponse, CustomerOrderItem, CustomerOrderRound,
         ExchangeAndReturnOrderDetailResponse, MarketOrderDetailResponse, OrderDetail,
         OrderQueryParams, OrderResponse, ProviderOrderItem, ProviderOrderRemark,
-        ProviderOrderResponse, ProviderOrderRound,
+        ProviderOrderResponse, ProviderOrderRound, ProviderReturnExchangeItem,
+        ProviderReturnExchangeOrderResponse,
     },
     map_db_err,
     models::{order_status::OrderStatus, tenant_type::TenantType},
@@ -49,6 +50,11 @@ pub(crate) trait CommonOrderRepository: Send + Sync {
         order_code: &str,
         customer_hash: &str,
     ) -> Result<Option<CustomerOrderDetailResponse>, AppError>;
+
+    async fn get_provider_return_exchange_orders(
+        &self,
+        provider_hash: &str,
+    ) -> Result<Vec<crate::dto::order::ProviderReturnExchangeOrderResponse>, AppError>;
 }
 
 #[async_trait]
@@ -394,7 +400,7 @@ impl CommonOrderRepository for MySqlRepository {
                     rer.evidence_images      AS "evidence_images?",
                     rer.processed_by         AS "processed_by?",
                     rer.processed_at         AS "processed_at?",
-                    rer.actual_quantity      AS "actual_quantity?"
+                    rer.delivered_qty      AS "actual_quantity?"
                 FROM return_exchange_records rer
                 INNER JOIN order_details od ON od.id = rer.order_detail_id
                 INNER JOIN orders o ON o.id = od.order_id
@@ -657,5 +663,97 @@ impl CommonOrderRepository for MySqlRepository {
         };
 
         Ok(Some(response))
+    }
+
+    async fn get_provider_return_exchange_orders(
+        &self,
+        provider_hash: &str,
+    ) -> Result<Vec<ProviderReturnExchangeOrderResponse>, AppError> {
+        // 获取供应商ID
+        let provider_id = self
+            .get_tenant_id_by_tenant_hash_and_tenant_type(provider_hash, "PROVIDER")
+            .await?;
+
+        // 查询需要退换货的订单信息
+        // 从 return_exchange_records 表中获取该供应商需要退换货的订单
+        let orders = sqlx::query!(
+            r#"
+            SELECT DISTINCT
+                o.order_code,
+                o.order_status,
+                o.created_at,
+                COUNT(DISTINCT rer.order_detail_id) as total_sku_count
+            FROM return_exchange_records rer
+            INNER JOIN order_details od ON rer.order_detail_id = od.id
+            INNER JOIN orders o ON od.order_id = o.id
+            INNER JOIN provider_orders_assignments poa ON o.id = poa.order_id
+            WHERE poa.provider_id = ?
+                -- AND rer.status = 'PENDING'
+                AND o.deleted_at IS NULL
+            GROUP BY o.id, o.order_code, o.order_status, o.created_at
+            ORDER BY o.created_at DESC
+            "#,
+            provider_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get provider return exchange orders"))?;
+
+        let mut result = Vec::new();
+
+        for order in orders {
+            // 获取每个订单的退换货商品详情
+            let items = sqlx::query!(
+                r#"
+                SELECT DISTINCT
+                    od.product_code,
+                    od.product_name,
+                    od.unit as weight,
+                    rer.operation_type,
+                    rer.status,
+                    rer.delivered_qty,
+                    rer.reason,
+                    rer.evidence_images
+                FROM return_exchange_records rer
+                INNER JOIN order_details od ON rer.order_detail_id = od.id
+                INNER JOIN orders o ON od.order_id = o.id
+                INNER JOIN provider_orders_assignments poa ON o.id = poa.order_id
+                WHERE poa.provider_id = ?
+                    AND o.order_code = ?
+                   -- AND rer.status = 'PENDING'
+                    AND o.deleted_at IS NULL
+                ORDER BY od.product_code
+                "#,
+                provider_id,
+                order.order_code
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get return exchange items"))?;
+
+            let return_exchange_items: Vec<ProviderReturnExchangeItem> = items
+                .into_iter()
+                .map(|item| ProviderReturnExchangeItem {
+                    product_code: item.product_code,
+                    product_name: item.product_name,
+                    weight: item.weight,
+                    operation_type: item.operation_type,
+                    status: item.status,
+                    delivered_qty: item.delivered_qty,
+                    reason: item.reason,
+                    evidence_images: item.evidence_images,
+                })
+                .collect();
+
+            result.push(ProviderReturnExchangeOrderResponse {
+                order_code: order.order_code,
+                total_sku_count: order.total_sku_count as i64,
+                created_at: DateTime::from_naive_utc_and_offset(order.created_at.naive_utc(), Utc),
+                order_status: order.order_status,
+                items: return_exchange_items,
+            });
+        }
+
+        Ok(result)
     }
 }

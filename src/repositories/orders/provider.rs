@@ -1,6 +1,9 @@
 use crate::{
     common::AppError,
-    dto::order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest, OrderDeliveryHistoryResponse, ProviderDashboardStatsDTO, ProviderTodayDeliveredProductsDTO},
+    dto::order::{
+        DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest,
+        OrderDeliveryHistoryResponse, ProviderDashboardStatsDTO, ProviderTodayDeliveredProductsDTO,
+    },
     map_db_err,
     models::{
         claims::Claims, order_action::OrderAction, order_machine::OrderStateMachine,
@@ -9,11 +12,11 @@ use crate::{
     repositories::my_sql_repository::MySqlRepository,
 };
 
-
 use async_trait::async_trait;
-use tracing::{debug, error};
 use chrono::NaiveDate;
 use sqlx::FromRow;
+use sqlx::{MySql, QueryBuilder};
+use tracing::{debug, error};
 
 // 用于查询配送统计的临时结构
 #[derive(Debug, FromRow)]
@@ -92,7 +95,6 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
         exchange_item_update_dto: &ExchangeItemQuantityUpdateRequest,
     ) -> Result<(), AppError>;
 
-
     // 获取订单配送历史
     async fn get_order_delivery_history(
         &self,
@@ -107,8 +109,8 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
     ) -> Result<ProviderDashboardStatsDTO, AppError>;
 
     /// 获取 PROVIDER 今天已交付的商品聚合数据
-    /// 
-    /// 返回今天（orders.delivery_date = 今天）所有订单对应的 provider_deliveries 
+    ///
+    /// 返回今天（orders.delivery_date = 今天）所有订单对应的 provider_deliveries
     /// 的 delivery_status 是 'DELIVERED' 的商品聚合数据
     /// 根据 order_details 表的 id 与 provider_delivery_items 的 order_detail_id 关联，
     /// 累加 actual_qty
@@ -368,7 +370,7 @@ impl ProviderOrderRepository for MySqlRepository {
             )
             .execute(&mut *tx)
             .await.map_err(map_db_err!("Failed to update provider delivery item"))?;
-        };
+        }
 
         // update provider delivery status to DELIVERED and delivered_at to now
         sqlx::query!(
@@ -418,6 +420,15 @@ impl ProviderOrderRepository for MySqlRepository {
             "Provider {} exchanges deliver to market for order code {} and exchange dto {:?}",
             operator, order_code, exchange_dto
         );
+
+        //check exchange_dto.items is not empty
+        if exchange_dto.items.is_empty() {
+            return Err(AppError::NotFound(format!(
+                "订单 {} 没有找到换货商品",
+                order_code
+            )));
+        }
+
         let mut tx = self
             .pool
             .begin()
@@ -453,33 +464,54 @@ impl ProviderOrderRepository for MySqlRepository {
         })?;
         debug!(
             "Exchange deliver to market for order code {} and delivery id {} and next status {}",
-            order_code, delivery_id, next.to_str()
+            order_code,
+            delivery_id,
+            next.to_str()
         );
 
-        for item in exchange_dto.items.iter() {
-            let id = item.id;
-            let actual_quantity = item.actual_quantity;
-
-            debug!(
-                "Exchange deliver to market for order code {} and delivery id {} and item id {} and actual quantity {}",
-                order_code, delivery_id, id, actual_quantity
+        // 批量更新 provider_delivery_items，使用 CASE WHEN 提高效率
+        if !exchange_dto.items.is_empty() {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "UPDATE provider_delivery_items SET actual_qty = CASE order_detail_id ",
             );
 
-            let insert_result = sqlx::query!(r#"
-              UPDATE provider_delivery_items SET actual_qty = ? WHERE delivery_id = ? AND order_detail_id = ?
-            "#,
-                actual_quantity,
-                delivery_id,
-                id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(map_db_err!("Failed to insert provider delivery item"))?;
+            // 构建 CASE WHEN 语句
+            for item in exchange_dto.items.iter() {
+                debug!(
+                    "Exchange deliver to market for order code {} and delivery id {} and item id {} and actual quantity {}",
+                    order_code, delivery_id, item.id, item.actual_quantity
+                );
+                builder
+                    .push("WHEN ")
+                    .push_bind(item.id)
+                    .push(" THEN ")
+                    .push_bind(item.actual_quantity)
+                    .push(" ");
+            }
 
-            if insert_result.rows_affected() == 0 {
+            builder.push("END WHERE delivery_id = ");
+            builder.push_bind(delivery_id);
+            builder.push(" AND order_detail_id IN (");
+
+            let mut separated = builder.separated(", ");
+            for item in exchange_dto.items.iter() {
+                separated.push_bind(item.id);
+            }
+            separated.push_unseparated(")");
+
+            let update_result = builder
+                .build()
+                .execute(&mut *tx)
+                .await
+                .map_err(map_db_err!(
+                    "Failed to batch update provider delivery items"
+                ))?;
+
+            // 验证所有记录都被更新了
+            if update_result.rows_affected() != exchange_dto.items.len() as u64 {
                 return Err(AppError::NotFound(format!(
-                    "订单 {} 中没有找到订单明细 {}，无法创建换货配送明细",
-                    order_code, id
+                    "订单 {} 中部分订单明细未找到，无法更新换货配送明细。期望更新 {} 条，实际更新 {} 条",
+                    order_code, exchange_dto.items.len(), update_result.rows_affected()
                 )));
             }
         }
@@ -492,6 +524,41 @@ impl ProviderOrderRepository for MySqlRepository {
         .execute(&mut *tx)
         .await
         .map_err(map_db_err!("Failed to update provider delivery status"))?;
+
+        // update return_exchange_records status to PROGRESSED and processed_at to now
+        // 只更新 exchange_dto.items 中指定的 order_detail_id
+        // 使用 CASE WHEN 为每个 order_detail_id 设置不同的 actual_quantity
+        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            "UPDATE return_exchange_records SET status = 'PROGRESSED', processed_at = NOW(), processed_by = "
+        );
+        
+        builder.push_bind(operator);
+        builder.push(", delivered_qty = CASE order_detail_id ");
+        
+        // 构建 CASE WHEN 语句，为每个 order_detail_id 设置对应的 actual_quantity
+        for item in exchange_dto.items.iter() {
+            builder.push("WHEN ")
+                .push_bind(item.id)
+                .push(" THEN ")
+                .push_bind(item.actual_quantity)
+                .push(" ");
+        }
+        
+        builder.push("END WHERE order_detail_id IN (");
+        
+        let mut separated = builder.separated(", ");
+        for item in exchange_dto.items.iter() {
+            separated.push_bind(item.id);
+        }
+        separated.push_unseparated(")");
+
+        builder
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(map_db_err!(
+                "Failed to update return exchange records status"
+            ))?;
 
         sqlx::query!(
             r#"UPDATE orders SET order_status = ? WHERE id = ?"#,
@@ -526,7 +593,7 @@ impl ProviderOrderRepository for MySqlRepository {
         exchange_item_update_dto: &ExchangeItemQuantityUpdateRequest,
     ) -> Result<(), AppError> {
         debug!(
-            "Provider {} updates exchange item actual quantity for order detail id {} and actual quantity {}",
+            "******Provider {} updates exchange item actual quantity for order detail id {} and actual quantity {}",
             claims.real_name, order_detail_id, exchange_item_update_dto.actual_quantity
         );
 
@@ -559,7 +626,7 @@ impl ProviderOrderRepository for MySqlRepository {
         })?;
 
         sqlx::query!(
-            r#"UPDATE return_exchange_records SET actual_quantity = ?, status = 'PROGRESSED', processed_by = ?, processed_at = NOW()
+            r#"UPDATE return_exchange_records SET delivered_qty = ?, status = 'PROGRESSED', processed_by = ?, processed_at = NOW()
              WHERE order_detail_id = ?"#,
             exchange_item_update_dto.actual_quantity, claims.real_name.as_str(), order_detail_id
         )
@@ -576,9 +643,8 @@ impl ProviderOrderRepository for MySqlRepository {
         .await
         .map_err(map_db_err!("Failed to update exchange item status"))?;
 
-
-    // insert into order delivery items table
-    sqlx::query!(
+        // insert into order delivery items table
+        sqlx::query!(
         r#"INSERT INTO provider_delivery_items (delivery_id, order_detail_id, product_code, actual_qty, unit_price, weight_unit) 
         SELECT ? AS delivery_id, od.id AS order_detail_id, od.product_code, ? AS actual_qty, od.discounted_unit_price, od.unit AS weight_unit
         FROM order_details od WHERE od.id = ? AND od.order_id = ?"#,
@@ -591,8 +657,8 @@ impl ProviderOrderRepository for MySqlRepository {
     .await
     .map_err(map_db_err!("Failed to insert provider delivery item"))?;
 
-    // update provider delivery status to DELIVERED and delivered_at to now
-    sqlx::query!(
+        // update provider delivery status to DELIVERED and delivered_at to now
+        sqlx::query!(
         r#"UPDATE provider_deliveries SET delivery_status = 'DELIVERED', delivered_at = NOW() WHERE id = ?"#,
         delivery_id
     )
@@ -600,10 +666,10 @@ impl ProviderOrderRepository for MySqlRepository {
     .await
     .map_err(map_db_err!("Failed to update provider delivery status"))?;
 
-    tx.commit()
-        .await
-        .map_err(map_db_err!("Failed to commit transaction"))?;
-    Ok(())
+        tx.commit()
+            .await
+            .map_err(map_db_err!("Failed to commit transaction"))?;
+        Ok(())
     }
 
     async fn get_order_delivery_history(
@@ -693,7 +759,8 @@ impl ProviderOrderRepository for MySqlRepository {
                 })
                 .collect();
 
-            let delivery_staff = if delivery.staff_name.is_some() && delivery.staff_phone.is_some() {
+            let delivery_staff = if delivery.staff_name.is_some() && delivery.staff_phone.is_some()
+            {
                 Some(crate::dto::order::DeliveryStaffInfo {
                     id: delivery.delivered_by.clone(),
                     name: delivery.staff_name.unwrap(),
@@ -707,9 +774,18 @@ impl ProviderOrderRepository for MySqlRepository {
                 round: delivery.delivery_round,
                 delivery_type: delivery.delivery_type.to_string(),
                 delivery_status: delivery.delivery_status.to_string(),
-                inspection_status: delivery.inspection_result.unwrap_or_else(|| "PENDING".to_string()),
-                delivered_at: delivery.delivered_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)).unwrap_or_default(),
-                inspected_at: delivery.inspected_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)),
+                inspection_status: delivery
+                    .inspection_result
+                    .unwrap_or_else(|| "PENDING".to_string()),
+                delivered_at: delivery
+                    .delivered_at
+                    .map(|dt| {
+                        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)
+                    })
+                    .unwrap_or_default(),
+                inspected_at: delivery.inspected_at.map(|dt| {
+                    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)
+                }),
                 delivery_staff,
                 items,
             });
@@ -726,10 +802,13 @@ impl ProviderOrderRepository for MySqlRepository {
         provider_hash: &str,
         delivery_date: Option<NaiveDate>,
     ) -> Result<ProviderDashboardStatsDTO, AppError> {
-        use tracing::debug;
         use sqlx::{MySql, QueryBuilder};
-        
-        debug!("Fetching dashboard stats for provider_hash: {}, delivery_date: {:?}", provider_hash, delivery_date);
+        use tracing::debug;
+
+        debug!(
+            "Fetching dashboard stats for provider_hash: {}, delivery_date: {:?}",
+            provider_hash, delivery_date
+        );
 
         // 查询待配送订单总数（ASSIGNED 或 SUPPLIER_PREPARING）
         let mut pending_query = QueryBuilder::<MySql>::new(
@@ -739,20 +818,20 @@ impl ProviderOrderRepository for MySqlRepository {
             JOIN tenants t ON poa.provider_id = t.id
             JOIN orders o ON poa.order_id = o.id
             WHERE t.name_hash = 
-            "#
+            "#,
         );
-        
+
         pending_query.push_bind(provider_hash);
         pending_query.push(" AND t.tenant_type = 'PROVIDER'");
         pending_query.push(" AND t.deleted_at IS NULL");
         pending_query.push(" AND o.order_status IN ('ASSIGNED', 'SUPPLIER_PREPARING')");
         pending_query.push(" AND o.deleted_at IS NULL");
-        
+
         if let Some(date) = delivery_date {
             pending_query.push(" AND o.delivery_date = ");
             pending_query.push_bind(date);
         }
-        
+
         let pending_delivery = pending_query
             .build_query_scalar::<i64>()
             .fetch_one(&self.pool)
@@ -770,20 +849,20 @@ impl ProviderOrderRepository for MySqlRepository {
             JOIN orders o ON poa.order_id = o.id
             JOIN provider_deliveries pd ON pd.assignment_id = poa.id
             WHERE t.name_hash = 
-            "#
+            "#,
         );
-        
+
         delivery_query.push_bind(provider_hash);
         delivery_query.push(" AND t.tenant_type = 'PROVIDER'");
         delivery_query.push(" AND t.deleted_at IS NULL");
         delivery_query.push(" AND o.deleted_at IS NULL");
         delivery_query.push(" AND pd.delivery_status IN ('PREPARING', 'DELIVERED')");
-        
+
         if let Some(date) = delivery_date {
             delivery_query.push(" AND o.delivery_date = ");
             delivery_query.push_bind(date);
         }
-        
+
         let delivery_stats = delivery_query
             .build_query_as::<DeliveryStatsRow>()
             .fetch_one(&self.pool)
@@ -803,20 +882,20 @@ impl ProviderOrderRepository for MySqlRepository {
             JOIN provider_orders_assignments poa ON o.id = poa.order_id
             JOIN tenants t ON poa.provider_id = t.id
             WHERE t.name_hash = 
-            "#
+            "#,
         );
-        
+
         return_exchange_query.push_bind(provider_hash);
         return_exchange_query.push(" AND t.tenant_type = 'PROVIDER'");
         return_exchange_query.push(" AND t.deleted_at IS NULL");
         return_exchange_query.push(" AND rer.status = 'PENDING'");
         return_exchange_query.push(" AND o.deleted_at IS NULL");
-        
+
         if let Some(date) = delivery_date {
             return_exchange_query.push(" AND o.delivery_date = ");
             return_exchange_query.push_bind(date);
         }
-        
+
         let return_exchange_tasks = return_exchange_query
             .build_query_scalar::<i64>()
             .fetch_one(&self.pool)
@@ -832,29 +911,62 @@ impl ProviderOrderRepository for MySqlRepository {
             JOIN orders o ON poa.order_id = o.id
             JOIN order_details od ON o.id = od.order_id
             WHERE t.name_hash = 
-            "#
+            "#,
         );
-        
+
         pending_stock_query.push_bind(provider_hash);
         pending_stock_query.push(" AND t.tenant_type = 'PROVIDER'");
         pending_stock_query.push(" AND t.deleted_at IS NULL");
         pending_stock_query.push(" AND o.order_status = 'ASSIGNED'");
         pending_stock_query.push(" AND o.deleted_at IS NULL");
-        
+
         if let Some(date) = delivery_date {
             pending_stock_query.push(" AND o.delivery_date = ");
             pending_stock_query.push_bind(date);
         }
-        
+
         let pending_stock_skus = pending_stock_query
             .build_query_scalar::<i64>()
             .fetch_one(&self.pool)
             .await
             .map_err(map_db_err!("Failed to get pending stock SKUs count"))?;
 
+        // 查询已签收的 SKU 数量（COMPLETED 订单中，CUSTOMER 验收结果为 PASS 或 PARTIAL，且 accepted=1 的 inspected_qty 总和）
+        let mut accepted_skus_query = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT COALESCE(SUM(oii.inspected_qty), 0) as accepted_skus_qty
+            FROM provider_orders_assignments poa
+            JOIN tenants t ON poa.provider_id = t.id
+            JOIN orders o ON poa.order_id = o.id
+            JOIN order_inspections oi ON oi.order_id = o.id
+            JOIN order_inspection_items oii ON oii.inspection_id = oi.id
+            WHERE t.name_hash = 
+            "#,
+        );
+
+        accepted_skus_query.push_bind(provider_hash);
+        accepted_skus_query.push(" AND t.tenant_type = 'PROVIDER'");
+        accepted_skus_query.push(" AND t.deleted_at IS NULL");
+        accepted_skus_query.push(" AND o.order_status = 'COMPLETED'");
+        accepted_skus_query.push(" AND o.deleted_at IS NULL");
+        accepted_skus_query.push(" AND oi.inspection_result IN ('PASS', 'PARTIAL')");
+        accepted_skus_query.push(" AND oi.inspected_by_type = 'CUSTOMER'");
+        accepted_skus_query.push(" AND oii.accepted = 1");
+
+        if let Some(date) = delivery_date {
+            accepted_skus_query.push(" AND o.delivery_date = ");
+            accepted_skus_query.push_bind(date);
+        }
+
+        let accepted_skus_qty = accepted_skus_query
+            .build_query_scalar::<sqlx::types::Decimal>()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get accepted SKUs quantity"))?;
+
         debug!(
-            "Dashboard stats - pending_delivery: {}, delivering: {}, completed: {}, return_exchange: {}, pending_stock: {}",
-            pending_delivery, delivering, completed, return_exchange_tasks, pending_stock_skus
+            "Dashboard stats - pending_delivery: {}, delivering: {}, completed: {}, return_exchange: {}, pending_stock: {}, accepted_skus_qty: {}",
+            pending_delivery, delivering, completed, return_exchange_tasks, pending_stock_skus, accepted_skus_qty
         );
 
         Ok(ProviderDashboardStatsDTO {
@@ -863,6 +975,7 @@ impl ProviderOrderRepository for MySqlRepository {
             completed_orders: completed,
             return_exchange_tasks: return_exchange_tasks,
             pending_stock_skus: pending_stock_skus,
+            accepted_skus_qty: accepted_skus_qty,
         })
     }
 
@@ -871,8 +984,11 @@ impl ProviderOrderRepository for MySqlRepository {
         provider_hash: &str,
     ) -> Result<Vec<ProviderTodayDeliveredProductsDTO>, AppError> {
         use tracing::debug;
-        
-        debug!("Fetching today delivered products for provider_hash: {}", provider_hash);
+
+        debug!(
+            "Fetching today delivered products for provider_hash: {}",
+            provider_hash
+        );
 
         let products = sqlx::query_as::<_, ProviderTodayDeliveredProductsDTO>(
             r#"
@@ -897,12 +1013,14 @@ impl ProviderOrderRepository for MySqlRepository {
                 AND pd.delivery_status = 'DELIVERED'
             GROUP BY od.id, od.product_code, od.product_name, od.category_name, od.unit
             ORDER BY od.product_code
-            "#
+            "#,
         )
         .bind(provider_hash)
         .fetch_all(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get provider today delivered products"))?;
+        .map_err(map_db_err!(
+            "Failed to get provider today delivered products"
+        ))?;
 
         debug!("Found {} delivered products for today", products.len());
         Ok(products)

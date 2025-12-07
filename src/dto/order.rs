@@ -372,6 +372,9 @@ pub(crate) struct ProviderDashboardStatsDTO {
 
     #[serde(rename = "pendingStockSkus")]
     pub(crate) pending_stock_skus: i64,
+
+    #[serde(rename = "acceptedSkusQty")]
+    pub(crate) accepted_skus_qty: Decimal,
 }
 
 /// 供应商今天已交付的商品聚合数据
@@ -965,4 +968,50 @@ pub(crate) struct NeedToInspection {
     pub(crate) delivery_staff: Option<DeliveryStaffInfo>,
 
     pub(crate) items: Vec<NeedToInspectionItem>,
+}
+
+/// 供应商退换货订单信息响应
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderReturnExchangeOrderResponse {
+    #[serde(rename = "orderCode")]
+    pub(crate) order_code: String,
+
+    #[serde(rename = "totalSkuCount")]
+    pub(crate) total_sku_count: i64,
+
+    #[serde(rename = "createdAt")]
+    pub(crate) created_at: DateTime<Utc>,
+
+    #[serde(rename = "orderStatus")]
+    pub(crate) order_status: String,
+
+    #[serde(rename = "items")]
+    pub(crate) items: Vec<ProviderReturnExchangeItem>,
+}
+
+/// 供应商退换货商品项
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct ProviderReturnExchangeItem {
+    #[serde(rename = "productCode")]
+    pub(crate) product_code: String,
+
+    #[serde(rename = "productName")]
+    pub(crate) product_name: String,
+
+    #[serde(rename = "weight")]
+    pub(crate) weight: String,
+
+    #[serde(rename = "operationType")]
+    pub(crate) operation_type: String,
+
+    #[serde(rename = "status")]
+    pub(crate) status: String,
+
+    #[serde(rename = "deliveredQty")]
+    pub(crate) delivered_qty: Option<Decimal>,
+
+    pub(crate) reason: String,
+
+    #[serde(rename = "evidenceImages")]
+    pub(crate) evidence_images: Option<String>,
 }

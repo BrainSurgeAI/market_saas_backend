@@ -5,11 +5,15 @@ use crate::{
     common::{ApiResponse, AppError},
     dto::{
         delivery_staff::DeliveryStaffIdDTO,
-        order::{DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest, OrderDeliveryHistoryResponse},
+        order::{
+            DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest,
+            OrderDeliveryHistoryResponse, ProviderReturnExchangeOrderResponse,
+        },
         ValidatedJSON,
     },
     middleware::context::RequestContext,
     models::{claims::Claims, tenant_type::TenantType},
+    repositories::orders::common::CommonOrderRepository,
     repositories::orders::provider::ProviderOrderRepository,
     utils::validate_json_fmt::Json,
 };
@@ -134,4 +138,18 @@ where
     )
     .await?;
     Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+pub(crate) async fn get_provider_return_exchange_orders<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<ApiResponse<Vec<ProviderReturnExchangeOrderResponse>>>, AppError>
+where
+    T: CommonOrderRepository + Send + Sync,
+{
+    let orders = repo
+        .get_provider_return_exchange_orders(&claims.tenant_hash)
+        .await?;
+    Ok(Json(ApiResponse::new(Some(orders), &context)))
 }
