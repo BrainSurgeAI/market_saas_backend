@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, types::Decimal};
 use validator::{Validate, ValidationError};
@@ -324,7 +324,7 @@ pub(crate) struct AcceptedOrderResponseDTO {
     pub(crate) order_status: String,
 
     #[serde(rename = "acceptedAt")]
-    pub(crate) accepted_at: DateTime<Utc>,
+    pub(crate) accepted_at: NaiveDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Validate)]
@@ -589,6 +589,12 @@ pub(crate) struct ProviderOrderResponse {
 
     #[serde(rename = "createdAt")]
     pub(crate) created_at: DateTime<Utc>,
+
+    #[serde(rename = "marketContactNumber")]
+    pub(crate) market_contact_number: Option<String>,
+
+    #[serde(rename = "marketContactorName")]
+    pub(crate) market_contactor_name: Option<String>,
 }
 
 /// MARKET 用户订单详情响应
@@ -610,7 +616,7 @@ pub(crate) struct MarketOrderDetailResponse {
     pub(crate) delivery_address: Option<String>,
 
     #[serde(rename = "deliveryDate")]
-    pub(crate) delivery_date: Option<NaiveDate>,
+    pub(crate) delivery_date: NaiveDate,
 
     #[serde(rename = "discountAmount")]
     pub(crate) discount_amount: Decimal,
@@ -727,7 +733,7 @@ pub(crate) struct CustomerOrderDetailResponse {
     pub(crate) delivery_address: Option<String>,
 
     #[serde(rename = "deliveryDate")]
-    pub(crate) delivery_date: Option<DateTime<Utc>>,
+    pub(crate) delivery_date: NaiveDate,
 
     #[serde(rename = "discountAmount")]
     pub(crate) discount_amount: Decimal,

@@ -70,7 +70,8 @@ impl CommonOrderRepository for MySqlRepository {
             SELECT o.id as order_id, o.order_code, o.order_status, o.delivery_date, o.delivery_address, 
                    o.confirmed_by as receiver_name, o.market_contact_number as receiver_phone, o.created_at,
                    mt.name as customer_name, o.ordered_amount, o.discount_amount, o.net_amount,
-                   ds.name as shipper_name, ds.phone as shipper_phone
+                   ds.name as shipper_name, ds.phone as shipper_phone,
+                   o.market_contact_number, o.assigned_by as market_contactor_name
             FROM orders o
             INNER JOIN provider_orders_assignments poa ON o.id = poa.order_id
             INNER JOIN tenants t ON poa.provider_id = t.id
@@ -95,7 +96,7 @@ impl CommonOrderRepository for MySqlRepository {
 
         let (order_details, delivery_type): (Vec<ProviderOrderItem>, String) =
             match OrderStatus::try_from(order_info.order_status.as_str())? {
-                OrderStatus::Assigned => {
+                OrderStatus::Assigned | OrderStatus::SupplierPreparing => {
                     // 从order_details表中获取信息构建ProviderOrderResponse
                     let items = sqlx::query!(
                         r#"
@@ -111,6 +112,7 @@ impl CommonOrderRepository for MySqlRepository {
                             od.processing_requirements,
                             tiu.temp_url as image_url
                         FROM order_details od
+                        INNER JOIN orders o ON od.order_id = o.id
                         LEFT JOIN temp_image_urls tiu ON od.product_code = tiu.product_code
                         WHERE od.order_id = ?
                         ORDER BY od.id ASC
@@ -215,6 +217,8 @@ impl CommonOrderRepository for MySqlRepository {
             net_amount: order_info.net_amount,
             shipper_name: order_info.shipper_name,
             shipper_phone: order_info.shipper_phone,
+            market_contact_number: order_info.market_contact_number,
+            market_contactor_name: order_info.market_contactor_name,
             current: ProviderOrderRound {
                 delivery_status: "PENDING".to_string(),
                 delivery_type: delivery_type,
@@ -290,7 +294,7 @@ impl CommonOrderRepository for MySqlRepository {
             created_at: order_info.created_at,
             customer_name: Some(order_info.market_name),
             delivery_address: Some(order_info.delivery_address),
-            delivery_date: Some(order_info.delivery_date.into()),
+            delivery_date: order_info.delivery_date,
             discount_amount: order_info.discount_amount,
             net_amount: order_info.net_amount,
             ordered_amount: order_info.ordered_amount,
@@ -647,10 +651,7 @@ impl CommonOrderRepository for MySqlRepository {
             created_at: order_info.created_at,
             customer_name: Some(order_info.customer_name),
             delivery_address: Some(order_info.delivery_address),
-            delivery_date: Some(DateTime::<Utc>::from_naive_utc_and_offset(
-                order_info.delivery_date.into(),
-                Utc,
-            )),
+            delivery_date: order_info.delivery_date,
             discount_amount: order_info.discount_amount,
             net_amount: order_info.net_amount,
             ordered_amount: order_info.ordered_amount,
@@ -748,7 +749,7 @@ impl CommonOrderRepository for MySqlRepository {
             result.push(ProviderReturnExchangeOrderResponse {
                 order_code: order.order_code,
                 total_sku_count: order.total_sku_count as i64,
-                created_at: DateTime::from_naive_utc_and_offset(order.created_at.naive_utc(), Utc),
+                created_at: order.created_at,
                 order_status: order.order_status,
                 items: return_exchange_items,
             });

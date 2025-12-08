@@ -219,38 +219,41 @@ impl MarketplaceOrderRepository for MySqlRepository {
             .pred_opt()
             .ok_or_else(|| AppError::Internal("无法计算昨天的日期".to_string()))?;
 
-        // Query today's new orders (PENDING status)
-        let new_orders_today: i64 = sqlx::query_scalar!(
+        // Query all order statistics in one query
+        let order_stats = sqlx::query!(
             r#"
-            SELECT COUNT(*) as count
+            SELECT 
+                COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as new_orders_today,
+                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'PENDING' THEN 1 END) as new_orders_pending_today,
+                COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as yesterday_total_orders,
+                COUNT(CASE WHEN DATE(created_at) = ? AND (order_status = 'EXCHANGE_DELIVERING' OR order_status = 'SUPPLIER_DELIVERING') THEN 1 END) as pending_inspection,
+                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_today,
+                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_yesterday
             FROM orders
             WHERE market_id = ?
-            AND order_status = 'PENDING'
-            AND DATE(created_at) = ?
+            AND DATE(created_at) IN (?, ?)
             AND deleted_at IS NULL
             "#,
+            today,
+            today,
+            yesterday,
+            today,
+            today,
+            yesterday,
             market_id,
-            today
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get today's new orders"))?;
-
-        // Query yesterday's total orders (all statuses) for newOrders trend
-        let yesterday_total_orders: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as count
-            FROM orders
-            WHERE market_id = ?
-            AND DATE(created_at) = ?
-            AND deleted_at IS NULL
-            "#,
-            market_id,
+            today,
             yesterday
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get yesterday's total orders"))?;
+        .map_err(map_db_err!("Failed to get order statistics"))?;
+
+        let new_orders_today = order_stats.new_orders_today;
+        let yesterday_total_orders = order_stats.yesterday_total_orders;
+        let pending_assignment = order_stats.new_orders_pending_today; // Same as new_orders_today (both are PENDING status)
+        let pending_inspection = order_stats.pending_inspection;
+        let completed_today = order_stats.completed_today;
+        let completed_yesterday = order_stats.completed_yesterday;
 
         // Calculate newOrders trend
         let new_orders_trend = if yesterday_total_orders > 0 {
@@ -272,75 +275,31 @@ impl MarketplaceOrderRepository for MySqlRepository {
             })
         };
 
-        // Query today's pending assignment (PENDING status) - same as newOrders
-        let pending_assignment: i64 = sqlx::query_scalar!(
+        // Query today's and yesterday's exceptions in one query
+        let exceptions_stats = sqlx::query!(
             r#"
-            SELECT COUNT(*) as count
-            FROM orders
-            WHERE market_id = ?
-            AND order_status = 'PENDING'
-            AND DATE(created_at) = ?
-            AND deleted_at IS NULL
-            "#,
-            market_id,
-            today
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get pending assignment"))?;
-
-        // Query today's pending inspection (ASSIGNED status)
-        let pending_inspection: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as count
-            FROM orders
-            WHERE market_id = ?
-            AND order_status = 'ASSIGNED'
-            AND DATE(created_at) = ?
-            AND deleted_at IS NULL
-            "#,
-            market_id,
-            today
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get pending inspection"))?;
-
-        // Query today's exceptions (from return_exchange_records)
-        let exceptions_today: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(DISTINCT o.id) as count
+            SELECT 
+                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_today,
+                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_yesterday
             FROM return_exchange_records rer
             INNER JOIN order_details od ON rer.order_detail_id = od.id
             INNER JOIN orders o ON od.order_id = o.id
             WHERE o.market_id = ?
-            AND DATE(rer.created_at) = ?
+            AND DATE(rer.created_at) IN (?, ?)
             AND o.deleted_at IS NULL
             "#,
+            today,
+            yesterday,
             market_id,
-            today
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get today's exceptions"))?;
-
-        // Query yesterday's exceptions for trend
-        let exceptions_yesterday: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(DISTINCT o.id) as count
-            FROM return_exchange_records rer
-            INNER JOIN order_details od ON rer.order_detail_id = od.id
-            INNER JOIN orders o ON od.order_id = o.id
-            WHERE o.market_id = ?
-            AND DATE(rer.created_at) = ?
-            AND o.deleted_at IS NULL
-            "#,
-            market_id,
+            today,
             yesterday
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(map_db_err!("Failed to get yesterday's exceptions"))?;
+        .map_err(map_db_err!("Failed to get exceptions statistics"))?;
+
+        let exceptions_today = exceptions_stats.exceptions_today;
+        let exceptions_yesterday = exceptions_stats.exceptions_yesterday;
 
         // Calculate exceptions trend
         let exceptions_trend = if exceptions_yesterday > 0 {
@@ -372,39 +331,6 @@ impl MarketplaceOrderRepository for MySqlRepository {
             })
         };
 
-        // Query today's completed orders
-        let completed_today: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as count
-            FROM orders
-            WHERE market_id = ?
-            AND order_status = 'COMPLETED'
-            AND DATE(created_at) = ?
-            AND deleted_at IS NULL
-            "#,
-            market_id,
-            today
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get today's completed orders"))?;
-
-        // Query yesterday's completed orders for trend
-        let completed_yesterday: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as count
-            FROM orders
-            WHERE market_id = ?
-            AND order_status = 'COMPLETED'
-            AND DATE(created_at) = ?
-            AND deleted_at IS NULL
-            "#,
-            market_id,
-            yesterday
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get yesterday's completed orders"))?;
 
         // Calculate completed trend
         let completed_trend = if completed_yesterday > 0 {
@@ -445,7 +371,7 @@ impl MarketplaceOrderRepository for MySqlRepository {
             metadata: Metadata {
                 pending_assignment: PendingAssignmentMetadata {
                     subtitle: "急需处理".to_string(),
-                    active: true,
+                    active: pending_assignment > 0,
                 },
             },
         })

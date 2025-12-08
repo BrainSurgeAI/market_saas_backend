@@ -161,6 +161,17 @@ impl ProviderOrderRepository for MySqlRepository {
             let id_card = delivery_staff_id
                 .ok_or_else(|| AppError::Validation("配送员 ID 不能为空".to_string()))?;
 
+            // update order delivery_staff_id
+            sqlx::query!(
+                r#"
+                   UPDATE orders SET delivery_staff_id = (SELECT id FROM delivery_staff WHERE id_card = ? AND status = true) WHERE id = ?
+                "#,
+                id_card,
+                order_id
+            )
+            .execute(&mut *tx)
+            .await.map_err(map_db_err!("Failed to update order delivery staff id"))?;
+
             // Insert provider delivery basic information
             let insert_result = sqlx::query!(
                 r#"INSERT INTO provider_deliveries (assignment_id, delivered_by, delivery_contact_number) 

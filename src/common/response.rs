@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{Local, NaiveDateTime};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ pub(crate) struct ApiResponse<T> {
     pub(crate) request_id: String,
 
     /// Response generation timestamp
-    pub(crate) timestamp: DateTime<Utc>,
+    pub(crate) timestamp: NaiveDateTime,
 }
 
 #[allow(dead_code)]
@@ -81,7 +81,7 @@ impl<T> ApiResponse<T> {
             message: message.into(),
             data,
             request_id: context.request_id.clone(),
-            timestamp: Utc::now(),
+            timestamp: Local::now().naive_local(),
         }
     }
 
@@ -117,7 +117,7 @@ impl<T> ApiResponse<T> {
             message: message.into(),
             data: None,
             request_id: Uuid::new_v4().to_string(),
-            timestamp: Utc::now(),
+            timestamp: Local::now().naive_local(),
         }
     }
 
@@ -137,7 +137,7 @@ impl<T> ApiResponse<T> {
             message: message.into(),
             data: None,
             request_id,
-            timestamp: Utc::now(),
+            timestamp: Local::now().naive_local(),
         }
     }
 }
