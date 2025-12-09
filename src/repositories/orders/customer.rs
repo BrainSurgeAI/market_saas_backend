@@ -1,6 +1,6 @@
 use crate::{
     common::AppError,
-    dto::order::CreateOrderRequestDTO,
+    dto::order::{CreateOrderRequestDTO, DashboardStatsDTO},
     // 以下导入已注释，如果将来需要查询分类层级映射时，可以取消注释
     // dto::category::CategoryLevel1Row,
     map_db_err,
@@ -9,6 +9,7 @@ use crate::{
 };
 
 use async_trait::async_trait;
+use chrono::{Local, NaiveDate};
 use futures::future::try_join_all;
 use sqlx::QueryBuilder;
 
@@ -31,6 +32,20 @@ pub(crate) trait CustomerOrderRepository: Send + Sync {
         claims: &Claims,
         order_payload: &CreateOrderRequestDTO,
     ) -> Result<String, AppError>;
+
+    /// Get dashboard statistics for a customer
+    ///
+    /// # Arguments
+    /// * `claims` - The claims containing customer information
+    /// * `date` - Optional date parameter (YYYY-MM-DD format). If None, uses current date
+    ///
+    /// # Returns
+    /// Dashboard statistics including counts for different order statuses
+    async fn get_customer_dashboard_stats(
+        &self,
+        claims: &Claims,
+        date: Option<NaiveDate>,
+    ) -> Result<DashboardStatsDTO, AppError>;
 }
 
 #[async_trait]
@@ -248,5 +263,55 @@ impl CustomerOrderRepository for MySqlRepository {
         info!("Order {} created successfully", order_code);
 
         Ok(order_code)
+    }
+
+    async fn get_customer_dashboard_stats(
+        &self,
+        claims: &Claims,
+        date: Option<NaiveDate>,
+    ) -> Result<DashboardStatsDTO, AppError> {
+        // Get customer_id from tenant_hash
+        let record = sqlx::query!(
+            r#"SELECT t.id AS customer_id 
+               FROM tenants t 
+               WHERE t.name_hash = ? AND t.tenant_type = 'CUSTOMER' AND t.deleted_at IS NULL"#,
+            claims.tenant_hash
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get customer information"))?
+        .ok_or_else(|| AppError::not_found("Customer not found"))?;
+
+        // Use provided date or current date
+        let target_date = date.unwrap_or_else(|| Local::now().date_naive());
+
+        // Single query to get all statistics using COUNT with CASE WHEN
+        let stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(CASE WHEN order_status = 'PENDING' THEN 1 END) as pending_confirmation,
+                COUNT(CASE WHEN order_status IN ('MARKET_DELIVERING', 'EXCHANGE_NEW_DELIVERING') THEN 1 END) as in_transit,
+                COUNT(CASE WHEN order_status = 'COMPLETED' THEN 1 END) as arriving_today,
+                COUNT(CASE WHEN order_status = 'CUSTOMER_INSPECTING' THEN 1 END) as in_acceptance,
+                COUNT(CASE WHEN order_status IN ('RETURN_REQUESTED', 'EXCHANGE_REQUESTED') THEN 1 END) as exceptions
+            FROM orders
+            WHERE customer_id = ? 
+              AND DATE(created_at) = ?
+              AND deleted_at IS NULL
+            "#,
+            record.customer_id,
+            target_date
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get dashboard statistics"))?;
+
+        Ok(DashboardStatsDTO {
+            pending_confirmation: stats.pending_confirmation,
+            in_transit: stats.in_transit,
+            arriving_today: stats.arriving_today,
+            in_acceptance: stats.in_acceptance,
+            exceptions: stats.exceptions,
+        })
     }
 }

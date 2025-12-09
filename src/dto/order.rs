@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, types::Decimal};
 use validator::{Validate, ValidationError};
@@ -94,7 +94,7 @@ pub(crate) struct OrderResponse {
     pub(crate) order_status: String,
 
     #[serde(rename = "createdAt")]
-    pub(crate) created_at: Option<DateTime<Utc>>,
+    pub(crate) created_at: Option<DateTime<Local>>,
 
     #[serde(rename = "marketName")]
     pub(crate) market_name: String,
@@ -1073,4 +1073,25 @@ pub(crate) struct Metadata {
 pub(crate) struct PendingAssignmentMetadata {
     pub(crate) subtitle: String,
     pub(crate) active: bool,
+}
+
+/// Dashboard statistics DTO
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DashboardStatsDTO {
+    #[serde(rename = "pendingConfirmation")]
+    pub(crate) pending_confirmation: i64,
+    #[serde(rename = "inTransit")]
+    pub(crate) in_transit: i64,
+    #[serde(rename = "arrivingToday")]
+    pub(crate) arriving_today: i64,
+    #[serde(rename = "inAcceptance")]
+    pub(crate) in_acceptance: i64,
+    pub(crate) exceptions: i64,
+}
+
+/// Dashboard query parameters
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct DashboardQueryParams {
+    /// 日期：YYYY-MM-DD，不传默认今天
+    pub(crate) date: Option<String>,
 }

@@ -114,7 +114,7 @@ where
     );
     
     let stats = repo
-        .get_market_order_statistics(&claims.tenant_hash)
+        .get_market_dashboard_stats(&claims.tenant_hash)
         .await?;
     
     debug!("Market order statistics retrieved successfully");

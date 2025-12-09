@@ -41,7 +41,7 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
     ///
     /// # Returns
     /// A result containing the market order statistics
-    async fn get_market_order_statistics(
+    async fn get_market_dashboard_stats(
         &self,
         tenant_hash: &str,
     ) -> Result<MarketOrderStatisticsResponse, AppError>;
@@ -201,7 +201,7 @@ impl MarketplaceOrderRepository for MySqlRepository {
         Ok(next)
     }
 
-    async fn get_market_order_statistics(
+    async fn get_market_dashboard_stats(
         &self,
         tenant_hash: &str,
     ) -> Result<MarketOrderStatisticsResponse, AppError> {
