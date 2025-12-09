@@ -1,12 +1,11 @@
-use axum::{extract::{Path, Query}, Extension};
+use axum::{extract::Path, Extension};
 
-use chrono::NaiveDate;
 use tracing::debug;
 
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        order::{CreateOrderRequestDTO, DashboardQueryParams, DashboardStatsDTO},
+        order::CreateOrderRequestDTO,
         ValidatedJSON,
     },
     middleware::context::RequestContext,
@@ -51,27 +50,4 @@ where
 
     
     Ok(Json(ApiResponse::new(Some(()), &context)))
-}
-
-pub(crate) async fn get_dashboard_stats<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Query(query_params): Query<DashboardQueryParams>,
-) -> Result<Json<ApiResponse<DashboardStatsDTO>>, AppError>
-where
-    T: CustomerOrderRepository + Send + Sync,
-{
-    // Parse date if provided
-    let date = if let Some(date_str) = &query_params.date {
-        Some(
-            NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                .map_err(|_| AppError::Validation("Invalid date format. Use YYYY-MM-DD".to_string()))?,
-        )
-    } else {
-        None
-    };
-
-    let stats = repo.get_customer_dashboard_stats(&claims, date).await?;
-    Ok(Json(ApiResponse::new(Some(stats), &context)))
 }

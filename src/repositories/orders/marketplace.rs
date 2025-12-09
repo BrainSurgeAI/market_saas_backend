@@ -1,16 +1,13 @@
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{
     common::AppError,
-    dto::order::MarketOrderStatisticsResponse,
     map_db_err,
-   // models::claims::Claims,
     models::{
         order_action::OrderAction, order_machine::OrderStateMachine, order_status::OrderStatus,
         tenant_type::TenantType,
     },
 };
 use async_trait::async_trait;
-use chrono::Local;
 use tracing::{debug, error};
 
 #[async_trait]
@@ -34,17 +31,11 @@ pub(crate) trait MarketplaceOrderRepository: Send + Sync {
         assign_by: &str,
     ) -> Result<OrderStatus, AppError>;
 
-    /// Get market order statistics
-    ///
-    /// # Arguments
-    /// * `tenant_hash` - The hash of the market tenant
-    ///
-    /// # Returns
-    /// A result containing the market order statistics
-    async fn get_market_dashboard_stats(
-        &self,
-        tenant_hash: &str,
-    ) -> Result<MarketOrderStatisticsResponse, AppError>;
+  
+    // async fn get_market_dashboard_stats(
+    //     &self,
+    //     tenant_hash: &str,
+    // ) -> Result<MarketOrderStatisticsResponse, AppError>;
 }
 
 #[async_trait]
@@ -201,179 +192,179 @@ impl MarketplaceOrderRepository for MySqlRepository {
         Ok(next)
     }
 
-    async fn get_market_dashboard_stats(
-        &self,
-        tenant_hash: &str,
-    ) -> Result<MarketOrderStatisticsResponse, AppError> {
-        use crate::dto::order::{
-            Metadata, PendingAssignmentMetadata, TrendItem, Trends,
-        };
+    // async fn get_market_dashboard_stats(
+    //     &self,
+    //     tenant_hash: &str,
+    // ) -> Result<MarketOrderStatisticsResponse, AppError> {
+    //     use crate::dto::order::{
+    //         Metadata, PendingAssignmentMetadata, TrendItem, Trends,
+    //     };
 
-        // Get market tenant id
-        let market_id = self
-            .get_tenant_id_by_tenant_hash_and_tenant_type(tenant_hash, "MARKET")
-            .await?;
+    //     // Get market tenant id
+    //     let market_id = self
+    //         .get_tenant_id_by_tenant_hash_and_tenant_type(tenant_hash, "MARKET")
+    //         .await?;
 
-        let today = Local::now().date_naive();
-        let yesterday = today
-            .pred_opt()
-            .ok_or_else(|| AppError::Internal("无法计算昨天的日期".to_string()))?;
+    //     let today = Local::now().date_naive();
+    //     let yesterday = today
+    //         .pred_opt()
+    //         .ok_or_else(|| AppError::Internal("无法计算昨天的日期".to_string()))?;
 
-        // Query all order statistics in one query
-        let order_stats = sqlx::query!(
-            r#"
-            SELECT 
-                COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as new_orders_today,
-                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'PENDING' THEN 1 END) as new_orders_pending_today,
-                COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as yesterday_total_orders,
-                COUNT(CASE WHEN DATE(created_at) = ? AND (order_status = 'EXCHANGE_DELIVERING' OR order_status = 'SUPPLIER_DELIVERING') THEN 1 END) as pending_inspection,
-                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_today,
-                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_yesterday
-            FROM orders
-            WHERE market_id = ?
-            AND DATE(created_at) IN (?, ?)
-            AND deleted_at IS NULL
-            "#,
-            today,
-            today,
-            yesterday,
-            today,
-            today,
-            yesterday,
-            market_id,
-            today,
-            yesterday
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get order statistics"))?;
+    //     // Query all order statistics in one query
+    //     let order_stats = sqlx::query!(
+    //         r#"
+    //         SELECT 
+    //             COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as new_orders_today,
+    //             COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'PENDING' THEN 1 END) as new_orders_pending_today,
+    //             COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as yesterday_total_orders,
+    //             COUNT(CASE WHEN DATE(created_at) = ? AND (order_status = 'EXCHANGE_DELIVERING' OR order_status = 'SUPPLIER_DELIVERING') THEN 1 END) as pending_inspection,
+    //             COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_today,
+    //             COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_yesterday
+    //         FROM orders
+    //         WHERE market_id = ?
+    //         AND DATE(created_at) IN (?, ?)
+    //         AND deleted_at IS NULL
+    //         "#,
+    //         today,
+    //         today,
+    //         yesterday,
+    //         today,
+    //         today,
+    //         yesterday,
+    //         market_id,
+    //         today,
+    //         yesterday
+    //     )
+    //     .fetch_one(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get order statistics"))?;
 
-        let new_orders_today = order_stats.new_orders_today;
-        let yesterday_total_orders = order_stats.yesterday_total_orders;
-        let pending_assignment = order_stats.new_orders_pending_today; // Same as new_orders_today (both are PENDING status)
-        let pending_inspection = order_stats.pending_inspection;
-        let completed_today = order_stats.completed_today;
-        let completed_yesterday = order_stats.completed_yesterday;
+    //     let new_orders_today = order_stats.new_orders_today;
+    //     let yesterday_total_orders = order_stats.yesterday_total_orders;
+    //     let pending_assignment = order_stats.new_orders_pending_today; // Same as new_orders_today (both are PENDING status)
+    //     let pending_inspection = order_stats.pending_inspection;
+    //     let completed_today = order_stats.completed_today;
+    //     let completed_yesterday = order_stats.completed_yesterday;
 
-        // Calculate newOrders trend
-        let new_orders_trend = if yesterday_total_orders > 0 {
-            let diff = new_orders_today as f64 - yesterday_total_orders as f64;
-            let percentage = (diff / yesterday_total_orders as f64) * 100.0;
-            let value = if percentage >= 0.0 {
-                format!("+{:.1}%", percentage)
-            } else {
-                format!("{:.1}%", percentage)
-            };
-            Some(TrendItem {
-                value,
-                up: percentage >= 0.0,
-            })
-        } else {
-            Some(TrendItem {
-                value: format!("+{}", new_orders_today),
-                up: true,
-            })
-        };
+    //     // Calculate newOrders trend
+    //     let new_orders_trend = if yesterday_total_orders > 0 {
+    //         let diff = new_orders_today as f64 - yesterday_total_orders as f64;
+    //         let percentage = (diff / yesterday_total_orders as f64) * 100.0;
+    //         let value = if percentage >= 0.0 {
+    //             format!("+{:.1}%", percentage)
+    //         } else {
+    //             format!("{:.1}%", percentage)
+    //         };
+    //         Some(TrendItem {
+    //             value,
+    //             up: percentage >= 0.0,
+    //         })
+    //     } else {
+    //         Some(TrendItem {
+    //             value: format!("+{}", new_orders_today),
+    //             up: true,
+    //         })
+    //     };
 
-        // Query today's and yesterday's exceptions in one query
-        let exceptions_stats = sqlx::query!(
-            r#"
-            SELECT 
-                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_today,
-                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_yesterday
-            FROM return_exchange_records rer
-            INNER JOIN order_details od ON rer.order_detail_id = od.id
-            INNER JOIN orders o ON od.order_id = o.id
-            WHERE o.market_id = ?
-            AND DATE(rer.created_at) IN (?, ?)
-            AND o.deleted_at IS NULL
-            "#,
-            today,
-            yesterday,
-            market_id,
-            today,
-            yesterday
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_db_err!("Failed to get exceptions statistics"))?;
+    //     // Query today's and yesterday's exceptions in one query
+    //     let exceptions_stats = sqlx::query!(
+    //         r#"
+    //         SELECT 
+    //             COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_today,
+    //             COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_yesterday
+    //         FROM return_exchange_records rer
+    //         INNER JOIN order_details od ON rer.order_detail_id = od.id
+    //         INNER JOIN orders o ON od.order_id = o.id
+    //         WHERE o.market_id = ?
+    //         AND DATE(rer.created_at) IN (?, ?)
+    //         AND o.deleted_at IS NULL
+    //         "#,
+    //         today,
+    //         yesterday,
+    //         market_id,
+    //         today,
+    //         yesterday
+    //     )
+    //     .fetch_one(&self.pool)
+    //     .await
+    //     .map_err(map_db_err!("Failed to get exceptions statistics"))?;
 
-        let exceptions_today = exceptions_stats.exceptions_today;
-        let exceptions_yesterday = exceptions_stats.exceptions_yesterday;
+    //     let exceptions_today = exceptions_stats.exceptions_today;
+    //     let exceptions_yesterday = exceptions_stats.exceptions_yesterday;
 
-        // Calculate exceptions trend
-        let exceptions_trend = if exceptions_yesterday > 0 {
-            let diff = exceptions_today as f64 - exceptions_yesterday as f64;
-            let percentage = (diff / exceptions_yesterday as f64) * 100.0;
-            let value = if percentage >= 0.0 {
-                format!("+{:.1}%", percentage)
-            } else {
-                format!("{:.1}%", percentage)
-            };
-            Some(TrendItem {
-                value,
-                up: percentage >= 0.0,
-            })
-        } else if exceptions_today > 0 {
-            Some(TrendItem {
-                value: format!("+{}", exceptions_today),
-                up: true,
-            })
-        } else {
-            let diff = exceptions_today - exceptions_yesterday;
-            Some(TrendItem {
-                value: if diff >= 0 {
-                    format!("+{}", diff)
-                } else {
-                    format!("{}", diff)
-                },
-                up: diff >= 0,
-            })
-        };
+    //     // Calculate exceptions trend
+    //     let exceptions_trend = if exceptions_yesterday > 0 {
+    //         let diff = exceptions_today as f64 - exceptions_yesterday as f64;
+    //         let percentage = (diff / exceptions_yesterday as f64) * 100.0;
+    //         let value = if percentage >= 0.0 {
+    //             format!("+{:.1}%", percentage)
+    //         } else {
+    //             format!("{:.1}%", percentage)
+    //         };
+    //         Some(TrendItem {
+    //             value,
+    //             up: percentage >= 0.0,
+    //         })
+    //     } else if exceptions_today > 0 {
+    //         Some(TrendItem {
+    //             value: format!("+{}", exceptions_today),
+    //             up: true,
+    //         })
+    //     } else {
+    //         let diff = exceptions_today - exceptions_yesterday;
+    //         Some(TrendItem {
+    //             value: if diff >= 0 {
+    //                 format!("+{}", diff)
+    //             } else {
+    //                 format!("{}", diff)
+    //             },
+    //             up: diff >= 0,
+    //         })
+    //     };
 
 
-        // Calculate completed trend
-        let completed_trend = if completed_yesterday > 0 {
-            let diff = completed_today as f64 - completed_yesterday as f64;
-            let percentage = (diff / completed_yesterday as f64) * 100.0;
-            let value = if percentage >= 0.0 {
-                format!("+{:.1}%", percentage)
-            } else {
-                format!("{:.1}%", percentage)
-            };
-            Some(TrendItem {
-                value,
-                up: percentage >= 0.0,
-            })
-        } else if completed_today > 0 {
-            Some(TrendItem {
-                value: format!("+{}", completed_today),
-                up: true,
-            })
-        } else {
-            Some(TrendItem {
-                value: "+0%".to_string(),
-                up: true,
-            })
-        };
+    //     // Calculate completed trend
+    //     let completed_trend = if completed_yesterday > 0 {
+    //         let diff = completed_today as f64 - completed_yesterday as f64;
+    //         let percentage = (diff / completed_yesterday as f64) * 100.0;
+    //         let value = if percentage >= 0.0 {
+    //             format!("+{:.1}%", percentage)
+    //         } else {
+    //             format!("{:.1}%", percentage)
+    //         };
+    //         Some(TrendItem {
+    //             value,
+    //             up: percentage >= 0.0,
+    //         })
+    //     } else if completed_today > 0 {
+    //         Some(TrendItem {
+    //             value: format!("+{}", completed_today),
+    //             up: true,
+    //         })
+    //     } else {
+    //         Some(TrendItem {
+    //             value: "+0%".to_string(),
+    //             up: true,
+    //         })
+    //     };
 
-        Ok(MarketOrderStatisticsResponse {
-            new_orders: new_orders_today,
-            pending_assignment,
-            pending_inspection,
-            exceptions: exceptions_today,
-            completed: completed_today,
-            trends: Trends {
-                new_orders: new_orders_trend,
-                exceptions: exceptions_trend,
-                completed: completed_trend,
-            },
-            metadata: Metadata {
-                pending_assignment: PendingAssignmentMetadata {
-                    subtitle: "急需处理".to_string(),
-                    active: pending_assignment > 0,
-                },
-            },
-        })
-    }
+    //     Ok(MarketOrderStatisticsResponse {
+    //         new_orders: new_orders_today,
+    //         pending_assignment,
+    //         pending_inspection,
+    //         exceptions: exceptions_today,
+    //         completed: completed_today,
+    //         trends: Trends {
+    //             new_orders: new_orders_trend,
+    //             exceptions: exceptions_trend,
+    //             completed: completed_trend,
+    //         },
+    //         metadata: Metadata {
+    //             pending_assignment: PendingAssignmentMetadata {
+    //                 subtitle: "急需处理".to_string(),
+    //                 active: pending_assignment > 0,
+    //             },
+    //         },
+    //     })
+    // }
 }

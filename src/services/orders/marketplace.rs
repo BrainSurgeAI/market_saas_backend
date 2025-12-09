@@ -3,7 +3,7 @@ use tracing::{debug, info};
 
 use crate::{
     common::{ApiResponse, AppError},
-    dto::{order::DispatchOrderDTO, order::MarketOrderStatisticsResponse, ValidatedJSON},
+    dto::{order::DispatchOrderDTO, ValidatedJSON},
     middleware::context::RequestContext,
     models::{claims::Claims, order_action::OrderAction, tenant_type::TenantType},
     repositories::orders::{
@@ -95,29 +95,4 @@ where
         Some(String::from(next_status.to_str())),
         &context,
     )))
-}
-
-/// Get market order statistics
-pub(crate) async fn get_market_order_statistics<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-) -> Result<Json<ApiResponse<MarketOrderStatisticsResponse>>, AppError>
-where
-    T: MarketplaceOrderRepository + Send + Sync,
-{
-    use tracing::debug;
-    
-    debug!(
-        "Getting market order statistics for tenant_hash: {}",
-        claims.tenant_hash
-    );
-    
-    let stats = repo
-        .get_market_dashboard_stats(&claims.tenant_hash)
-        .await?;
-    
-    debug!("Market order statistics retrieved successfully");
-    
-    Ok(Json(ApiResponse::new(Some(stats), &context)))
 }

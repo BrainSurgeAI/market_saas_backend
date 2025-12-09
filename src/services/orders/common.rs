@@ -3,12 +3,14 @@ use axum::{
     Extension,
     response::IntoResponse,
 };
+
 use tracing::info;
+use chrono::NaiveDate;
 
 use crate::{
     common::{ApiResponse, AppError},
     dto::order::{
-        ExchangeAndReturnOrderDetailResponse, OrderQueryParams, OrderResponse,
+        ExchangeAndReturnOrderDetailResponse, OrderQueryParams, OrderResponse, DashboardQueryParams,
     },
     middleware::context::RequestContext,
     models::claims::Claims,
@@ -80,4 +82,40 @@ where
         .get_exchange_and_return_order_details_by_order_code(&order_code)
         .await?;
     Ok(Json(ApiResponse::new(Some(order_details), &context)))
+}
+
+
+pub(crate) async fn get_dashboard_stats<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+    Query(query_params): Query<DashboardQueryParams>,
+) -> Result<impl IntoResponse, AppError>
+where
+    T: CommonOrderRepository + Send + Sync,
+{
+    // Parse date if provided
+    let date = if let Some(date_str) = &query_params.date {
+        Some(
+            NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                .map_err(|_| AppError::Validation("Invalid date format. Use YYYY-MM-DD".to_string()))?,
+        )
+    } else {
+        None
+    };
+
+    match TenantType::try_from(claims.tenant_type.as_str())? {
+        TenantType::Provider => {
+            let stats = repo.get_provider_dashboard_stats(&claims.tenant_hash, date).await?;
+            return Ok(Json(ApiResponse::new(Some(serde_json::to_value(stats)?), &context)));
+        }
+        TenantType::Market => {
+            let stats = repo.get_market_dashboard_stats(&claims.tenant_hash).await?;
+            return Ok(Json(ApiResponse::new(Some(serde_json::to_value(stats)?), &context)));
+        }
+        TenantType::Customer => {
+            let stats = repo.get_customer_dashboard_stats(&claims.tenant_hash, date).await?;
+            return Ok(Json(ApiResponse::new(Some(serde_json::to_value(stats)?), &context)));
+        }
+    }
 }

@@ -2,7 +2,7 @@ use crate::{
     common::AppError,
     dto::order::{
         DeliverToMarketDTO, ExchangeDTO, ExchangeItemQuantityUpdateRequest,
-        OrderDeliveryHistoryResponse, ProviderDashboardStatsDTO, ProviderTodayDeliveredProductsDTO,
+        OrderDeliveryHistoryResponse, ProviderTodayDeliveredProductsDTO,
     },
     map_db_err,
     models::{
@@ -13,17 +13,8 @@ use crate::{
 };
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
-use sqlx::FromRow;
-use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error};
-
-// 用于查询配送统计的临时结构
-#[derive(Debug, FromRow)]
-struct DeliveryStatsRow {
-    delivering_count: i64,
-    completed_count: i64,
-}
+use sqlx::{QueryBuilder, MySql};
 
 #[async_trait]
 pub(crate) trait ProviderOrderRepository: Send + Sync {
@@ -102,11 +93,11 @@ pub(crate) trait ProviderOrderRepository: Send + Sync {
         claims: &Claims,
     ) -> Result<OrderDeliveryHistoryResponse, AppError>;
 
-    async fn get_provider_dashboard_stats(
-        &self,
-        provider_hash: &str,
-        delivery_date: Option<NaiveDate>,
-    ) -> Result<ProviderDashboardStatsDTO, AppError>;
+    // async fn get_provider_dashboard_stats(
+    //     &self,
+    //     provider_hash: &str,
+    //     delivery_date: Option<NaiveDate>,
+    // ) -> Result<ProviderDashboardStatsDTO, AppError>;
 
     /// 获取 PROVIDER 今天已交付的商品聚合数据
     ///
@@ -808,187 +799,187 @@ impl ProviderOrderRepository for MySqlRepository {
         })
     }
 
-    async fn get_provider_dashboard_stats(
-        &self,
-        provider_hash: &str,
-        delivery_date: Option<NaiveDate>,
-    ) -> Result<ProviderDashboardStatsDTO, AppError> {
-        use sqlx::{MySql, QueryBuilder};
-        use tracing::debug;
+    // async fn get_provider_dashboard_stats(
+    //     &self,
+    //     provider_hash: &str,
+    //     delivery_date: Option<NaiveDate>,
+    // ) -> Result<ProviderDashboardStatsDTO, AppError> {
+    //     use sqlx::{MySql, QueryBuilder};
+    //     use tracing::debug;
 
-        debug!(
-            "Fetching dashboard stats for provider_hash: {}, delivery_date: {:?}",
-            provider_hash, delivery_date
-        );
+    //     debug!(
+    //         "Fetching dashboard stats for provider_hash: {}, delivery_date: {:?}",
+    //         provider_hash, delivery_date
+    //     );
 
-        // 查询待配送订单总数（ASSIGNED 或 SUPPLIER_PREPARING）
-        let mut pending_query = QueryBuilder::<MySql>::new(
-            r#"
-            SELECT COUNT(DISTINCT o.id) as count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            WHERE t.name_hash = 
-            "#,
-        );
+    //     // 查询待配送订单总数（ASSIGNED 或 SUPPLIER_PREPARING）
+    //     let mut pending_query = QueryBuilder::<MySql>::new(
+    //         r#"
+    //         SELECT COUNT(DISTINCT o.id) as count
+    //         FROM provider_orders_assignments poa
+    //         JOIN tenants t ON poa.provider_id = t.id
+    //         JOIN orders o ON poa.order_id = o.id
+    //         WHERE t.name_hash = 
+    //         "#,
+    //     );
 
-        pending_query.push_bind(provider_hash);
-        pending_query.push(" AND t.tenant_type = 'PROVIDER'");
-        pending_query.push(" AND t.deleted_at IS NULL");
-        pending_query.push(" AND o.order_status IN ('ASSIGNED', 'SUPPLIER_PREPARING')");
-        pending_query.push(" AND o.deleted_at IS NULL");
+    //     pending_query.push_bind(provider_hash);
+    //     pending_query.push(" AND t.tenant_type = 'PROVIDER'");
+    //     pending_query.push(" AND t.deleted_at IS NULL");
+    //     pending_query.push(" AND o.order_status IN ('ASSIGNED', 'SUPPLIER_PREPARING')");
+    //     pending_query.push(" AND o.deleted_at IS NULL");
 
-        if let Some(date) = delivery_date {
-            pending_query.push(" AND o.delivery_date = ");
-            pending_query.push_bind(date);
-        }
+    //     if let Some(date) = delivery_date {
+    //         pending_query.push(" AND o.delivery_date = ");
+    //         pending_query.push_bind(date);
+    //     }
 
-        let pending_delivery = pending_query
-            .build_query_scalar::<i64>()
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get pending delivery orders count"))?;
+    //     let pending_delivery = pending_query
+    //         .build_query_scalar::<i64>()
+    //         .fetch_one(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get pending delivery orders count"))?;
 
-        // 合并查询：同时统计配送中订单总数（PREPARING）和已完成配送订单总数（DELIVERED）
-        let mut delivery_query = QueryBuilder::<MySql>::new(
-            r#"
-            SELECT 
-                COUNT(DISTINCT CASE WHEN pd.delivery_status = 'PREPARING' THEN o.id END) as delivering_count,
-                COUNT(DISTINCT CASE WHEN pd.delivery_status = 'DELIVERED' THEN o.id END) as completed_count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            JOIN provider_deliveries pd ON pd.assignment_id = poa.id
-            WHERE t.name_hash = 
-            "#,
-        );
+    //     // 合并查询：同时统计配送中订单总数（PREPARING）和已完成配送订单总数（DELIVERED）
+    //     let mut delivery_query = QueryBuilder::<MySql>::new(
+    //         r#"
+    //         SELECT 
+    //             COUNT(DISTINCT CASE WHEN pd.delivery_status = 'PREPARING' THEN o.id END) as delivering_count,
+    //             COUNT(DISTINCT CASE WHEN pd.delivery_status = 'DELIVERED' THEN o.id END) as completed_count
+    //         FROM provider_orders_assignments poa
+    //         JOIN tenants t ON poa.provider_id = t.id
+    //         JOIN orders o ON poa.order_id = o.id
+    //         JOIN provider_deliveries pd ON pd.assignment_id = poa.id
+    //         WHERE t.name_hash = 
+    //         "#,
+    //     );
 
-        delivery_query.push_bind(provider_hash);
-        delivery_query.push(" AND t.tenant_type = 'PROVIDER'");
-        delivery_query.push(" AND t.deleted_at IS NULL");
-        delivery_query.push(" AND o.deleted_at IS NULL");
-        delivery_query.push(" AND pd.delivery_status IN ('PREPARING', 'DELIVERED')");
+    //     delivery_query.push_bind(provider_hash);
+    //     delivery_query.push(" AND t.tenant_type = 'PROVIDER'");
+    //     delivery_query.push(" AND t.deleted_at IS NULL");
+    //     delivery_query.push(" AND o.deleted_at IS NULL");
+    //     delivery_query.push(" AND pd.delivery_status IN ('PREPARING', 'DELIVERED')");
 
-        if let Some(date) = delivery_date {
-            delivery_query.push(" AND o.delivery_date = ");
-            delivery_query.push_bind(date);
-        }
+    //     if let Some(date) = delivery_date {
+    //         delivery_query.push(" AND o.delivery_date = ");
+    //         delivery_query.push_bind(date);
+    //     }
 
-        let delivery_stats = delivery_query
-            .build_query_as::<DeliveryStatsRow>()
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get delivery orders count"))?;
+    //     let delivery_stats = delivery_query
+    //         .build_query_as::<DeliveryStatsRow>()
+    //         .fetch_one(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get delivery orders count"))?;
 
-        let delivering = delivery_stats.delivering_count;
-        let completed = delivery_stats.completed_count;
+    //     let delivering = delivery_stats.delivering_count;
+    //     let completed = delivery_stats.completed_count;
 
-        // 查询退换货任务总数（return_exchange_records 表中 status = 'PENDING'）
-        let mut return_exchange_query = QueryBuilder::<MySql>::new(
-            r#"
-            SELECT COUNT(DISTINCT rer.id) as count
-            FROM return_exchange_records rer
-            JOIN order_details od ON rer.order_detail_id = od.id
-            JOIN orders o ON od.order_id = o.id
-            JOIN provider_orders_assignments poa ON o.id = poa.order_id
-            JOIN tenants t ON poa.provider_id = t.id
-            WHERE t.name_hash = 
-            "#,
-        );
+    //     // 查询退换货任务总数（return_exchange_records 表中 status = 'PENDING'）
+    //     let mut return_exchange_query = QueryBuilder::<MySql>::new(
+    //         r#"
+    //         SELECT COUNT(DISTINCT rer.id) as count
+    //         FROM return_exchange_records rer
+    //         JOIN order_details od ON rer.order_detail_id = od.id
+    //         JOIN orders o ON od.order_id = o.id
+    //         JOIN provider_orders_assignments poa ON o.id = poa.order_id
+    //         JOIN tenants t ON poa.provider_id = t.id
+    //         WHERE t.name_hash = 
+    //         "#,
+    //     );
 
-        return_exchange_query.push_bind(provider_hash);
-        return_exchange_query.push(" AND t.tenant_type = 'PROVIDER'");
-        return_exchange_query.push(" AND t.deleted_at IS NULL");
-        return_exchange_query.push(" AND rer.status = 'PENDING'");
-        return_exchange_query.push(" AND o.deleted_at IS NULL");
+    //     return_exchange_query.push_bind(provider_hash);
+    //     return_exchange_query.push(" AND t.tenant_type = 'PROVIDER'");
+    //     return_exchange_query.push(" AND t.deleted_at IS NULL");
+    //     return_exchange_query.push(" AND rer.status = 'PENDING'");
+    //     return_exchange_query.push(" AND o.deleted_at IS NULL");
 
-        if let Some(date) = delivery_date {
-            return_exchange_query.push(" AND o.delivery_date = ");
-            return_exchange_query.push_bind(date);
-        }
+    //     if let Some(date) = delivery_date {
+    //         return_exchange_query.push(" AND o.delivery_date = ");
+    //         return_exchange_query.push_bind(date);
+    //     }
 
-        let return_exchange_tasks = return_exchange_query
-            .build_query_scalar::<i64>()
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get return exchange tasks count"))?;
+    //     let return_exchange_tasks = return_exchange_query
+    //         .build_query_scalar::<i64>()
+    //         .fetch_one(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get return exchange tasks count"))?;
 
-        // 查询待备货 SKU 总数（订单状态为 ASSIGNED 的订单的 product_code 去重）
-        let mut pending_stock_query = QueryBuilder::<MySql>::new(
-            r#"
-            SELECT COUNT(DISTINCT od.product_code) as count
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            JOIN order_details od ON o.id = od.order_id
-            WHERE t.name_hash = 
-            "#,
-        );
+    //     // 查询待备货 SKU 总数（订单状态为 ASSIGNED 的订单的 product_code 去重）
+    //     let mut pending_stock_query = QueryBuilder::<MySql>::new(
+    //         r#"
+    //         SELECT COUNT(DISTINCT od.product_code) as count
+    //         FROM provider_orders_assignments poa
+    //         JOIN tenants t ON poa.provider_id = t.id
+    //         JOIN orders o ON poa.order_id = o.id
+    //         JOIN order_details od ON o.id = od.order_id
+    //         WHERE t.name_hash = 
+    //         "#,
+    //     );
 
-        pending_stock_query.push_bind(provider_hash);
-        pending_stock_query.push(" AND t.tenant_type = 'PROVIDER'");
-        pending_stock_query.push(" AND t.deleted_at IS NULL");
-        pending_stock_query.push(" AND o.order_status = 'ASSIGNED'");
-        pending_stock_query.push(" AND o.deleted_at IS NULL");
+    //     pending_stock_query.push_bind(provider_hash);
+    //     pending_stock_query.push(" AND t.tenant_type = 'PROVIDER'");
+    //     pending_stock_query.push(" AND t.deleted_at IS NULL");
+    //     pending_stock_query.push(" AND o.order_status = 'ASSIGNED'");
+    //     pending_stock_query.push(" AND o.deleted_at IS NULL");
 
-        if let Some(date) = delivery_date {
-            pending_stock_query.push(" AND o.delivery_date = ");
-            pending_stock_query.push_bind(date);
-        }
+    //     if let Some(date) = delivery_date {
+    //         pending_stock_query.push(" AND o.delivery_date = ");
+    //         pending_stock_query.push_bind(date);
+    //     }
 
-        let pending_stock_skus = pending_stock_query
-            .build_query_scalar::<i64>()
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get pending stock SKUs count"))?;
+    //     let pending_stock_skus = pending_stock_query
+    //         .build_query_scalar::<i64>()
+    //         .fetch_one(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get pending stock SKUs count"))?;
 
-        // 查询已签收的 SKU 数量（COMPLETED 订单中，CUSTOMER 验收结果为 PASS 或 PARTIAL，且 accepted=1 的 inspected_qty 总和）
-        let mut accepted_skus_query = QueryBuilder::<MySql>::new(
-            r#"
-            SELECT COALESCE(SUM(oii.inspected_qty), 0) as accepted_skus_qty
-            FROM provider_orders_assignments poa
-            JOIN tenants t ON poa.provider_id = t.id
-            JOIN orders o ON poa.order_id = o.id
-            JOIN order_inspections oi ON oi.order_id = o.id
-            JOIN order_inspection_items oii ON oii.inspection_id = oi.id
-            WHERE t.name_hash = 
-            "#,
-        );
+    //     // 查询已签收的 SKU 数量（COMPLETED 订单中，CUSTOMER 验收结果为 PASS 或 PARTIAL，且 accepted=1 的 inspected_qty 总和）
+    //     let mut accepted_skus_query = QueryBuilder::<MySql>::new(
+    //         r#"
+    //         SELECT COALESCE(SUM(oii.inspected_qty), 0) as accepted_skus_qty
+    //         FROM provider_orders_assignments poa
+    //         JOIN tenants t ON poa.provider_id = t.id
+    //         JOIN orders o ON poa.order_id = o.id
+    //         JOIN order_inspections oi ON oi.order_id = o.id
+    //         JOIN order_inspection_items oii ON oii.inspection_id = oi.id
+    //         WHERE t.name_hash = 
+    //         "#,
+    //     );
 
-        accepted_skus_query.push_bind(provider_hash);
-        accepted_skus_query.push(" AND t.tenant_type = 'PROVIDER'");
-        accepted_skus_query.push(" AND t.deleted_at IS NULL");
-        accepted_skus_query.push(" AND o.order_status = 'COMPLETED'");
-        accepted_skus_query.push(" AND o.deleted_at IS NULL");
-        accepted_skus_query.push(" AND oi.inspection_result IN ('PASS', 'PARTIAL')");
-        accepted_skus_query.push(" AND oi.inspected_by_type = 'CUSTOMER'");
-        accepted_skus_query.push(" AND oii.accepted = 1");
+    //     accepted_skus_query.push_bind(provider_hash);
+    //     accepted_skus_query.push(" AND t.tenant_type = 'PROVIDER'");
+    //     accepted_skus_query.push(" AND t.deleted_at IS NULL");
+    //     accepted_skus_query.push(" AND o.order_status = 'COMPLETED'");
+    //     accepted_skus_query.push(" AND o.deleted_at IS NULL");
+    //     accepted_skus_query.push(" AND oi.inspection_result IN ('PASS', 'PARTIAL')");
+    //     accepted_skus_query.push(" AND oi.inspected_by_type = 'CUSTOMER'");
+    //     accepted_skus_query.push(" AND oii.accepted = 1");
 
-        if let Some(date) = delivery_date {
-            accepted_skus_query.push(" AND o.delivery_date = ");
-            accepted_skus_query.push_bind(date);
-        }
+    //     if let Some(date) = delivery_date {
+    //         accepted_skus_query.push(" AND o.delivery_date = ");
+    //         accepted_skus_query.push_bind(date);
+    //     }
 
-        let accepted_skus_qty = accepted_skus_query
-            .build_query_scalar::<sqlx::types::Decimal>()
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_db_err!("Failed to get accepted SKUs quantity"))?;
+    //     let accepted_skus_qty = accepted_skus_query
+    //         .build_query_scalar::<sqlx::types::Decimal>()
+    //         .fetch_one(&self.pool)
+    //         .await
+    //         .map_err(map_db_err!("Failed to get accepted SKUs quantity"))?;
 
-        debug!(
-            "Dashboard stats - pending_delivery: {}, delivering: {}, completed: {}, return_exchange: {}, pending_stock: {}, accepted_skus_qty: {}",
-            pending_delivery, delivering, completed, return_exchange_tasks, pending_stock_skus, accepted_skus_qty
-        );
+    //     debug!(
+    //         "Dashboard stats - pending_delivery: {}, delivering: {}, completed: {}, return_exchange: {}, pending_stock: {}, accepted_skus_qty: {}",
+    //         pending_delivery, delivering, completed, return_exchange_tasks, pending_stock_skus, accepted_skus_qty
+    //     );
 
-        Ok(ProviderDashboardStatsDTO {
-            pending_delivery_orders: pending_delivery,
-            delivering_orders: delivering,
-            completed_orders: completed,
-            return_exchange_tasks: return_exchange_tasks,
-            pending_stock_skus: pending_stock_skus,
-            accepted_skus_qty: accepted_skus_qty,
-        })
-    }
+    //     Ok(ProviderDashboardStatsDTO {
+    //         pending_delivery_orders: pending_delivery,
+    //         delivering_orders: delivering,
+    //         completed_orders: completed,
+    //         return_exchange_tasks: return_exchange_tasks,
+    //         pending_stock_skus: pending_stock_skus,
+    //         accepted_skus_qty: accepted_skus_qty,
+    //     })
+    // }
 
     async fn get_provider_today_delivered_products(
         &self,

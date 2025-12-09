@@ -1,14 +1,10 @@
-use axum::{routing::get, routing::patch, Router};
+use axum::{routing::patch, Router};
 
 use crate::repositories::my_sql_repository::MySqlRepository;
-use crate::services::orders::marketplace::{assign_order_to_provider, complete_inspection, deliver_to_customer, get_market_order_statistics};
+use crate::services::orders::marketplace::{assign_order_to_provider, complete_inspection, deliver_to_customer};
 
 pub(super) fn marketplace_routes() -> Router {
     Router::new()
-        .route(
-            "/statistics",
-            get(get_market_order_statistics::<MySqlRepository>),
-        )
         .route(
             "/{order_code}/assign",
             patch(assign_order_to_provider::<MySqlRepository>),

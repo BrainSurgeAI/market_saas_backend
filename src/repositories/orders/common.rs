@@ -6,18 +6,26 @@ use crate::{
         ExchangeAndReturnOrderDetailResponse, MarketOrderDetailResponse, OrderDetail,
         OrderQueryParams, OrderResponse, ProviderOrderItem, ProviderOrderRemark,
         ProviderOrderResponse, ProviderOrderRound, ProviderReturnExchangeItem,
-        ProviderReturnExchangeOrderResponse,
+        ProviderReturnExchangeOrderResponse, MarketOrderStatisticsResponse,
+        ProviderDashboardStatsDTO, DashboardStatsDTO,
     },
     map_db_err,
     models::{order_status::OrderStatus, tenant_type::TenantType},
 };
 use async_trait::async_trait;
-use sqlx::{MySql, QueryBuilder};
+use sqlx::{FromRow, MySql, QueryBuilder};
 use tracing::debug;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 
 use rust_decimal::Decimal;
+
+// 用于查询配送统计的临时结构
+#[derive(Debug, FromRow)]
+struct DeliveryStatsRow {
+    delivering_count: i64,
+    completed_count: i64,
+}
 
 #[async_trait]
 pub(crate) trait CommonOrderRepository: Send + Sync {
@@ -55,6 +63,31 @@ pub(crate) trait CommonOrderRepository: Send + Sync {
         &self,
         provider_hash: &str,
     ) -> Result<Vec<crate::dto::order::ProviderReturnExchangeOrderResponse>, AppError>;
+
+        /// Get market order statistics
+    ///
+    /// # Arguments
+    /// * `tenant_hash` - The hash of the market tenant
+    ///
+    /// # Returns
+    /// A result containing the market order statistics
+    async fn get_market_dashboard_stats(
+        &self,
+        tenant_hash: &str,
+    ) -> Result<MarketOrderStatisticsResponse, AppError>;
+
+
+    async fn get_provider_dashboard_stats(
+        &self,
+        provider_hash: &str,
+        delivery_date: Option<NaiveDate>,
+    ) -> Result<ProviderDashboardStatsDTO, AppError>;
+
+    async fn get_customer_dashboard_stats(
+        &self,
+        customer_hash: &str,
+        date: Option<NaiveDate>,
+    ) -> Result<DashboardStatsDTO, AppError>;
 }
 
 #[async_trait]
@@ -756,5 +789,413 @@ impl CommonOrderRepository for MySqlRepository {
         }
 
         Ok(result)
+    }
+
+    async fn get_market_dashboard_stats(
+        &self,
+        tenant_hash: &str,
+    ) -> Result<MarketOrderStatisticsResponse, AppError> {
+        use crate::dto::order::{
+            Metadata, PendingAssignmentMetadata, TrendItem, Trends,
+        };
+
+        // Get market tenant id
+        let market_id = self
+            .get_tenant_id_by_tenant_hash_and_tenant_type(tenant_hash, "MARKET")
+            .await?;
+
+        let today = Local::now().date_naive();
+        let yesterday = today
+            .pred_opt()
+            .ok_or_else(|| AppError::Internal("无法计算昨天的日期".to_string()))?;
+
+        // Query all order statistics in one query
+        let order_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as new_orders_today,
+                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'PENDING' THEN 1 END) as new_orders_pending_today,
+                COUNT(CASE WHEN DATE(created_at) = ? THEN 1 END) as yesterday_total_orders,
+                COUNT(CASE WHEN DATE(created_at) = ? AND (order_status = 'EXCHANGE_DELIVERING' OR order_status = 'SUPPLIER_DELIVERING') THEN 1 END) as pending_inspection,
+                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_today,
+                COUNT(CASE WHEN DATE(created_at) = ? AND order_status = 'COMPLETED' THEN 1 END) as completed_yesterday
+            FROM orders
+            WHERE market_id = ?
+            AND DATE(created_at) IN (?, ?)
+            AND deleted_at IS NULL
+            "#,
+            today,
+            today,
+            yesterday,
+            today,
+            today,
+            yesterday,
+            market_id,
+            today,
+            yesterday
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order statistics"))?;
+
+        let new_orders_today = order_stats.new_orders_today;
+        let yesterday_total_orders = order_stats.yesterday_total_orders;
+        let pending_assignment = order_stats.new_orders_pending_today; // Same as new_orders_today (both are PENDING status)
+        let pending_inspection = order_stats.pending_inspection;
+        let completed_today = order_stats.completed_today;
+        let completed_yesterday = order_stats.completed_yesterday;
+
+        // Calculate newOrders trend
+        let new_orders_trend = if yesterday_total_orders > 0 {
+            let diff = new_orders_today as f64 - yesterday_total_orders as f64;
+            let percentage = (diff / yesterday_total_orders as f64) * 100.0;
+            let value = if percentage >= 0.0 {
+                format!("+{:.1}%", percentage)
+            } else {
+                format!("{:.1}%", percentage)
+            };
+            Some(TrendItem {
+                value,
+                up: percentage >= 0.0,
+            })
+        } else {
+            Some(TrendItem {
+                value: format!("+{}", new_orders_today),
+                up: true,
+            })
+        };
+
+        // Query today's and yesterday's exceptions in one query
+        let exceptions_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_today,
+                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_yesterday
+            FROM return_exchange_records rer
+            INNER JOIN order_details od ON rer.order_detail_id = od.id
+            INNER JOIN orders o ON od.order_id = o.id
+            WHERE o.market_id = ?
+            AND DATE(rer.created_at) IN (?, ?)
+            AND o.deleted_at IS NULL
+            "#,
+            today,
+            yesterday,
+            market_id,
+            today,
+            yesterday
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get exceptions statistics"))?;
+
+        let exceptions_today = exceptions_stats.exceptions_today;
+        let exceptions_yesterday = exceptions_stats.exceptions_yesterday;
+
+        // Calculate exceptions trend
+        let exceptions_trend = if exceptions_yesterday > 0 {
+            let diff = exceptions_today as f64 - exceptions_yesterday as f64;
+            let percentage = (diff / exceptions_yesterday as f64) * 100.0;
+            let value = if percentage >= 0.0 {
+                format!("+{:.1}%", percentage)
+            } else {
+                format!("{:.1}%", percentage)
+            };
+            Some(TrendItem {
+                value,
+                up: percentage >= 0.0,
+            })
+        } else if exceptions_today > 0 {
+            Some(TrendItem {
+                value: format!("+{}", exceptions_today),
+                up: true,
+            })
+        } else {
+            let diff = exceptions_today - exceptions_yesterday;
+            Some(TrendItem {
+                value: if diff >= 0 {
+                    format!("+{}", diff)
+                } else {
+                    format!("{}", diff)
+                },
+                up: diff >= 0,
+            })
+        };
+
+
+        // Calculate completed trend
+        let completed_trend = if completed_yesterday > 0 {
+            let diff = completed_today as f64 - completed_yesterday as f64;
+            let percentage = (diff / completed_yesterday as f64) * 100.0;
+            let value = if percentage >= 0.0 {
+                format!("+{:.1}%", percentage)
+            } else {
+                format!("{:.1}%", percentage)
+            };
+            Some(TrendItem {
+                value,
+                up: percentage >= 0.0,
+            })
+        } else if completed_today > 0 {
+            Some(TrendItem {
+                value: format!("+{}", completed_today),
+                up: true,
+            })
+        } else {
+            Some(TrendItem {
+                value: "+0%".to_string(),
+                up: true,
+            })
+        };
+
+        Ok(MarketOrderStatisticsResponse {
+            new_orders: new_orders_today,
+            pending_assignment,
+            pending_inspection,
+            exceptions: exceptions_today,
+            completed: completed_today,
+            trends: Trends {
+                new_orders: new_orders_trend,
+                exceptions: exceptions_trend,
+                completed: completed_trend,
+            },
+            metadata: Metadata {
+                pending_assignment: PendingAssignmentMetadata {
+                    subtitle: "急需处理".to_string(),
+                    active: pending_assignment > 0,
+                },
+            },
+        })
+    }
+
+    async fn get_provider_dashboard_stats(
+        &self,
+        provider_hash: &str,
+        delivery_date: Option<NaiveDate>,
+    ) -> Result<ProviderDashboardStatsDTO, AppError> {
+        use sqlx::{MySql, QueryBuilder};
+        use tracing::debug;
+
+        debug!(
+            "Fetching dashboard stats for provider_hash: {}, delivery_date: {:?}",
+            provider_hash, delivery_date
+        );
+
+        // 查询待配送订单总数（ASSIGNED 或 SUPPLIER_PREPARING）
+        let mut pending_query = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT COUNT(DISTINCT o.id) as count
+            FROM provider_orders_assignments poa
+            JOIN tenants t ON poa.provider_id = t.id
+            JOIN orders o ON poa.order_id = o.id
+            WHERE t.name_hash = 
+            "#,
+        );
+
+        pending_query.push_bind(provider_hash);
+        pending_query.push(" AND t.tenant_type = 'PROVIDER'");
+        pending_query.push(" AND t.deleted_at IS NULL");
+        pending_query.push(" AND o.order_status IN ('ASSIGNED', 'SUPPLIER_PREPARING')");
+        pending_query.push(" AND o.deleted_at IS NULL");
+
+        if let Some(date) = delivery_date {
+            pending_query.push(" AND o.delivery_date = ");
+            pending_query.push_bind(date);
+        }
+
+        let pending_delivery = pending_query
+            .build_query_scalar::<i64>()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get pending delivery orders count"))?;
+
+        // 合并查询：同时统计配送中订单总数（PREPARING）和已完成配送订单总数（DELIVERED）
+        let mut delivery_query = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT 
+                COUNT(DISTINCT CASE WHEN pd.delivery_status = 'PREPARING' THEN o.id END) as delivering_count,
+                COUNT(DISTINCT CASE WHEN pd.delivery_status = 'DELIVERED' THEN o.id END) as completed_count
+            FROM provider_orders_assignments poa
+            JOIN tenants t ON poa.provider_id = t.id
+            JOIN orders o ON poa.order_id = o.id
+            JOIN provider_deliveries pd ON pd.assignment_id = poa.id
+            WHERE t.name_hash = 
+            "#,
+        );
+
+        delivery_query.push_bind(provider_hash);
+        delivery_query.push(" AND t.tenant_type = 'PROVIDER'");
+        delivery_query.push(" AND t.deleted_at IS NULL");
+        delivery_query.push(" AND o.deleted_at IS NULL");
+        delivery_query.push(" AND pd.delivery_status IN ('PREPARING', 'DELIVERED')");
+
+        if let Some(date) = delivery_date {
+            delivery_query.push(" AND o.delivery_date = ");
+            delivery_query.push_bind(date);
+        }
+
+        let delivery_stats = delivery_query
+            .build_query_as::<DeliveryStatsRow>()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get delivery orders count"))?;
+
+        let delivering = delivery_stats.delivering_count;
+        let completed = delivery_stats.completed_count;
+
+        // 查询退换货任务总数（return_exchange_records 表中 status = 'PENDING'）
+        let mut return_exchange_query = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT COUNT(DISTINCT rer.id) as count
+            FROM return_exchange_records rer
+            JOIN order_details od ON rer.order_detail_id = od.id
+            JOIN orders o ON od.order_id = o.id
+            JOIN provider_orders_assignments poa ON o.id = poa.order_id
+            JOIN tenants t ON poa.provider_id = t.id
+            WHERE t.name_hash = 
+            "#,
+        );
+
+        return_exchange_query.push_bind(provider_hash);
+        return_exchange_query.push(" AND t.tenant_type = 'PROVIDER'");
+        return_exchange_query.push(" AND t.deleted_at IS NULL");
+        return_exchange_query.push(" AND rer.status = 'PENDING'");
+        return_exchange_query.push(" AND o.deleted_at IS NULL");
+
+        if let Some(date) = delivery_date {
+            return_exchange_query.push(" AND o.delivery_date = ");
+            return_exchange_query.push_bind(date);
+        }
+
+        let return_exchange_tasks = return_exchange_query
+            .build_query_scalar::<i64>()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get return exchange tasks count"))?;
+
+        // 查询待备货 SKU 总数（订单状态为 ASSIGNED 的订单的 product_code 去重）
+        let mut pending_stock_query = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT COUNT(DISTINCT od.product_code) as count
+            FROM provider_orders_assignments poa
+            JOIN tenants t ON poa.provider_id = t.id
+            JOIN orders o ON poa.order_id = o.id
+            JOIN order_details od ON o.id = od.order_id
+            WHERE t.name_hash = 
+            "#,
+        );
+
+        pending_stock_query.push_bind(provider_hash);
+        pending_stock_query.push(" AND t.tenant_type = 'PROVIDER'");
+        pending_stock_query.push(" AND t.deleted_at IS NULL");
+        pending_stock_query.push(" AND o.order_status = 'ASSIGNED'");
+        pending_stock_query.push(" AND o.deleted_at IS NULL");
+
+        if let Some(date) = delivery_date {
+            pending_stock_query.push(" AND o.delivery_date = ");
+            pending_stock_query.push_bind(date);
+        }
+
+        let pending_stock_skus = pending_stock_query
+            .build_query_scalar::<i64>()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get pending stock SKUs count"))?;
+
+        // 查询已签收的 SKU 数量（COMPLETED 订单中，CUSTOMER 验收结果为 PASS 或 PARTIAL，且 accepted=1 的 inspected_qty 总和）
+        let mut accepted_skus_query = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT COALESCE(SUM(oii.inspected_qty), 0) as accepted_skus_qty
+            FROM provider_orders_assignments poa
+            JOIN tenants t ON poa.provider_id = t.id
+            JOIN orders o ON poa.order_id = o.id
+            JOIN order_inspections oi ON oi.order_id = o.id
+            JOIN order_inspection_items oii ON oii.inspection_id = oi.id
+            WHERE t.name_hash = 
+            "#,
+        );
+
+        accepted_skus_query.push_bind(provider_hash);
+        accepted_skus_query.push(" AND t.tenant_type = 'PROVIDER'");
+        accepted_skus_query.push(" AND t.deleted_at IS NULL");
+        accepted_skus_query.push(" AND o.order_status = 'COMPLETED'");
+        accepted_skus_query.push(" AND o.deleted_at IS NULL");
+        accepted_skus_query.push(" AND oi.inspection_result IN ('PASS', 'PARTIAL')");
+        accepted_skus_query.push(" AND oi.inspected_by_type = 'CUSTOMER'");
+        accepted_skus_query.push(" AND oii.accepted = 1");
+
+        if let Some(date) = delivery_date {
+            accepted_skus_query.push(" AND o.delivery_date = ");
+            accepted_skus_query.push_bind(date);
+        }
+
+        let accepted_skus_qty = accepted_skus_query
+            .build_query_scalar::<sqlx::types::Decimal>()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get accepted SKUs quantity"))?;
+
+        debug!(
+            "Dashboard stats - pending_delivery: {}, delivering: {}, completed: {}, return_exchange: {}, pending_stock: {}, accepted_skus_qty: {}",
+            pending_delivery, delivering, completed, return_exchange_tasks, pending_stock_skus, accepted_skus_qty
+        );
+
+        Ok(ProviderDashboardStatsDTO {
+            pending_delivery_orders: pending_delivery,
+            delivering_orders: delivering,
+            completed_orders: completed,
+            return_exchange_tasks: return_exchange_tasks,
+            pending_stock_skus: pending_stock_skus,
+            accepted_skus_qty: accepted_skus_qty,
+        })
+    }
+
+    async fn get_customer_dashboard_stats(
+        &self,
+        customer_hash: &str,
+        date: Option<NaiveDate>,
+    ) -> Result<DashboardStatsDTO, AppError> {
+        // Get customer_id from tenant_hash
+        let record = sqlx::query!(
+            r#"SELECT t.id AS customer_id 
+               FROM tenants t 
+               WHERE t.name_hash = ? AND t.tenant_type = 'CUSTOMER' AND t.deleted_at IS NULL"#,
+            customer_hash
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get customer information"))?
+        .ok_or_else(|| AppError::not_found("Customer not found"))?;
+
+        // Use provided date or current date
+        let target_date = date.unwrap_or_else(|| Local::now().date_naive());
+
+        // Single query to get all statistics using COUNT with CASE WHEN
+        let stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(CASE WHEN order_status = 'PENDING' THEN 1 END) as pending_confirmation,
+                COUNT(CASE WHEN order_status IN ('MARKET_DELIVERING', 'EXCHANGE_NEW_DELIVERING') THEN 1 END) as in_transit,
+                COUNT(CASE WHEN order_status = 'COMPLETED' THEN 1 END) as arriving_today,
+                COUNT(CASE WHEN order_status = 'CUSTOMER_INSPECTING' THEN 1 END) as in_acceptance,
+                COUNT(CASE WHEN order_status IN ('RETURN_REQUESTED', 'EXCHANGE_REQUESTED') THEN 1 END) as exceptions
+            FROM orders
+            WHERE customer_id = ? 
+              AND DATE(created_at) = ?
+              AND deleted_at IS NULL
+            "#,
+            record.customer_id,
+            target_date
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get dashboard statistics"))?;
+
+        Ok(DashboardStatsDTO {
+            pending_confirmation: stats.pending_confirmation,
+            in_transit: stats.in_transit,
+            arriving_today: stats.arriving_today,
+            in_acceptance: stats.in_acceptance,
+            exceptions: stats.exceptions,
+        })
     }
 }

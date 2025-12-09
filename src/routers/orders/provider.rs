@@ -5,7 +5,7 @@ use axum::{
 
 use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::services::order_services::{
-    get_provider_dashboard_stats, get_provider_preparation_summary,
+    get_provider_preparation_summary,
     get_provider_today_delivered_products,
 };
 use crate::services::orders::provider::{
@@ -35,10 +35,6 @@ pub(super) fn provider_routes() -> Router {
         .route(
             "/preparation-summary",
             get(get_provider_preparation_summary::<MySqlRepository>),
-        )
-        .route(
-            "/dashboard-stats",
-            get(get_provider_dashboard_stats::<MySqlRepository>),
         )
         .route(
             "/today-delivered-products",

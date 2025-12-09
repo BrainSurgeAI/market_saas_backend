@@ -1,10 +1,9 @@
-use axum::{extract::Path, extract::Query, Extension};
-use serde::Deserialize;
+use axum::{extract::Path, Extension};
 
 use crate::{
     common::{ApiResponse, AppError},
     dto::order::{
-        AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO, ProviderDashboardStatsDTO,
+        AcceptedOrderResponseDTO, ProductsSummaryWithOrdersDTO,
         ProviderTodayDeliveredProductsDTO,
     },
     middleware::context::RequestContext,
@@ -13,13 +12,6 @@ use crate::{
     repositories::orders::provider::ProviderOrderRepository,
     utils::validate_json_fmt::Json,
 };
-
-/// Dashboard 统计查询参数
-#[derive(Debug, Deserialize)]
-pub(crate) struct DashboardStatsQueryParams {
-    #[serde(rename = "deliveryDate")]
-    pub(crate) delivery_date: Option<chrono::NaiveDate>,
-}
 
 /// Get accepted orders by provider
 pub async fn get_after_sale_orders_by_provider<T>(
@@ -52,27 +44,6 @@ where
         .await?;
     
     Ok(Json(ApiResponse::new(Some(summary), &context)))
-}
-
-pub async fn get_provider_dashboard_stats<T>(
-    Extension(repo): Extension<T>,
-    Extension(context): Extension<RequestContext>,
-    Extension(claims): Extension<Claims>,
-    Query(query_params): Query<DashboardStatsQueryParams>,
-) -> Result<Json<ApiResponse<ProviderDashboardStatsDTO>>, AppError>
-where
-    T: ProviderOrderRepository + Send + Sync,
-{
-    use tracing::debug;
-    debug!(
-        "Getting dashboard stats for tenant_hash: {}, delivery_date: {:?}",
-        claims.tenant_hash, query_params.delivery_date
-    );
-    let stats = repo
-        .get_provider_dashboard_stats(&claims.tenant_hash, query_params.delivery_date)
-        .await?;
-    debug!("Dashboard stats retrieved successfully");
-    Ok(Json(ApiResponse::new(Some(stats), &context)))
 }
 
 pub async fn get_provider_today_delivered_products<T>(
