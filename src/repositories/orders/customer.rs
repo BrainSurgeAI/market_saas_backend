@@ -1,6 +1,6 @@
 use crate::{
     common::AppError,
-    dto::order::CreateOrderRequestDTO,
+    dto::order::{CreateOrderRequestDTO, CustomerStatisticsDTO, TopProductDTO},
     // 以下导入已注释，如果将来需要查询分类层级映射时，可以取消注释
     // dto::category::CategoryLevel1Row,
     map_db_err,
@@ -9,11 +9,82 @@ use crate::{
 };
 
 use async_trait::async_trait;
+use chrono::{Datelike, Local, NaiveDate};
 use futures::future::try_join_all;
 use sqlx::QueryBuilder;
 
 use rust_decimal::Decimal;
 use tracing::info;
+
+/// Month range structure containing start and end dates
+struct MonthRange {
+    start: NaiveDate,
+    end: NaiveDate,
+}
+
+/// Calculate current month and previous month date ranges
+///
+/// # Returns
+/// A tuple containing (current_month_range, previous_month_range)
+fn calculate_month_ranges() -> Result<(MonthRange, MonthRange), AppError> {
+    let now = Local::now();
+    let current_date = now.date_naive();
+    
+    // Calculate current month start and end
+    let current_month_start = NaiveDate::from_ymd_opt(
+        current_date.year(),
+        current_date.month(),
+        1,
+    ).ok_or_else(|| AppError::Internal("Failed to calculate current month start".to_string()))?;
+    
+    let current_month_end = if current_date.month() == 12 {
+        NaiveDate::from_ymd_opt(
+            current_date.year() + 1,
+            1,
+            1,
+        ).ok_or_else(|| AppError::Internal("Failed to calculate current month end".to_string()))?
+            .pred_opt()
+            .ok_or_else(|| AppError::Internal("Failed to calculate current month end".to_string()))?
+    } else {
+        NaiveDate::from_ymd_opt(
+            current_date.year(),
+            current_date.month() + 1,
+            1,
+        ).ok_or_else(|| AppError::Internal("Failed to calculate current month end".to_string()))?
+            .pred_opt()
+            .ok_or_else(|| AppError::Internal("Failed to calculate current month end".to_string()))?
+    };
+
+    // Calculate previous month start and end
+    let previous_month_start = if current_date.month() == 1 {
+        NaiveDate::from_ymd_opt(
+            current_date.year() - 1,
+            12,
+            1,
+        ).ok_or_else(|| AppError::Internal("Failed to calculate previous month start".to_string()))?
+    } else {
+        NaiveDate::from_ymd_opt(
+            current_date.year(),
+            current_date.month() - 1,
+            1,
+        ).ok_or_else(|| AppError::Internal("Failed to calculate previous month start".to_string()))?
+    };
+
+    let previous_month_end = current_month_start
+        .pred_opt()
+        .ok_or_else(|| AppError::Internal("Failed to calculate previous month end".to_string()))?;
+
+    Ok((
+        MonthRange {
+            start: current_month_start,
+            end: current_month_end,
+        },
+        MonthRange {
+            start: previous_month_start,
+            end: previous_month_end,
+        },
+    ))
+}
 
 #[async_trait]
 pub(crate) trait CustomerOrderRepository: Send + Sync {
@@ -32,6 +103,18 @@ pub(crate) trait CustomerOrderRepository: Send + Sync {
         order_payload: &CreateOrderRequestDTO,
     ) -> Result<String, AppError>;
 
+    /// Get customer statistics including orders, spending, return rate and trends
+    ///
+    /// # Arguments
+    /// * `claims` - The claims containing customer information
+    ///
+    /// # Returns
+    /// Customer statistics including orders count, total spent, return rate,
+    /// trends compared to previous month, and top products
+    async fn get_customer_statistics(
+        &self,
+        claims: &Claims,
+    ) -> Result<CustomerStatisticsDTO, AppError>;
 }
 
 #[async_trait]
@@ -249,5 +332,208 @@ impl CustomerOrderRepository for MySqlRepository {
         info!("Order {} created successfully", order_code);
 
         Ok(order_code)
-    }   
+    }
+
+    async fn get_customer_statistics(
+        &self,
+        claims: &Claims,
+    ) -> Result<CustomerStatisticsDTO, AppError> {
+        // Get customer_id from tenant_hash
+        let record = sqlx::query!(
+            r#"SELECT t.id AS customer_id 
+               FROM tenants t 
+               WHERE t.name_hash = ? AND t.tenant_type = ? AND t.deleted_at IS NULL"#,
+            claims.tenant_hash,
+            claims.tenant_type
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get customer information"))?
+        .ok_or_else(|| AppError::not_found("Customer not found"))?;
+
+        // Calculate current month and previous month date ranges
+        let (current_month, previous_month) = calculate_month_ranges()?;
+
+        // Query current month statistics
+        let current_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(DISTINCT o.id) as orders_count,
+                COALESCE(SUM(o.net_amount), 0) as total_spent
+            FROM orders o
+            WHERE o.customer_id = ?
+              AND DATE(o.created_at) >= ?
+              AND DATE(o.created_at) <= ?
+              AND o.deleted_at IS NULL
+            "#,
+            record.customer_id,
+            current_month.start,
+            current_month.end
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get current month statistics"))?;
+
+        // Query current month return count from return_exchange_records
+        let current_return_count = sqlx::query!(
+            r#"
+            SELECT COUNT(DISTINCT rer.id) as return_count
+            FROM return_exchange_records rer
+            INNER JOIN order_details od ON rer.order_detail_id = od.id
+            INNER JOIN orders o ON od.order_id = o.id
+            WHERE o.customer_id = ?
+              AND DATE(o.created_at) >= ?
+              AND DATE(o.created_at) <= ?
+              AND rer.operation_type = 'RETURN' OR rer.operation_type = 'EXCHANGE'
+              AND o.deleted_at IS NULL
+            "#,
+            record.customer_id,
+            current_month.start,
+            current_month.end
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get current month return count"))?;
+
+        // Query previous month statistics
+        let previous_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(DISTINCT o.id) as orders_count,
+                COALESCE(SUM(o.net_amount), 0) as total_spent
+            FROM orders o
+            WHERE o.customer_id = ?
+              AND DATE(o.created_at) >= ?
+              AND DATE(o.created_at) <= ?
+              AND o.deleted_at IS NULL
+            "#,
+            record.customer_id,
+            previous_month.start,
+            previous_month.end
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get previous month statistics"))?;
+
+        // Query previous month return count from return_exchange_records
+        let previous_return_count = sqlx::query!(
+            r#"
+            SELECT COUNT(DISTINCT rer.id) as return_count
+            FROM return_exchange_records rer
+            INNER JOIN order_details od ON rer.order_detail_id = od.id
+            INNER JOIN orders o ON od.order_id = o.id
+            WHERE o.customer_id = ?
+              AND DATE(o.created_at) >= ?
+              AND DATE(o.created_at) <= ?
+              AND rer.operation_type = 'RETURN' OR rer.operation_type = 'EXCHANGE'
+              AND o.deleted_at IS NULL
+            "#,
+            record.customer_id,
+            previous_month.start,
+            previous_month.end
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get previous month return count"))?;
+
+        let current_orders = current_stats.orders_count as i64;
+        let previous_orders = previous_stats.orders_count as i64;
+        let current_total_spent = current_stats.total_spent;
+        let previous_total_spent = previous_stats.total_spent;
+        let current_return_count = current_return_count.return_count as i64;
+        let previous_return_count = previous_return_count.return_count as i64;
+
+        // Calculate return rate
+        let current_return_rate = if current_orders > 0 {
+            (current_return_count as f64 / current_orders as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let previous_return_rate = if previous_orders > 0 {
+            (previous_return_count as f64 / previous_orders as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // Calculate trends
+        let orders_trend = if previous_orders > 0 {
+            let change = ((current_orders as f64 - previous_orders as f64) / previous_orders as f64) * 100.0;
+            format!("{}{:.0}%", if change >= 0.0 { "+" } else { "" }, change)
+        } else {
+            if current_orders > 0 {
+                "+100%".to_string()
+            } else {
+                "0%".to_string()
+            }
+        };
+        let orders_trend_up = current_orders >= previous_orders;
+
+        let total_spent_trend = if previous_total_spent > Decimal::ZERO {
+            let change = ((current_total_spent - previous_total_spent) / previous_total_spent) * Decimal::from(100);
+            format!("{}{:.0}%", if change >= Decimal::ZERO { "+" } else { "" }, change)
+        } else {
+            if current_total_spent > Decimal::ZERO {
+                "+100%".to_string()
+            } else {
+                "0%".to_string()
+            }
+        };
+        let total_spent_trend_up = current_total_spent >= previous_total_spent;
+
+        let return_rate_trend = if previous_return_rate > 0.0 {
+            let change = current_return_rate - previous_return_rate;
+            format!("{}{:.1}%", if change >= 0.0 { "+" } else { "" }, change)
+        } else {
+            if current_return_rate > 0.0 {
+                "+100%".to_string()
+            } else {
+                "0%".to_string()
+            }
+        };
+        let return_rate_trend_up = current_return_rate >= previous_return_rate; // Lower is better
+
+        // Query top products
+        let top_products = sqlx::query!(
+            r#"
+            SELECT 
+                od.product_name as name,
+                COUNT(*) as count
+            FROM order_details od
+            INNER JOIN orders o ON od.order_id = o.id
+            WHERE o.customer_id = ?
+              AND DATE(o.created_at) >= ?
+              AND DATE(o.created_at) <= ?
+              AND o.deleted_at IS NULL
+            GROUP BY od.product_name
+            ORDER BY count DESC
+            LIMIT 4
+            "#,
+            record.customer_id,
+            current_month.start,
+            current_month.end
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get top products"))?
+        .into_iter()
+        .map(|row| TopProductDTO {
+            name: row.name,
+            count: row.count as i64,
+        })
+        .collect();
+
+        Ok(CustomerStatisticsDTO {
+            orders: current_orders,
+            total_spent: current_total_spent,
+            return_rate: (current_return_rate * 10.0).round() / 10.0, // Round to 1 decimal place
+            orders_trend,
+            orders_trend_up,
+            total_spent_trend,
+            total_spent_trend_up,
+            return_rate_trend,
+            return_rate_trend_up,
+            top_products,
+        })
+    }
 }

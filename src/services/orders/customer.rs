@@ -5,7 +5,7 @@ use tracing::debug;
 use crate::{
     common::{ApiResponse, AppError},
     dto::{
-        order::CreateOrderRequestDTO,
+        order::{CreateOrderRequestDTO, CustomerStatisticsDTO},
         ValidatedJSON,
     },
     middleware::context::RequestContext,
@@ -50,4 +50,19 @@ where
 
     
     Ok(Json(ApiResponse::new(Some(()), &context)))
+}
+
+/// Get customer statistics including orders, spending, return rate and trends
+pub(crate) async fn get_customer_statistics<T>(
+    Extension(repo): Extension<T>,
+    Extension(context): Extension<RequestContext>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<ApiResponse<CustomerStatisticsDTO>>, AppError>
+where
+    T: CustomerOrderRepository + Send + Sync,
+{
+    debug!("Get customer statistics for tenant: {}", claims.tenant_hash);
+
+    let stats = repo.get_customer_statistics(&claims).await?;
+    Ok(Json(ApiResponse::new(Some(stats), &context)))
 }

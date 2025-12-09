@@ -888,8 +888,8 @@ impl CommonOrderRepository for MySqlRepository {
         let exceptions_stats = sqlx::query!(
             r#"
             SELECT 
-                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_today,
-                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? THEN o.id END) as exceptions_yesterday
+                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? AND rer.status = 'PENDING' THEN o.id END) as exceptions_today,
+                COUNT(DISTINCT CASE WHEN DATE(rer.created_at) = ? AND rer.status = 'PENDING' THEN o.id END) as exceptions_yesterday
             FROM return_exchange_records rer
             INNER JOIN order_details od ON rer.order_detail_id = od.id
             INNER JOIN orders o ON od.order_id = o.id

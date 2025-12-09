@@ -1099,3 +1099,34 @@ pub(crate) struct DashboardQueryParams {
     /// 日期：YYYY-MM-DD，不传默认今天
     pub(crate) date: Option<String>,
 }
+
+/// Customer statistics DTO
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct CustomerStatisticsDTO {
+    pub(crate) orders: i64,
+    #[serde(rename = "totalSpent")]
+    pub(crate) total_spent: Decimal,
+    #[serde(rename = "returnRate")]
+    pub(crate) return_rate: f64,
+    #[serde(rename = "ordersTrend")]
+    pub(crate) orders_trend: String,
+    #[serde(rename = "ordersTrendUp")]
+    pub(crate) orders_trend_up: bool,
+    #[serde(rename = "totalSpentTrend")]
+    pub(crate) total_spent_trend: String,
+    #[serde(rename = "totalSpentTrendUp")]
+    pub(crate) total_spent_trend_up: bool,
+    #[serde(rename = "returnRateTrend")]
+    pub(crate) return_rate_trend: String,
+    #[serde(rename = "returnRateTrendUp")]
+    pub(crate) return_rate_trend_up: bool,
+    #[serde(rename = "topProducts")]
+    pub(crate) top_products: Vec<TopProductDTO>,
+}
+
+/// Top product DTO
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TopProductDTO {
+    pub(crate) name: String,
+    pub(crate) count: i64,
+}
