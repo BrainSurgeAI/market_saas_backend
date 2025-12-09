@@ -419,6 +419,13 @@ impl CommonOrderRepository for MySqlRepository {
             builder.push(" AND o.order_status=").push_bind(order_status);
         }
 
+        // Filter by delivery_date if provided
+        if let Some(delivery_date_str) = &query_params.delivery_date {
+            let delivery_date = NaiveDate::parse_from_str(delivery_date_str, "%Y-%m-%d")
+                .map_err(|_| AppError::Validation("Invalid delivery_date format. Use YYYY-MM-DD".to_string()))?;
+            builder.push(" AND o.delivery_date=").push_bind(delivery_date);
+        }
+
         builder.push(" ORDER BY o.created_at DESC ");
         builder.push(" LIMIT ").push_bind(page_size);
         builder.push(" OFFSET ").push_bind(offset);

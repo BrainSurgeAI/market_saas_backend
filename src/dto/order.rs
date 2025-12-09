@@ -144,6 +144,10 @@ pub(crate) struct OrderQueryParams {
 
     #[serde(rename = "orderStatus")]
     pub(crate) order_status: Option<String>,
+
+    /// 配送日期：YYYY-MM-DD，不传则不按日期筛选
+    #[serde(rename = "deliveryDate")]
+    pub(crate) delivery_date: Option<String>,
 }
 
 /// 订单验收项信息
