@@ -64,7 +64,7 @@ pub(crate) trait CommonOrderRepository: Send + Sync {
         provider_hash: &str,
     ) -> Result<Vec<crate::dto::order::ProviderReturnExchangeOrderResponse>, AppError>;
 
-        /// Get market order statistics
+    /// Get market order statistics
     ///
     /// # Arguments
     /// * `tenant_hash` - The hash of the market tenant
@@ -356,7 +356,8 @@ impl CommonOrderRepository for MySqlRepository {
             .get_tenant_id_by_tenant_hash_and_tenant_type(tenant_hash, tenant_type)
             .await?;
 
-        let basic_query = r#"SELECT 
+        let basic_query = r#"
+                SELECT 
                    o.order_code, 
                    o.delivery_address, 
                    o.ordered_amount,
@@ -384,22 +385,33 @@ impl CommonOrderRepository for MySqlRepository {
                    LEFT JOIN delivery_staff ds ON o.delivery_staff_id = ds.id
                    {JOIN_CLAUSE} WHERE 1=1 "#;
 
+        // Parse tenant_type string to enum for match
+        let tenant_type_enum = TenantType::try_from(tenant_type)
+            .map_err(|_| AppError::Validation(format!("Invalid tenant type: {}", tenant_type)))?;
+
         let mut builder: QueryBuilder<MySql>;
-        if tenant_type == TenantType::Provider.to_string() {
-            let query = &basic_query.replace(
-                "{JOIN_CLAUSE}",
-                "JOIN provider_orders_assignments po ON po.order_id=o.id",
-            );
+        match tenant_type_enum {
+            TenantType::Provider => {
+                let query = &basic_query.replace(
+                    "{JOIN_CLAUSE}",
+                    "JOIN provider_orders_assignments po ON po.order_id=o.id",
+                );
 
-            builder = QueryBuilder::new(query);
-            builder.push(" AND po.provider_id= ").push_bind(tenant_id);
-        } else {
-            let query = &basic_query.replace("{JOIN_CLAUSE}", "");
+                builder = QueryBuilder::new(query);
+                builder.push(" AND po.provider_id= ").push_bind(tenant_id);
+            }
+            TenantType::Market => {
+                let query = &basic_query.replace("{JOIN_CLAUSE}", "");
 
-            builder = QueryBuilder::new(query);
-            builder.push(" AND (o.market_id=").push_bind(tenant_id);
-            builder.push(" OR o.customer_id=").push_bind(tenant_id);
-            builder.push(") ");
+                builder = QueryBuilder::new(query);
+                builder.push(" AND o.market_id=").push_bind(tenant_id);
+            }
+            TenantType::Customer => {
+                let query = &basic_query.replace("{JOIN_CLAUSE}", "");
+
+                builder = QueryBuilder::new(query);
+                builder.push(" AND o.customer_id=").push_bind(tenant_id);
+            }
         }
 
         if let Some(order_status) = query_params.order_status.as_ref() {
