@@ -13,6 +13,7 @@ use crate::acl_core::{
     acl_snapshot::AclSnapshot,
     permission_trie::{PermissionRule, PermissionTrie},
 };
+use crate::repositories::my_sql_repository::MySqlRepository;
 use crate::{acl_core::acl_snapshot::ACL_SNAPSHOT, routers::router_config::create_router};
 use dashmap::DashMap;
 use dotenv::dotenv;
@@ -22,9 +23,9 @@ use sqlx::MySqlPool;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
-
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -56,11 +57,58 @@ async fn main() {
         .await
         .expect("Failed to initialize ACL snapshot");
 
-    // let snapshot = ACL_SNAPSHOT.load();
-    // debug!(
-    //     "ACL Snapshot initialized {:?}",
-    //     snapshot
-    // );
+    let pool_for_spawn = pool.clone();
+    tokio::spawn(async move {
+        let repo = MySqlRepository::new(pool_for_spawn);
+        loop {
+            match sqlx::query!(
+                "SELECT id, payload, event_type, exclude_tenant_type FROM outbox_events WHERE processed = 0 LIMIT 50"
+            )
+            .fetch_all(&repo.pool)
+            .await
+            {
+                Ok(events) => {
+                    for ev in events {
+                        let payload = ev.payload;
+                        // 从 payload 获取 order_id，然后查询 order_code
+                        if let Some(order_id) = payload.get("order_id").and_then(|v| v.as_i64()) {
+                            let title = payload["title"].as_str().unwrap_or("");
+                            let content = payload["content"].as_str().unwrap_or("");
+                            // 插入 messages 表
+                            if let Err(e) = repo
+                                .send_order_messages_to_tenants(
+                                    order_id as i32,
+                                    &ev.event_type,
+                                    title,
+                                    content,
+                                    ev.exclude_tenant_type,
+                                )
+                                .await
+                            {
+                                error!("Failed to send order messages to tenants: {:?}", e);
+                            }
+                        }
+
+                        // 标记事件已处理
+                        if let Err(e) = sqlx::query!(
+                            "UPDATE outbox_events SET processed = 1, processed_at = NOW() WHERE id = ?",
+                            ev.id
+                        )
+                        .execute(&repo.pool)
+                        .await
+                        {
+                            error!("Failed to update outbox events table: {:?}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get outbox events: {:?}", e);
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+    });
 
     let app = create_router(&pool);
 

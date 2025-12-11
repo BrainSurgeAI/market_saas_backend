@@ -6,7 +6,7 @@ use tracing::error;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub(crate) struct MessageDto {
-    pub(crate) id: i32,
+    pub(crate) id: u64,
 
     #[serde(rename = "userId")]
     pub(crate) user_id: i32,

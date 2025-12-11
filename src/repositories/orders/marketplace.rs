@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use tracing::{debug, error};
+use serde_json::json;
 
 #[async_trait]
 pub(crate) trait MarketplaceOrderRepository: Send + Sync {
@@ -178,6 +179,21 @@ impl MarketplaceOrderRepository for MySqlRepository {
             OrderAction::AssignSupplier,
         )
         .await?;
+
+        // insert into outbox_events table
+        sqlx::query!(
+            r#"INSERT INTO outbox_events (event_type, payload, exclude_tenant_type) VALUES (?, ?, ?)"#,
+            "order_assigned",
+            json!({
+                "order_id": order.id,
+                "title": "新订单分配",
+                "content": format!("您有新的订单 {} 需要处理", order_code),
+            }),
+            "MARKET",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert into outbox_events table"))?;
 
         tx.commit()
             .await

@@ -460,4 +460,121 @@ impl MySqlRepository {
 
         Ok(())
     }
+
+
+    /// Send messages to all users of tenants associated with an order
+    ///
+    /// # Arguments
+    /// * `order_code` - The order code to find associated tenants
+    /// * `category` - Message category
+    /// * `title` - Message title
+    /// * `content` - Message content
+    ///
+    /// # Returns
+    /// Number of messages sent
+    pub(crate) async fn send_order_messages_to_tenants(
+        &self,
+        order_id: i32,
+        category: &str,
+        title: &str,
+        content: &str,
+        exclude_tenant_type: String,
+    ) -> Result<u64, AppError> {
+        // Get order information including customer_id, market_id, and provider_id in one query
+        let order_info = sqlx::query!(
+            r#"
+            SELECT o.customer_id, o.market_id, o.order_status, poa.provider_id
+            FROM orders o
+            LEFT JOIN provider_orders_assignments poa ON o.id = poa.order_id
+            WHERE o.id = ? AND o.deleted_at IS NULL
+            "#,
+            order_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_db_err!("Failed to get order information"))?
+            .ok_or_else(|| AppError::not_found(format!("Order not found: {}", order_id)))?;
+
+        let provider_id = order_info.provider_id;
+
+        // 解析 exclude_tenant_type，确定需要排除的租户类型
+        let exclude_type = exclude_tenant_type.to_ascii_uppercase();
+        let exclude_customer = exclude_type == "CUSTOMER";
+        let exclude_market = exclude_type == "MARKET";
+        let exclude_provider = exclude_type == "PROVIDER";
+
+        // Build query to get all user IDs for these tenants
+        let mut query_builder = sqlx::QueryBuilder::new(
+            r#"
+            SELECT u.id
+            FROM users u
+            WHERE u.tenant_id IN (
+            "#,
+        );
+
+        let mut tenant_ids_added = false;
+
+        // 添加 customer_id（如果不需要排除）
+        if !exclude_customer {
+            query_builder.push_bind(order_info.customer_id);
+            tenant_ids_added = true;
+        }
+
+        // 添加 market_id（如果不需要排除）
+        if !exclude_market {
+            if tenant_ids_added {
+                query_builder.push(",");
+            }
+            query_builder.push_bind(order_info.market_id);
+            tenant_ids_added = true;
+        }
+
+        // 添加 provider_id（如果存在且不需要排除）
+        if !exclude_provider {
+            if let Some(pid) = provider_id {
+                if tenant_ids_added {
+                    query_builder.push(",");
+                }
+                query_builder.push_bind(pid);
+                tenant_ids_added = true;
+            }
+        }
+
+        // 如果没有有效的租户ID，直接返回0
+        if !tenant_ids_added {
+            return Ok(0);
+        }
+
+        query_builder.push(") AND u.deleted_at IS NULL");
+
+        let user_ids: Vec<i32> = query_builder
+            .build_query_scalar::<i32>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to get user IDs"))?;
+
+        if user_ids.is_empty() {
+            return Ok(0);
+        }
+
+        // Batch insert messages
+        let mut message_builder = sqlx::QueryBuilder::new(
+            "INSERT INTO messages (user_id, category, title, content) ",
+        );
+
+        message_builder.push_values(user_ids.iter(), |mut b, user_id| {
+            b.push_bind(user_id)
+                .push_bind(category)
+                .push_bind(title)
+                .push_bind(content);
+        });
+
+        let result = message_builder
+            .build()
+            .execute(&self.pool)
+            .await
+            .map_err(map_db_err!("Failed to batch insert messages"))?;
+
+        Ok(result.rows_affected())
+    }
 }

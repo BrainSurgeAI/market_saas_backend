@@ -14,6 +14,7 @@ use futures::future::try_join_all;
 use sqlx::QueryBuilder;
 
 use rust_decimal::Decimal;
+use serde_json::json;
 use tracing::info;
 
 /// Month range structure containing start and end dates
@@ -323,6 +324,21 @@ impl CustomerOrderRepository for MySqlRepository {
             OrderAction::Create,
         )
         .await?;
+
+        // insert into outbox_events table
+        sqlx::query!(
+            r#"INSERT INTO outbox_events (event_type, payload, exclude_tenant_type) VALUES (?, ?, ?)"#,
+            "order_created",
+            json!({
+                "order_id": order_id,
+                "title": "新订单创建",
+                "content": format!("您有新的订单: {} 需要处理", order_code),
+            }),
+            claims.tenant_type,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_db_err!("Failed to insert into outbox_events table"))?;
 
         // Commit transaction
         tx.commit()
